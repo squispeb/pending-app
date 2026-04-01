@@ -1,13 +1,20 @@
 import { config } from 'dotenv'
 import { defineConfig } from 'drizzle-kit'
 
-config()
+config({ quiet: true })
+
+const databaseUrl = process.env.DATABASE_URL ?? 'file:local.db'
+const isRemoteTurso =
+  databaseUrl.startsWith('libsql://') || databaseUrl.startsWith('https://')
 
 export default defineConfig({
   schema: './src/db/schema/**/*.ts',
   out: './drizzle',
-  dialect: 'sqlite',
+  dialect: isRemoteTurso ? 'turso' : 'sqlite',
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? 'file:local.db',
+    url: databaseUrl,
+    ...(isRemoteTurso && process.env.DATABASE_AUTH_TOKEN
+      ? { authToken: process.env.DATABASE_AUTH_TOKEN }
+      : {}),
   },
 })
