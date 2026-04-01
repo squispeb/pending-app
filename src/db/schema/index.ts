@@ -1,0 +1,209 @@
+import { sql } from 'drizzle-orm'
+import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+
+export const users = sqliteTable('users', {
+  id: text('id').primaryKey(),
+  email: text('email').notNull().unique(),
+  displayName: text('display_name'),
+  timezone: text('timezone').notNull().default('UTC'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+})
+
+export const tasks = sqliteTable('tasks', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  notes: text('notes'),
+  status: text('status').notNull().default('active'),
+  priority: text('priority').notNull().default('medium'),
+  dueDate: text('due_date'),
+  dueTime: text('due_time'),
+  reminderAt: integer('reminder_at', { mode: 'timestamp_ms' }),
+  estimatedMinutes: integer('estimated_minutes'),
+  preferredStartTime: text('preferred_start_time'),
+  preferredEndTime: text('preferred_end_time'),
+  completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
+  archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+})
+
+export const habits = sqliteTable('habits', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  cadenceType: text('cadence_type').notNull().default('daily'),
+  cadenceDays: text('cadence_days'),
+  targetCount: integer('target_count').notNull().default(1),
+  preferredStartTime: text('preferred_start_time'),
+  preferredEndTime: text('preferred_end_time'),
+  reminderAt: integer('reminder_at', { mode: 'timestamp_ms' }),
+  archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+})
+
+export const habitCompletions = sqliteTable(
+  'habit_completions',
+  {
+    id: text('id').primaryKey(),
+    habitId: text('habit_id')
+      .notNull()
+      .references(() => habits.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    completionDate: text('completion_date').notNull(),
+    completedAt: integer('completed_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    habitDateIdx: uniqueIndex('habit_completion_unique').on(
+      table.habitId,
+      table.completionDate,
+    ),
+  }),
+)
+
+export const googleAccounts = sqliteTable('google_accounts', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  googleSubject: text('google_subject').notNull(),
+  email: text('email').notNull(),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  tokenExpiryAt: integer('token_expiry_at', { mode: 'timestamp_ms' }),
+  scope: text('scope'),
+  connectedAt: integer('connected_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  disconnectedAt: integer('disconnected_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+})
+
+export const calendarConnections = sqliteTable('calendar_connections', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  googleAccountId: text('google_account_id')
+    .notNull()
+    .references(() => googleAccounts.id, { onDelete: 'cascade' }),
+  calendarId: text('calendar_id').notNull(),
+  calendarName: text('calendar_name').notNull(),
+  isSelected: integer('is_selected', { mode: 'boolean' }).notNull().default(false),
+  primaryFlag: integer('primary_flag', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+})
+
+export const calendarEvents = sqliteTable('calendar_events', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  calendarId: text('calendar_id').notNull(),
+  googleEventId: text('google_event_id').notNull(),
+  googleRecurringEventId: text('google_recurring_event_id'),
+  status: text('status').notNull().default('confirmed'),
+  summary: text('summary'),
+  description: text('description'),
+  location: text('location'),
+  startsAt: integer('starts_at', { mode: 'timestamp_ms' }).notNull(),
+  endsAt: integer('ends_at', { mode: 'timestamp_ms' }).notNull(),
+  allDay: integer('all_day', { mode: 'boolean' }).notNull().default(false),
+  eventTimezone: text('event_timezone'),
+  htmlLink: text('html_link'),
+  organizerEmail: text('organizer_email'),
+  attendeeCount: integer('attendee_count'),
+  syncedAt: integer('synced_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  updatedAtRemote: integer('updated_at_remote', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+})
+
+export const syncStates = sqliteTable('sync_states', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  provider: text('provider').notNull(),
+  scopeKey: text('scope_key').notNull(),
+  lastSyncedAt: integer('last_synced_at', { mode: 'timestamp_ms' }),
+  nextSyncToken: text('next_sync_token'),
+  syncWindowStart: integer('sync_window_start', { mode: 'timestamp_ms' }),
+  syncWindowEnd: integer('sync_window_end', { mode: 'timestamp_ms' }),
+  lastStatus: text('last_status'),
+  lastError: text('last_error'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+})
+
+export const reminderEvents = sqliteTable('reminder_events', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  sourceType: text('source_type').notNull(),
+  sourceId: text('source_id').notNull(),
+  scheduledFor: integer('scheduled_for', { mode: 'timestamp_ms' }).notNull(),
+  snoozedUntil: integer('snoozed_until', { mode: 'timestamp_ms' }),
+  deliveredInAppAt: integer('delivered_in_app_at', { mode: 'timestamp_ms' }),
+  deliveredBrowserAt: integer('delivered_browser_at', { mode: 'timestamp_ms' }),
+  completedViaReminderAt: integer('completed_via_reminder_at', {
+    mode: 'timestamp_ms',
+  }),
+  dismissedAt: integer('dismissed_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+})
+
+export type User = typeof users.$inferSelect
+export type Task = typeof tasks.$inferSelect
+export type Habit = typeof habits.$inferSelect
