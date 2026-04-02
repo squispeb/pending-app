@@ -299,8 +299,7 @@ function TasksPage() {
                 </label>
               </div>
 
-              <div className="overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-                <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {FILTERS.map((option) => (
                   <button
                     key={option.value}
@@ -308,14 +307,13 @@ function TasksPage() {
                     onClick={() => setFilter(option.value)}
                     className={
                       filter === option.value
-                        ? 'primary-pill shrink-0 cursor-pointer border-0 text-sm font-semibold'
-                        : 'secondary-pill shrink-0 cursor-pointer border-0 text-sm font-semibold'
+                        ? 'primary-pill cursor-pointer border-0 !py-1.5 !px-3.5 text-sm font-semibold'
+                        : 'secondary-pill cursor-pointer border-0 !py-1.5 !px-3.5 text-sm font-semibold'
                     }
                   >
                     {option.label}
                   </button>
                 ))}
-                </div>
               </div>
             </div>
 
