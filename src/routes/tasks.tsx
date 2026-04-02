@@ -282,38 +282,42 @@ function TasksPage() {
         <article className="min-w-0 space-y-6">
           <section className="panel rounded-[1.75rem] p-6 sm:p-8">
             <div className="mb-5">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ink-soft)]">
-                  Sort
-                  <select
-                    value={sort}
-                    onChange={(event) => setSort(event.target.value as TaskSort)}
-                    className="rounded-full border border-[var(--line)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                  >
-                    {SORTS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              <div className="mb-3 flex flex-wrap gap-2">
+                {FILTERS.map((option) => {
+                  const count = applyTaskFilter(tasks, option.value).length
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setFilter(option.value)}
+                      className={
+                        filter === option.value
+                          ? 'primary-pill inline-flex cursor-pointer items-center gap-1.5 border-0 !py-1.5 !px-3.5 text-sm font-semibold'
+                          : 'secondary-pill inline-flex cursor-pointer items-center gap-1.5 border-0 !py-1.5 !px-3.5 text-sm font-semibold'
+                      }
+                    >
+                      {option.label}
+                      <span className={`tabular-nums text-xs ${filter === option.value ? 'opacity-70' : 'opacity-50'}`}>
+                        {count}
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                {FILTERS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => setFilter(option.value)}
-                    className={
-                      filter === option.value
-                        ? 'primary-pill cursor-pointer border-0 !py-1.5 !px-3.5 text-sm font-semibold'
-                        : 'secondary-pill cursor-pointer border-0 !py-1.5 !px-3.5 text-sm font-semibold'
-                    }
-                  >
-                    {option.label}
-                  </button>
-                ))}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">Sort</span>
+                <select
+                  value={sort}
+                  onChange={(event) => setSort(event.target.value as TaskSort)}
+                  className="rounded-full border border-[var(--line)] bg-[var(--input-bg)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                >
+                  {SORTS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
