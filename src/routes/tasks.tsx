@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ChevronDown, Plus, X } from 'lucide-react'
 import {
   queryOptions,
   useMutation,
@@ -74,6 +75,8 @@ function TasksPage() {
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
   const [feedbackTone, setFeedbackTone] = useState<'success' | 'error' | null>(null)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showForm, setShowForm] = useState(false)
 
   const groupedTasks = groupActiveTasks(tasks)
   const filteredTasks = sortTasks(applyTaskFilter(tasks, filter), sort)
@@ -98,6 +101,8 @@ function TasksPage() {
       setEditingTask(null)
       setFormError(null)
       setFieldErrors({})
+      setShowAdvanced(false)
+      setShowForm(false)
       setFeedbackTone('success')
       setFeedbackMessage(editingTask ? 'Task updated.' : 'Task created.')
       setActiveTaskId(null)
@@ -207,6 +212,15 @@ function TasksPage() {
     setFieldErrors({})
     setFeedbackMessage(null)
     setFeedbackTone(null)
+    const hasSecondary = !!(
+      task.notes ||
+      task.dueTime ||
+      task.reminderAt ||
+      task.estimatedMinutes ||
+      task.preferredStartTime
+    )
+    setShowAdvanced(hasSecondary)
+    setShowForm(true)
   }
 
   function resetForm() {
@@ -214,23 +228,15 @@ function TasksPage() {
     setFormValues(EMPTY_FORM)
     setFormError(null)
     setFieldErrors({})
+    setShowAdvanced(false)
+    setShowForm(false)
   }
 
   return (
-    <main className="page-wrap px-4 pb-12 pt-10">
-      <section className="hero-panel rounded-[2rem] px-6 py-8 sm:px-8">
-        <p className="island-kicker mb-3">Milestone 1</p>
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h1 className="display-title mb-3 text-4xl font-bold text-[var(--ink-strong)]">
-              Tasks workspace
-            </h1>
-            <p className="max-w-3xl text-base leading-7 text-[var(--ink-soft)]">
-              Create, edit, complete, archive, filter, and sort local tasks. This
-              is the first real productivity slice and becomes the base for the
-              daily dashboard.
-            </p>
-          </div>
+    <main className="page-wrap px-4 pb-24 pt-10">
+      <section className="hero-panel rounded-[2rem] px-6 py-6 sm:px-8">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <h1 className="display-title text-3xl font-bold text-[var(--ink-strong)]">Tasks</h1>
 
           <div className="flex flex-wrap items-center gap-y-4">
             {[
@@ -267,15 +273,13 @@ function TasksPage() {
         </section>
       ) : null}
 
-      <section className="mt-6 grid gap-6 xl:grid-cols-[0.95fr_1.25fr]">
+      <section className={`mt-6 grid gap-6 ${showForm ? 'lg:grid-cols-[0.95fr_1.25fr]' : ''}`}>
+        {showForm ? (
         <article className="panel rounded-[1.75rem] p-6 sm:p-8">
-          <div className="mb-6 flex items-center justify-between gap-4">
-            <div>
-              <p className="island-kicker mb-2">Task editor</p>
-              <h2 className="m-0 text-2xl font-semibold text-[var(--ink-strong)]">
-                {editingTask ? 'Edit task' : 'Create a task'}
-              </h2>
-            </div>
+          <div className="mb-5 flex items-center justify-between gap-4">
+            <h2 className="m-0 text-xl font-semibold text-[var(--ink-strong)]">
+              {editingTask ? 'Edit task' : 'New task'}
+            </h2>
 
             {editingTask ? (
               <button
@@ -306,25 +310,24 @@ function TasksPage() {
               ) : null}
             </label>
 
-            <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
-                Notes
-              </span>
-              <textarea
-                value={formValues.notes ?? ''}
-                onChange={(event) => handleChange('notes', event.target.value)}
-                rows={4}
-                placeholder="Add context or next steps"
-                className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-              />
-              {fieldErrors.notes ? (
-                <span className="mt-2 block text-sm font-medium text-red-600">
-                  {fieldErrors.notes}
-                </span>
-              ) : null}
-            </label>
-
             <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
+                  Due date
+                </span>
+                <input
+                  type="date"
+                  value={formValues.dueDate ?? ''}
+                  onChange={(event) => handleChange('dueDate', event.target.value)}
+                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                />
+                {fieldErrors.dueDate ? (
+                  <span className="mt-2 block text-sm font-medium text-red-600">
+                    {fieldErrors.dueDate}
+                  </span>
+                ) : null}
+              </label>
+
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
                   Priority
@@ -346,126 +349,134 @@ function TasksPage() {
                   </span>
                 ) : null}
               </label>
-
-              <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
-                  Estimated minutes
-                </span>
-                <input
-                  type="number"
-                  min="1"
-                  max="1440"
-                  value={formValues.estimatedMinutes ?? ''}
-                  onChange={(event) =>
-                    handleChange(
-                      'estimatedMinutes',
-                      event.target.value ? Number(event.target.value) : undefined,
-                    )
-                  }
-                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                />
-                {fieldErrors.estimatedMinutes ? (
-                  <span className="mt-2 block text-sm font-medium text-red-600">
-                    {fieldErrors.estimatedMinutes}
-                  </span>
-                ) : null}
-              </label>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
-                  Due date
-                </span>
-                <input
-                  type="date"
-                  value={formValues.dueDate ?? ''}
-                  onChange={(event) => handleChange('dueDate', event.target.value)}
-                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                />
-                {fieldErrors.dueDate ? (
-                  <span className="mt-2 block text-sm font-medium text-red-600">
-                    {fieldErrors.dueDate}
-                  </span>
-                ) : null}
-              </label>
-
-              <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
-                  Due time
-                </span>
-                <input
-                  type="time"
-                  value={formValues.dueTime ?? ''}
-                  onChange={(event) => handleChange('dueTime', event.target.value)}
-                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                />
-                {fieldErrors.dueTime ? (
-                  <span className="mt-2 block text-sm font-medium text-red-600">
-                    {fieldErrors.dueTime}
-                  </span>
-                ) : null}
-              </label>
-            </div>
-
-            <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
-                Reminder
-              </span>
-              <input
-                type="datetime-local"
-                value={formValues.reminderAt ?? ''}
-                onChange={(event) => handleChange('reminderAt', event.target.value)}
-                className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+            >
+              <ChevronDown
+                size={16}
+                className={`transition-transform duration-200 ${showAdvanced ? 'rotate-180' : ''}`}
               />
-              {fieldErrors.reminderAt ? (
-                <span className="mt-2 block text-sm font-medium text-red-600">
-                  {fieldErrors.reminderAt}
-                </span>
-              ) : null}
-            </label>
+              More options
+            </button>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
-                  Preferred start
-                </span>
-                <input
-                  type="time"
-                  value={formValues.preferredStartTime ?? ''}
-                  onChange={(event) => handleChange('preferredStartTime', event.target.value)}
-                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                />
-                {fieldErrors.preferredStartTime ? (
-                  <span className="mt-2 block text-sm font-medium text-red-600">
-                    {fieldErrors.preferredStartTime}
+            {showAdvanced ? (
+              <div className="space-y-4">
+                <label className="block">
+                  <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
+                    Notes
                   </span>
-                ) : null}
-              </label>
+                  <textarea
+                    value={formValues.notes ?? ''}
+                    onChange={(event) => handleChange('notes', event.target.value)}
+                    rows={4}
+                    placeholder="Add context or next steps"
+                    className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                  />
+                  {fieldErrors.notes ? (
+                    <span className="mt-2 block text-sm font-medium text-red-600">
+                      {fieldErrors.notes}
+                    </span>
+                  ) : null}
+                </label>
 
-              <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
-                  Preferred end
-                </span>
-                <input
-                  type="time"
-                  value={formValues.preferredEndTime ?? ''}
-                  onChange={(event) => handleChange('preferredEndTime', event.target.value)}
-                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                />
-                {fieldErrors.preferredEndTime ? (
-                  <span className="mt-2 block text-sm font-medium text-red-600">
-                    {fieldErrors.preferredEndTime}
-                  </span>
-                ) : null}
-              </label>
-            </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
+                      Due time
+                    </span>
+                    <input
+                      type="time"
+                      value={formValues.dueTime ?? ''}
+                      onChange={(event) => handleChange('dueTime', event.target.value)}
+                      className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                    />
+                    {fieldErrors.dueTime ? (
+                      <span className="mt-2 block text-sm font-medium text-red-600">
+                        {fieldErrors.dueTime}
+                      </span>
+                    ) : null}
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
+                      Reminder
+                    </span>
+                    <input
+                      type="datetime-local"
+                      value={formValues.reminderAt ?? ''}
+                      onChange={(event) => handleChange('reminderAt', event.target.value)}
+                      className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                    />
+                    {fieldErrors.reminderAt ? (
+                      <span className="mt-2 block text-sm font-medium text-red-600">
+                        {fieldErrors.reminderAt}
+                      </span>
+                    ) : null}
+                  </label>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
+                      Est. min
+                    </span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="1440"
+                      value={formValues.estimatedMinutes ?? ''}
+                      onChange={(event) =>
+                        handleChange(
+                          'estimatedMinutes',
+                          event.target.value ? Number(event.target.value) : undefined,
+                        )
+                      }
+                      className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                    />
+                    {fieldErrors.estimatedMinutes ? (
+                      <span className="mt-2 block text-sm font-medium text-red-600">
+                        {fieldErrors.estimatedMinutes}
+                      </span>
+                    ) : null}
+                  </label>
+
+                  <div>
+                    <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
+                      Preferred window
+                    </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="time"
+                        value={formValues.preferredStartTime ?? ''}
+                        onChange={(event) => handleChange('preferredStartTime', event.target.value)}
+                        className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                      />
+                      <input
+                        type="time"
+                        value={formValues.preferredEndTime ?? ''}
+                        onChange={(event) => handleChange('preferredEndTime', event.target.value)}
+                        className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                      />
+                    </div>
+                    {(fieldErrors.preferredStartTime ?? fieldErrors.preferredEndTime) ? (
+                      <span className="mt-2 block text-sm font-medium text-red-600">
+                        {fieldErrors.preferredStartTime ?? fieldErrors.preferredEndTime}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             {formError ? (
               <p className="m-0 text-sm font-medium text-red-600">{formError}</p>
             ) : null}
 
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <button
                 type="submit"
                 disabled={saveTaskMutation.isPending}
@@ -481,25 +492,19 @@ function TasksPage() {
               <button
                 type="button"
                 onClick={resetForm}
-                className="secondary-pill cursor-pointer border-0 text-sm font-semibold"
+                className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
               >
-                Reset form
+                Reset
               </button>
             </div>
           </form>
         </article>
+        ) : null}
 
         <article className="space-y-6">
           <section className="panel rounded-[1.75rem] p-6 sm:p-8">
             <div className="mb-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="island-kicker mb-2">Task filters</p>
-                  <h2 className="m-0 text-2xl font-semibold text-[var(--ink-strong)]">
-                    Current task list
-                  </h2>
-                </div>
-
                 <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ink-soft)]">
                   Sort
                   <select
@@ -536,7 +541,7 @@ function TasksPage() {
 
             {filteredTasks.length === 0 ? (
               <div className="subpanel rounded-2xl p-6 text-sm leading-7 text-[var(--ink-soft)]">
-                No tasks match the current filter yet.
+                No tasks.
               </div>
             ) : (
               <div className="space-y-3">
@@ -558,26 +563,42 @@ function TasksPage() {
             <TaskBucket
               title="Overdue"
               tasks={groupedTasks.overdue}
-              emptyCopy="Nothing overdue right now."
+              emptyCopy="None"
             />
             <TaskBucket
               title="Due today"
               tasks={groupedTasks.dueToday}
-              emptyCopy="No tasks due today yet."
+              emptyCopy="None"
             />
             <TaskBucket
               title="Upcoming"
               tasks={groupedTasks.upcoming}
-              emptyCopy="No future-dated tasks yet."
+              emptyCopy="None"
             />
             <TaskBucket
               title="Unscheduled"
               tasks={groupedTasks.unscheduled}
-              emptyCopy="Every active task has a due date."
+              emptyCopy="None"
             />
           </section>
         </article>
       </section>
+
+      {/* Floating action button */}
+      <button
+        type="button"
+        onClick={() => {
+          if (showForm) {
+            resetForm()
+          } else {
+            setShowForm(true)
+          }
+        }}
+        aria-label={showForm ? 'Close form' : 'New task'}
+        className="fixed bottom-6 right-6 z-50 flex size-14 cursor-pointer items-center justify-center rounded-full bg-[var(--brand)] text-white shadow-lg transition hover:opacity-90 active:scale-95"
+      >
+        {showForm ? <X size={22} /> : <Plus size={22} />}
+      </button>
     </main>
   )
 }
@@ -597,43 +618,47 @@ function TaskCard({
 }) {
   const completed = isTaskCompleted(task)
 
+  const priorityDot =
+    task.priority === 'high'
+      ? 'bg-red-400'
+      : task.priority === 'medium'
+        ? 'bg-amber-400'
+        : 'bg-slate-400'
+
   return (
-    <article className="subpanel rounded-2xl p-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <article className="subpanel rounded-2xl p-4">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="m-0 text-lg font-semibold text-[var(--ink-strong)]">
+          <div className="flex items-center gap-2">
+            <span className={`mt-0.5 size-2 shrink-0 rounded-full ${priorityDot}`} />
+            <h3 className="m-0 text-sm font-semibold text-[var(--ink-strong)]">
               {task.title}
             </h3>
-            <span className="rounded-full border border-[var(--line)] px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ink-soft)]">
-              {task.priority}
-            </span>
-            <span className="rounded-full border border-[var(--line)] px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ink-soft)]">
-              {task.archivedAt ? 'archived' : completed ? 'completed' : 'active'}
-            </span>
           </div>
 
           {task.notes ? (
-            <p className="mb-0 mt-3 text-sm leading-6 text-[var(--ink-soft)]">{task.notes}</p>
+            <p className="mb-0 ml-4 mt-1.5 text-xs leading-5 text-[var(--ink-soft)]">
+              {task.notes}
+            </p>
           ) : null}
 
-          <div className="mt-4 flex flex-wrap gap-3 text-sm text-[var(--ink-soft)]">
+          <div className="ml-4 mt-2 flex flex-wrap gap-3 text-xs text-[var(--ink-soft)]">
             <span>{getTaskTimingLabel(task)}</span>
             {task.reminderAt ? <span>{getReminderLabel(task)}</span> : null}
-            {task.estimatedMinutes ? <span>{task.estimatedMinutes} min estimate</span> : null}
+            {task.estimatedMinutes ? <span>{task.estimatedMinutes} min</span> : null}
             {task.preferredStartTime && task.preferredEndTime ? (
               <span>
-                Preferred window {task.preferredStartTime}-{task.preferredEndTime}
+                {task.preferredStartTime}–{task.preferredEndTime}
               </span>
             ) : null}
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 lg:justify-end">
+        <div className="flex shrink-0 items-center gap-3">
           <button
             type="button"
             onClick={onEdit}
-            className="secondary-pill cursor-pointer border-0 text-sm font-semibold"
+            className="cursor-pointer text-xs font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
           >
             Edit
           </button>
@@ -641,15 +666,15 @@ function TaskCard({
             type="button"
             onClick={onToggleComplete}
             disabled={isMutating}
-            className="secondary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+            className="cursor-pointer text-xs font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {completed ? 'Reopen' : 'Complete'}
+            {completed ? 'Reopen' : 'Done'}
           </button>
           <button
             type="button"
             onClick={onArchive}
             disabled={isMutating}
-            className="secondary-pill cursor-pointer border-0 text-sm font-semibold text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+            className="cursor-pointer text-xs font-semibold text-red-500 transition hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Archive
           </button>
