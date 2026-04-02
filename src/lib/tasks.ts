@@ -99,6 +99,7 @@ export type TaskFilter =
   | 'today'
   | 'overdue'
   | 'completed'
+  | 'archived'
   | 'high-priority'
   | 'scheduled'
   | 'all'
@@ -274,6 +275,8 @@ export function applyTaskFilter(tasks: Array<Task>, filter: TaskFilter, now = ne
       return tasks.filter((task) => isTaskOverdue(task, now))
     case 'completed':
       return tasks.filter((task) => isTaskCompleted(task) && !isTaskArchived(task))
+    case 'archived':
+      return tasks.filter((task) => isTaskArchived(task))
     case 'high-priority':
       return tasks.filter(
         (task) =>
@@ -288,7 +291,7 @@ export function applyTaskFilter(tasks: Array<Task>, filter: TaskFilter, now = ne
       )
     case 'all':
     default:
-      return tasks.filter((task) => !isTaskArchived(task))
+      return tasks
   }
 }
 

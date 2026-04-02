@@ -21,6 +21,7 @@ import {
   type TaskFormValues,
   type TaskSort,
 } from '../lib/tasks'
+import { z } from 'zod'
 import {
   archiveTask,
   completeTask,
@@ -48,6 +49,7 @@ const FILTERS: Array<{ value: TaskFilter; label: string }> = [
   { value: 'high-priority', label: 'High priority' },
   { value: 'scheduled', label: 'Scheduled' },
   { value: 'completed', label: 'Completed' },
+  { value: 'archived', label: 'Archived' },
   { value: 'all', label: 'All' },
 ]
 
@@ -68,6 +70,9 @@ function TasksPage() {
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [formValues, setFormValues] = useState<TaskFormValues>(EMPTY_FORM)
   const [formError, setFormError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof TaskFormValues, string>>>({})
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
+  const [feedbackTone, setFeedbackTone] = useState<'success' | 'error' | null>(null)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
 
   const groupedTasks = groupActiveTasks(tasks)
@@ -92,11 +97,33 @@ function TasksPage() {
       setFormValues(EMPTY_FORM)
       setEditingTask(null)
       setFormError(null)
+      setFieldErrors({})
+      setFeedbackTone('success')
+      setFeedbackMessage(editingTask ? 'Task updated.' : 'Task created.')
       setActiveTaskId(null)
       await invalidateTasks()
     },
     onError: (error) => {
-      setFormError(error instanceof Error ? error.message : 'Failed to save task')
+      if (error instanceof z.ZodError) {
+        const flattened = error.flatten().fieldErrors
+        setFieldErrors({
+          title: flattened.title?.[0],
+          notes: flattened.notes?.[0],
+          priority: flattened.priority?.[0],
+          dueDate: flattened.dueDate?.[0],
+          dueTime: flattened.dueTime?.[0],
+          reminderAt: flattened.reminderAt?.[0],
+          estimatedMinutes: flattened.estimatedMinutes?.[0],
+          preferredStartTime: flattened.preferredStartTime?.[0],
+          preferredEndTime: flattened.preferredEndTime?.[0],
+        })
+        setFormError('Fix the highlighted fields and try again.')
+      } else {
+        setFormError(error instanceof Error ? error.message : 'Failed to save task')
+      }
+
+      setFeedbackTone('error')
+      setFeedbackMessage('Task save failed.')
       setActiveTaskId(null)
     },
   })
@@ -113,9 +140,13 @@ function TasksPage() {
     },
     onSuccess: async () => {
       setActiveTaskId(null)
+      setFeedbackTone('success')
+      setFeedbackMessage('Task status updated.')
       await invalidateTasks()
     },
     onError: () => {
+      setFeedbackTone('error')
+      setFeedbackMessage('Task status update failed.')
       setActiveTaskId(null)
     },
   })
@@ -132,9 +163,13 @@ function TasksPage() {
       }
 
       setActiveTaskId(null)
+      setFeedbackTone('success')
+      setFeedbackMessage('Task archived.')
       await invalidateTasks()
     },
     onError: () => {
+      setFeedbackTone('error')
+      setFeedbackMessage('Task archive failed.')
       setActiveTaskId(null)
     },
   })
@@ -142,11 +177,23 @@ function TasksPage() {
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setFormError(null)
+    setFieldErrors({})
     setActiveTaskId(editingTask?.id ?? 'new-task')
     saveTaskMutation.mutate(formValues)
   }
 
   function handleChange<K extends keyof TaskFormValues>(key: K, value: TaskFormValues[K]) {
+    setFieldErrors((current) => {
+      if (!current[key]) {
+        return current
+      }
+
+      return {
+        ...current,
+        [key]: undefined,
+      }
+    })
+
     setFormValues((current) => ({
       ...current,
       [key]: value,
@@ -157,12 +204,16 @@ function TasksPage() {
     setEditingTask(task)
     setFormValues(toTaskFormValues(task))
     setFormError(null)
+    setFieldErrors({})
+    setFeedbackMessage(null)
+    setFeedbackTone(null)
   }
 
   function resetForm() {
     setEditingTask(null)
     setFormValues(EMPTY_FORM)
     setFormError(null)
+    setFieldErrors({})
   }
 
   return (
@@ -189,7 +240,7 @@ function TasksPage() {
               ['Completed', summary.completed],
             ].map(([label, value]) => (
               <div key={label} className="subpanel rounded-2xl p-4 text-center">
-                <p className="mb-1 text-xs font-semibold tracking-[0.16em] text-[var(--ink-soft)] uppercase">
+                <p className="mb-1 whitespace-nowrap text-xs font-semibold tracking-[0.12em] text-[var(--ink-soft)] uppercase">
                   {label}
                 </p>
                 <p className="m-0 text-2xl font-bold text-[var(--ink-strong)]">{value}</p>
@@ -198,6 +249,18 @@ function TasksPage() {
           </div>
         </div>
       </section>
+
+      {feedbackMessage ? (
+        <section
+          className={
+            feedbackTone === 'error'
+              ? 'mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700'
+              : 'mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700'
+          }
+        >
+          {feedbackMessage}
+        </section>
+      ) : null}
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[0.95fr_1.25fr]">
         <article className="panel rounded-[1.75rem] p-6 sm:p-8">
@@ -229,8 +292,13 @@ function TasksPage() {
                 value={formValues.title}
                 onChange={(event) => handleChange('title', event.target.value)}
                 placeholder="Review roadmap, call the bank, plan tomorrow"
-                className="w-full rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
               />
+              {fieldErrors.title ? (
+                <span className="mt-2 block text-sm font-medium text-red-600">
+                  {fieldErrors.title}
+                </span>
+              ) : null}
             </label>
 
             <label className="block">
@@ -242,8 +310,13 @@ function TasksPage() {
                 onChange={(event) => handleChange('notes', event.target.value)}
                 rows={4}
                 placeholder="Add context or next steps"
-                className="w-full rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
               />
+              {fieldErrors.notes ? (
+                <span className="mt-2 block text-sm font-medium text-red-600">
+                  {fieldErrors.notes}
+                </span>
+              ) : null}
             </label>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -256,12 +329,17 @@ function TasksPage() {
                   onChange={(event) =>
                     handleChange('priority', event.target.value as TaskFormValues['priority'])
                   }
-                  className="w-full rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
                 >
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
                 </select>
+                {fieldErrors.priority ? (
+                  <span className="mt-2 block text-sm font-medium text-red-600">
+                    {fieldErrors.priority}
+                  </span>
+                ) : null}
               </label>
 
               <label className="block">
@@ -279,8 +357,13 @@ function TasksPage() {
                       event.target.value ? Number(event.target.value) : undefined,
                     )
                   }
-                  className="w-full rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
                 />
+                {fieldErrors.estimatedMinutes ? (
+                  <span className="mt-2 block text-sm font-medium text-red-600">
+                    {fieldErrors.estimatedMinutes}
+                  </span>
+                ) : null}
               </label>
             </div>
 
@@ -293,8 +376,13 @@ function TasksPage() {
                   type="date"
                   value={formValues.dueDate ?? ''}
                   onChange={(event) => handleChange('dueDate', event.target.value)}
-                  className="w-full rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
                 />
+                {fieldErrors.dueDate ? (
+                  <span className="mt-2 block text-sm font-medium text-red-600">
+                    {fieldErrors.dueDate}
+                  </span>
+                ) : null}
               </label>
 
               <label className="block">
@@ -305,8 +393,13 @@ function TasksPage() {
                   type="time"
                   value={formValues.dueTime ?? ''}
                   onChange={(event) => handleChange('dueTime', event.target.value)}
-                  className="w-full rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
                 />
+                {fieldErrors.dueTime ? (
+                  <span className="mt-2 block text-sm font-medium text-red-600">
+                    {fieldErrors.dueTime}
+                  </span>
+                ) : null}
               </label>
             </div>
 
@@ -318,8 +411,13 @@ function TasksPage() {
                 type="datetime-local"
                 value={formValues.reminderAt ?? ''}
                 onChange={(event) => handleChange('reminderAt', event.target.value)}
-                className="w-full rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
               />
+              {fieldErrors.reminderAt ? (
+                <span className="mt-2 block text-sm font-medium text-red-600">
+                  {fieldErrors.reminderAt}
+                </span>
+              ) : null}
             </label>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -331,8 +429,13 @@ function TasksPage() {
                   type="time"
                   value={formValues.preferredStartTime ?? ''}
                   onChange={(event) => handleChange('preferredStartTime', event.target.value)}
-                  className="w-full rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
                 />
+                {fieldErrors.preferredStartTime ? (
+                  <span className="mt-2 block text-sm font-medium text-red-600">
+                    {fieldErrors.preferredStartTime}
+                  </span>
+                ) : null}
               </label>
 
               <label className="block">
@@ -343,8 +446,13 @@ function TasksPage() {
                   type="time"
                   value={formValues.preferredEndTime ?? ''}
                   onChange={(event) => handleChange('preferredEndTime', event.target.value)}
-                  className="w-full rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
                 />
+                {fieldErrors.preferredEndTime ? (
+                  <span className="mt-2 block text-sm font-medium text-red-600">
+                    {fieldErrors.preferredEndTime}
+                  </span>
+                ) : null}
               </label>
             </div>
 
@@ -378,30 +486,13 @@ function TasksPage() {
 
         <article className="space-y-6">
           <section className="panel rounded-[1.75rem] p-6 sm:p-8">
-            <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <p className="island-kicker mb-2">Task filters</p>
-                <h2 className="m-0 text-2xl font-semibold text-[var(--ink-strong)]">
-                  Current task list
-                </h2>
-              </div>
-
-              <div className="flex flex-col gap-3 sm:items-end">
-                <div className="flex flex-wrap gap-2">
-                  {FILTERS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setFilter(option.value)}
-                      className={
-                        filter === option.value
-                          ? 'primary-pill cursor-pointer border-0 text-sm font-semibold'
-                          : 'secondary-pill cursor-pointer border-0 text-sm font-semibold'
-                      }
-                    >
-                      {option.label}
-                    </button>
-                  ))}
+            <div className="mb-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="island-kicker mb-2">Task filters</p>
+                  <h2 className="m-0 text-2xl font-semibold text-[var(--ink-strong)]">
+                    Current task list
+                  </h2>
                 </div>
 
                 <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ink-soft)]">
@@ -409,7 +500,7 @@ function TasksPage() {
                   <select
                     value={sort}
                     onChange={(event) => setSort(event.target.value as TaskSort)}
-                    className="rounded-full border border-[var(--line)] bg-white/70 px-3 py-2 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                    className="rounded-full border border-[var(--line)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
                   >
                     {SORTS.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -418,6 +509,23 @@ function TasksPage() {
                     ))}
                   </select>
                 </label>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {FILTERS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setFilter(option.value)}
+                    className={
+                      filter === option.value
+                        ? 'primary-pill cursor-pointer border-0 text-sm font-semibold'
+                        : 'secondary-pill cursor-pointer border-0 text-sm font-semibold'
+                    }
+                  >
+                    {option.label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -496,7 +604,7 @@ function TaskCard({
               {task.priority}
             </span>
             <span className="rounded-full border border-[var(--line)] px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ink-soft)]">
-              {completed ? 'completed' : 'active'}
+              {task.archivedAt ? 'archived' : completed ? 'completed' : 'active'}
             </span>
           </div>
 
