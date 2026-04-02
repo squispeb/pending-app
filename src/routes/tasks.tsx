@@ -220,7 +220,7 @@ function TasksPage() {
     <main className="page-wrap px-4 pb-12 pt-10">
       <section className="hero-panel rounded-[2rem] px-6 py-8 sm:px-8">
         <p className="island-kicker mb-3">Milestone 1</p>
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h1 className="display-title mb-3 text-4xl font-bold text-[var(--ink-strong)]">
               Tasks workspace
@@ -232,18 +232,23 @@ function TasksPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="flex flex-wrap items-center gap-y-4">
             {[
               ['Active', summary.active],
               ['Due today', summary.dueToday],
               ['Overdue', summary.overdue],
               ['Completed', summary.completed],
-            ].map(([label, value]) => (
-              <div key={label} className="subpanel rounded-2xl p-4 text-center">
-                <p className="mb-1 whitespace-nowrap text-xs font-semibold tracking-[0.12em] text-[var(--ink-soft)] uppercase">
+            ].map(([label, value], i) => (
+              <div
+                key={label as string}
+                className={`flex flex-col items-center gap-1 px-5 ${i > 0 ? 'border-l border-[var(--line)]' : ''}`}
+              >
+                <span className="text-2xl font-bold tabular-nums text-[var(--ink-strong)]">
+                  {value}
+                </span>
+                <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
                   {label}
-                </p>
-                <p className="m-0 text-2xl font-bold text-[var(--ink-strong)]">{value}</p>
+                </span>
               </div>
             ))}
           </div>
