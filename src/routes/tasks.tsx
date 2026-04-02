@@ -238,7 +238,7 @@ function TasksPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <h1 className="display-title text-3xl font-bold text-[var(--ink-strong)]">Tasks</h1>
 
-          <div className="flex flex-wrap items-center gap-y-4">
+          <div className="grid grid-cols-2 gap-y-4 sm:flex sm:flex-wrap sm:items-center">
             {[
               ['Active', summary.active],
               ['Due today', summary.dueToday],
@@ -247,7 +247,11 @@ function TasksPage() {
             ].map(([label, value], i) => (
               <div
                 key={label as string}
-                className={`flex flex-col items-center gap-1 px-5 ${i > 0 ? 'border-l border-[var(--line)]' : ''}`}
+                className={`flex flex-col items-center gap-1 px-5 ${
+                  i === 1 || i === 3
+                    ? 'border-l border-[var(--line)]'
+                    : 'sm:border-l sm:border-[var(--line)]'
+                } ${i === 0 ? 'sm:border-l-0' : ''}`}
               >
                 <span className="text-2xl font-bold tabular-nums text-[var(--ink-strong)]">
                   {value}
@@ -275,7 +279,7 @@ function TasksPage() {
 
       <section className="mt-6 grid gap-6">
 
-        <article className="space-y-6">
+        <article className="min-w-0 space-y-6">
           <section className="panel rounded-[1.75rem] p-6 sm:p-8">
             <div className="mb-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -295,7 +299,8 @@ function TasksPage() {
                 </label>
               </div>
 
-              <div className="flex flex-wrap gap-2">
+              <div className="overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+                <div className="flex gap-2">
                 {FILTERS.map((option) => (
                   <button
                     key={option.value}
@@ -303,13 +308,14 @@ function TasksPage() {
                     onClick={() => setFilter(option.value)}
                     className={
                       filter === option.value
-                        ? 'primary-pill cursor-pointer border-0 text-sm font-semibold'
-                        : 'secondary-pill cursor-pointer border-0 text-sm font-semibold'
+                        ? 'primary-pill shrink-0 cursor-pointer border-0 text-sm font-semibold'
+                        : 'secondary-pill shrink-0 cursor-pointer border-0 text-sm font-semibold'
                     }
                   >
                     {option.label}
                   </button>
                 ))}
+                </div>
               </div>
             </div>
 
@@ -389,7 +395,7 @@ function TasksPage() {
             </div>
 
             {/* Scrollable form area */}
-            <div className="max-h-[65vh] overflow-y-auto">
+            <div className="max-h-[65vh] overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
               <form className="space-y-4" onSubmit={handleSubmit}>
                 <label className="block">
                   <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
