@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown, Plus, X } from 'lucide-react'
 import {
   queryOptions,
@@ -78,6 +79,16 @@ function TasksPage() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [showSortMenu, setShowSortMenu] = useState(false)
+  const sortButtonRef = useRef<HTMLButtonElement>(null)
+  const [sortMenuPos, setSortMenuPos] = useState<{ top: number; left: number } | null>(null)
+
+  function openSortMenu() {
+    if (sortButtonRef.current) {
+      const rect = sortButtonRef.current.getBoundingClientRect()
+      setSortMenuPos({ top: rect.bottom + 6, left: rect.left })
+    }
+    setShowSortMenu(true)
+  }
 
   const groupedTasks = groupActiveTasks(tasks)
   const filteredTasks = sortTasks(applyTaskFilter(tasks, filter), sort)
@@ -317,11 +328,12 @@ function TasksPage() {
                 />
               </div>
 
-              <div className="relative flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">Sort</span>
                 <button
+                  ref={sortButtonRef}
                   type="button"
-                  onClick={() => setShowSortMenu((v) => !v)}
+                  onClick={openSortMenu}
                   className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--input-bg)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)] outline-none transition hover:border-[var(--brand)]"
                 >
                   {SORTS.find((s) => s.value === sort)?.label}
@@ -331,34 +343,40 @@ function TasksPage() {
                   />
                 </button>
 
-                {showSortMenu ? (
-                  <>
-                    <div
-                      className="fixed inset-0 z-10"
-                      onClick={() => setShowSortMenu(false)}
-                    />
-                    <div className="absolute left-8 top-full z-20 mt-1.5 min-w-[11rem] overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface-strong)] py-1.5 shadow-xl">
-                      {SORTS.map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          onClick={() => {
-                            setSort(option.value)
-                            setShowSortMenu(false)
-                          }}
-                          className={`flex w-full cursor-pointer items-center gap-2 px-4 py-2.5 text-sm font-semibold transition hover:bg-[var(--surface-inset)] ${
-                            sort === option.value
-                              ? 'text-[var(--brand)]'
-                              : 'text-[var(--ink-strong)]'
-                          }`}
+                {showSortMenu && sortMenuPos
+                  ? createPortal(
+                      <>
+                        <div
+                          className="fixed inset-0 z-30"
+                          onClick={() => setShowSortMenu(false)}
+                        />
+                        <div
+                          className="fixed z-40 min-w-[11rem] overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface-strong)] py-1.5 shadow-xl"
+                          style={{ top: sortMenuPos.top, left: sortMenuPos.left }}
                         >
-                          <span aria-hidden="true" className={`text-xs ${sort === option.value ? 'opacity-100' : 'opacity-0'}`}>✓</span>
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                ) : null}
+                          {SORTS.map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              onClick={() => {
+                                setSort(option.value)
+                                setShowSortMenu(false)
+                              }}
+                              className={`flex w-full cursor-pointer items-center gap-2 px-4 py-2.5 text-sm font-semibold transition hover:bg-[var(--surface-inset)] ${
+                                sort === option.value
+                                  ? 'text-[var(--brand)]'
+                                  : 'text-[var(--ink-strong)]'
+                              }`}
+                            >
+                              <span aria-hidden="true" className={`text-xs ${sort === option.value ? 'opacity-100' : 'opacity-0'}`}>✓</span>
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </>,
+                      document.body,
+                    )
+                  : null}
               </div>
             </div>
 
