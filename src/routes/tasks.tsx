@@ -316,12 +316,12 @@ function TasksPage() {
                 />
               </div>
 
-              <div className="flex items-center gap-2">
+              <label className="flex cursor-pointer items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">Sort</span>
                 <select
                   value={sort}
                   onChange={(event) => setSort(event.target.value as TaskSort)}
-                  className="rounded-full border border-[var(--line)] bg-[var(--input-bg)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                  className="cursor-pointer rounded-full border border-[var(--line)] bg-[var(--input-bg)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
                 >
                   {SORTS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -329,7 +329,7 @@ function TasksPage() {
                     </option>
                   ))}
                 </select>
-              </div>
+              </label>
             </div>
 
             {filteredTasks.length === 0 ? (
