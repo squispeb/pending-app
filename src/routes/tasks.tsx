@@ -77,6 +77,7 @@ function TasksPage() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [showForm, setShowForm] = useState(false)
+  const [showSortMenu, setShowSortMenu] = useState(false)
 
   const groupedTasks = groupActiveTasks(tasks)
   const filteredTasks = sortTasks(applyTaskFilter(tasks, filter), sort)
@@ -316,20 +317,49 @@ function TasksPage() {
                 />
               </div>
 
-              <label className="flex cursor-pointer items-center gap-2">
+              <div className="relative flex items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">Sort</span>
-                <select
-                  value={sort}
-                  onChange={(event) => setSort(event.target.value as TaskSort)}
-                  className="cursor-pointer rounded-full border border-[var(--line)] bg-[var(--input-bg)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                <button
+                  type="button"
+                  onClick={() => setShowSortMenu((v) => !v)}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--input-bg)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)] outline-none transition hover:border-[var(--brand)]"
                 >
-                  {SORTS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  {SORTS.find((s) => s.value === sort)?.label}
+                  <ChevronDown
+                    size={12}
+                    className={`shrink-0 transition-transform duration-150 ${showSortMenu ? 'rotate-180' : ''}`}
+                  />
+                </button>
+
+                {showSortMenu ? (
+                  <>
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setShowSortMenu(false)}
+                    />
+                    <div className="absolute left-8 top-full z-20 mt-1.5 min-w-[11rem] overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface-strong)] py-1.5 shadow-xl">
+                      {SORTS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => {
+                            setSort(option.value)
+                            setShowSortMenu(false)
+                          }}
+                          className={`flex w-full cursor-pointer items-center gap-2 px-4 py-2.5 text-sm font-semibold transition hover:bg-[var(--surface-inset)] ${
+                            sort === option.value
+                              ? 'text-[var(--brand)]'
+                              : 'text-[var(--ink-strong)]'
+                          }`}
+                        >
+                          <span aria-hidden="true" className={`text-xs ${sort === option.value ? 'opacity-100' : 'opacity-0'}`}>✓</span>
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
+              </div>
             </div>
 
             {filteredTasks.length === 0 ? (
