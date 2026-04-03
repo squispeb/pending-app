@@ -281,28 +281,39 @@ function TasksPage() {
 
         <article className="min-w-0 space-y-6">
           <section className="panel rounded-[1.75rem] p-6 sm:p-8">
-            <div className="mb-5">
-              <div className="mb-3 flex flex-wrap gap-2">
-                {FILTERS.map((option) => {
-                  const count = applyTaskFilter(tasks, option.value).length
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setFilter(option.value)}
-                      className={
-                        filter === option.value
-                          ? 'primary-pill inline-flex cursor-pointer items-center gap-1.5 border-0 !py-1.5 !px-3.5 text-sm font-semibold'
-                          : 'secondary-pill inline-flex cursor-pointer items-center gap-1.5 border-0 !py-1.5 !px-3.5 text-sm font-semibold'
-                      }
-                    >
-                      {option.label}
-                      <span className={`tabular-nums text-xs ${filter === option.value ? 'opacity-70' : 'opacity-50'}`}>
-                        {count}
-                      </span>
-                    </button>
-                  )
-                })}
+            <div className="mb-5 space-y-3">
+              {/* Scrollable chip row */}
+              <div className="relative">
+                <div
+                  className="flex gap-2 overflow-x-auto pb-0.5"
+                  style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}
+                >
+                  {FILTERS.map((option) => {
+                    const count = applyTaskFilter(tasks, option.value).length
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setFilter(option.value)}
+                        className={
+                          filter === option.value
+                            ? 'primary-pill inline-flex shrink-0 cursor-pointer items-center gap-1.5 border-0 !py-1.5 !px-3.5 text-sm font-semibold'
+                            : 'secondary-pill inline-flex shrink-0 cursor-pointer items-center gap-1.5 border-0 !py-1.5 !px-3.5 text-sm font-semibold'
+                        }
+                      >
+                        {option.label}
+                        <span className={`tabular-nums text-xs ${filter === option.value ? 'opacity-70' : 'opacity-50'}`}>
+                          {count}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+                {/* Right fade to indicate more chips */}
+                <div
+                  className="pointer-events-none absolute inset-y-0 right-0 w-10"
+                  style={{ background: 'linear-gradient(to right, transparent, var(--surface))' }}
+                />
               </div>
 
               <div className="flex items-center gap-2">
