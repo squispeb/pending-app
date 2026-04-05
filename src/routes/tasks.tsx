@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, Plus, X } from 'lucide-react'
 import {
@@ -15,6 +15,7 @@ import {
   getTaskSummary,
   getTaskTimingLabel,
   groupActiveTasks,
+  isTaskArchived,
   isTaskCompleted,
   sortTasks,
   taskFormSchema,
@@ -75,12 +76,31 @@ function TasksPage() {
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof TaskFormValues, string>>>({})
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
   const [feedbackTone, setFeedbackTone] = useState<'success' | 'error' | null>(null)
+
+  useEffect(() => {
+    if (!feedbackMessage) return
+    const timer = setTimeout(() => {
+      setFeedbackMessage(null)
+      setFeedbackTone(null)
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [feedbackMessage])
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [showSortMenu, setShowSortMenu] = useState(false)
   const sortButtonRef = useRef<HTMLButtonElement>(null)
   const [sortMenuPos, setSortMenuPos] = useState<{ top: number; left: number } | null>(null)
+  const chipScrollRef = useRef<HTMLDivElement>(null)
+  const [chipScrollLeft, setChipScrollLeft] = useState(0)
+
+  useEffect(() => {
+    const el = chipScrollRef.current
+    if (!el) return
+    const onScroll = () => setChipScrollLeft(el.scrollLeft)
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
 
   function openSortMenu() {
     if (sortButtonRef.current) {
@@ -297,6 +317,7 @@ function TasksPage() {
               {/* Scrollable chip row */}
               <div className="relative">
                 <div
+                  ref={chipScrollRef}
                   className="flex gap-2 overflow-x-auto pb-0.5"
                   style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}
                 >
@@ -321,6 +342,13 @@ function TasksPage() {
                     )
                   })}
                 </div>
+                {/* Left fade — visible once scrolled */}
+                {chipScrollLeft > 0 ? (
+                  <div
+                    className="pointer-events-none absolute inset-y-0 left-0 w-10"
+                    style={{ background: 'linear-gradient(to left, transparent, var(--surface))' }}
+                  />
+                ) : null}
                 {/* Right fade to indicate more chips */}
                 <div
                   className="pointer-events-none absolute inset-y-0 right-0 w-10"
@@ -431,14 +459,18 @@ function TasksPage() {
         className={`fixed inset-0 z-40 bg-black/40 transition-opacity duration-300 ${showForm ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
       />
 
-      {/* Bottom sheet */}
+      {/* Bottom sheet / desktop modal */}
       <div
-        className={`fixed inset-x-0 bottom-0 z-50 transition-transform duration-300 ${showForm ? 'translate-y-0' : 'translate-y-full'}`}
+        className={`fixed inset-x-0 bottom-0 z-50 duration-300 lg:inset-0 lg:flex lg:items-center lg:justify-center ${
+          showForm
+            ? 'translate-y-0 opacity-100 transition-[transform,opacity] lg:pointer-events-auto'
+            : 'translate-y-full opacity-0 transition-[transform,opacity] lg:translate-y-0 lg:pointer-events-none'
+        }`}
       >
-        <div className="mx-auto w-full max-w-2xl">
-          <div className="panel rounded-t-[2rem] px-6 pb-10 pt-3 lg:mb-8 lg:rounded-[2rem]">
-            {/* Drag handle */}
-            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[var(--line)]" />
+        <div className="mx-auto w-full max-w-2xl lg:px-4">
+          <div className="panel rounded-t-[2rem] px-6 pb-10 pt-3 lg:rounded-[2rem]">
+            {/* Drag handle — mobile only */}
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[var(--line)] lg:hidden" />
 
             {/* Sheet header */}
             <div className="mb-5 flex items-center justify-between gap-4">
@@ -699,6 +731,8 @@ function TaskCard({
   isMutating: boolean
 }) {
   const completed = isTaskCompleted(task)
+  const archived = isTaskArchived(task)
+  const isDone = completed || archived
 
   const priorityDot =
     task.priority === 'high'
@@ -708,12 +742,12 @@ function TaskCard({
         : 'bg-slate-400'
 
   return (
-    <article className="subpanel rounded-2xl p-4">
+    <article className={`subpanel rounded-2xl p-4 transition-opacity ${isDone ? 'opacity-60' : ''}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className={`mt-0.5 size-2 shrink-0 rounded-full ${priorityDot}`} />
-            <h3 className="m-0 text-sm font-semibold text-[var(--ink-strong)]">
+            <span className={`mt-0.5 size-2 shrink-0 rounded-full ${priorityDot} ${isDone ? 'opacity-50' : ''}`} />
+            <h3 className={`m-0 text-sm font-semibold ${isDone ? 'line-through text-[var(--ink-soft)]' : 'text-[var(--ink-strong)]'}`}>
               {task.title}
             </h3>
           </div>

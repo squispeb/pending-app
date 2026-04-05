@@ -18,9 +18,6 @@ export default function Header() {
         </h2>
 
         <div className="ml-auto flex items-center gap-2">
-          <span className="hidden rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-1 text-xs font-semibold tracking-[0.16em] text-[var(--ink-soft)] uppercase sm:inline-flex">
-            Foundation ready
-          </span>
           <ThemeToggle />
         </div>
 
