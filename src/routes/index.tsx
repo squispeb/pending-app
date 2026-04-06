@@ -145,17 +145,23 @@ function DashboardPage() {
         <h1 className="display-title mb-6 text-3xl font-bold tracking-tight text-[var(--ink-strong)] sm:text-4xl">
           {formatTodayHeading()}
         </h1>
-        <div className="flex flex-wrap gap-x-6 gap-y-4">
+        <div className="grid grid-cols-2 gap-y-4 sm:flex sm:flex-wrap sm:items-center">
           {(
             [
               ['Active tasks', taskSummary.active],
               ['Due today', taskSummary.dueToday],
               ['Overdue', taskSummary.overdue],
               ['Habits due', habitSummary.dueToday],
-              ['Habits done', habitSummary.completedToday],
             ] as const
-          ).map(([label, value]) => (
-            <div key={label} className="flex flex-col gap-0.5">
+          ).map(([label, value], i) => (
+            <div
+              key={label}
+              className={`flex flex-col items-center gap-1 px-5 ${
+                i === 1 || i === 3
+                  ? 'border-l border-[var(--line)]'
+                  : 'sm:border-l sm:border-[var(--line)]'
+              } ${i === 0 ? 'sm:border-l-0' : ''}`}
+            >
               <span className="text-2xl font-bold tabular-nums text-[var(--ink-strong)]">
                 {value}
               </span>
@@ -280,7 +286,7 @@ function DashboardPage() {
       </div>
 
       {/* Quick navigation */}
-      <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="mt-6 grid grid-cols-2 gap-4 xl:grid-cols-4">
         {[
           { title: 'Tasks', description: 'Manage and filter all your tasks.', href: '/tasks' },
           { title: 'Habits', description: 'Track recurring routines.', href: '/habits' },
