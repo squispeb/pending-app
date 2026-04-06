@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, CircleAlert, Link2, RefreshCw, ShieldCheck, Unplug } from 'lucide-react'
+import { CheckCircle2, Link2, RefreshCw, Unplug } from 'lucide-react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import {
@@ -151,8 +151,7 @@ function SettingsPage() {
         </section>
       ) : null}
 
-      <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-        <article className="panel rounded-[1.75rem] p-6 sm:p-8">
+      <article className="panel rounded-[1.75rem] p-6 sm:p-8">
           <h1 className="display-title mb-4 text-3xl font-bold text-[var(--ink-strong)]">Settings</h1>
           <p className="max-w-3xl text-base leading-7 text-[var(--ink-soft)]">
             {renderConnectionCopy()}
@@ -161,7 +160,7 @@ function SettingsPage() {
           <div className="mt-6 flex flex-wrap gap-3">
             <button
               type="button"
-              disabled={!data.configuration.ready || connectMutation.isPending}
+              disabled={connectMutation.isPending}
               onClick={() => connectMutation.mutate()}
               className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -196,61 +195,6 @@ function SettingsPage() {
             </button>
           </div>
         </article>
-
-        <article className="panel rounded-[1.75rem] p-6 sm:p-8">
-          <div className="mb-3 flex items-center gap-2">
-            {data.configuration.ready ? (
-              <ShieldCheck size={18} className="text-emerald-400" />
-            ) : (
-              <CircleAlert size={18} className="text-amber-400" />
-            )}
-            <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">Server configuration</p>
-          </div>
-
-          {data.configuration.ready ? (
-            <p className="text-sm leading-7 text-[var(--ink-soft)]">
-              Google OAuth variables are present. Connect can run from this environment.
-            </p>
-          ) : (
-            <>
-              <p className="text-sm leading-7 text-[var(--ink-soft)]">
-                Add the missing server variables before starting Google OAuth.
-              </p>
-              <ul className="m-0 mt-3 space-y-2 pl-5 text-sm leading-6 text-[var(--ink-soft)]">
-                {data.configuration.missing.map((name) => (
-                  <li key={name}>
-                    <code>{name}</code>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-
-          <div className="subpanel mt-5 rounded-2xl px-4 py-4 text-sm leading-7 text-[var(--ink-soft)]">
-            <p className="m-0 font-semibold text-[var(--ink-strong)]">Current integration state</p>
-            <p className="m-0 mt-2">
-              {data.account ? (
-                <>
-                  Account: <span className="text-[var(--ink-strong)]">{data.account.email}</span>
-                </>
-              ) : (
-                'No Google account connected yet.'
-              )}
-            </p>
-            <p className="m-0 mt-1">
-              Cached meeting snapshots: <span className="text-[var(--ink-strong)]">{data.cachedEventCount}</span>
-            </p>
-            <p className="m-0 mt-1">
-              Last event sync:{' '}
-              <span className="text-[var(--ink-strong)]">
-                {data.syncStatus?.lastSyncedAt
-                  ? new Date(data.syncStatus.lastSyncedAt).toLocaleString()
-                  : 'Not synced yet'}
-              </span>
-            </p>
-          </div>
-        </article>
-      </section>
 
       <section className="panel mt-4 rounded-[1.75rem] p-6 sm:p-8">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
