@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
+import { CalendarDays, CheckSquare, Repeat, Settings2 } from 'lucide-react'
 import type { Habit, Task } from '../db/schema'
 import {
   applyTaskFilter,
@@ -288,18 +289,18 @@ function DashboardPage() {
       {/* Quick navigation */}
       <section className="mt-6 grid grid-cols-2 gap-4 xl:grid-cols-4">
         {[
-          { title: 'Tasks', description: 'Manage and filter all your tasks.', href: '/tasks' },
-          { title: 'Habits', description: 'Track recurring routines.', href: '/habits' },
-          { title: 'Calendar', description: 'Read-only Google event context.', href: '/calendar' },
-          {
-            title: 'Settings',
-            description: 'Integrations and environment config.',
-            href: '/settings',
-          },
-        ].map(({ title, description, href }) => (
-          <a key={title} href={href} className="subpanel rounded-2xl p-5 no-underline">
-            <p className="mb-1 text-base font-semibold text-[var(--ink-strong)]">{title}</p>
-            <p className="m-0 text-sm leading-6 text-[var(--ink-soft)]">{description}</p>
+          { title: 'Tasks', icon: CheckSquare, href: '/tasks' },
+          { title: 'Habits', icon: Repeat, href: '/habits' },
+          { title: 'Calendar', icon: CalendarDays, href: '/calendar' },
+          { title: 'Settings', icon: Settings2, href: '/settings' },
+        ].map(({ title, icon: Icon, href }) => (
+          <a
+            key={title}
+            href={href}
+            className="subpanel flex items-center gap-3 rounded-2xl px-4 py-4 no-underline"
+          >
+            <Icon size={18} className="shrink-0 text-[var(--ink-soft)]" />
+            <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">{title}</p>
           </a>
         ))}
       </section>
