@@ -208,3 +208,4 @@ export type User = typeof users.$inferSelect
 export type Task = typeof tasks.$inferSelect
 export type Habit = typeof habits.$inferSelect
 export type HabitCompletion = typeof habitCompletions.$inferSelect
+export type ReminderEvent = typeof reminderEvents.$inferSelect

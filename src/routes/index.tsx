@@ -1,74 +1,30 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { CalendarDays, CheckSquare, Repeat, Settings2 } from 'lucide-react'
+import { Bell, CalendarDays, CheckSquare, Repeat, Settings2 } from 'lucide-react'
 import type { Habit, Task } from '../db/schema'
+import { getTaskTimingLabel, isTaskCompleted } from '../lib/tasks'
+import { getHabitCadenceLabel } from '../lib/habits'
+import type { ReminderItem } from '../lib/reminders'
+import { completeTask, reopenTask } from '../server/tasks'
+import { completeHabitForDate, uncompleteHabitForDate } from '../server/habits'
+import { getDashboardData } from '../server/dashboard'
 import {
-  applyTaskFilter,
-  getTaskSummary,
-  getTaskTimingLabel,
-  getTodayDateString,
-  isTaskCompleted,
-  sortTasks,
-} from '../lib/tasks'
-import {
-  applyHabitFilter,
-  getHabitCadenceLabel,
-  getHabitSummary,
-  isHabitCompletedOnDate,
-} from '../lib/habits'
-import { completeTask, listTasks, reopenTask } from '../server/tasks'
-import {
-  completeHabitForDate,
-  listHabitCompletions,
-  listHabits,
-  uncompleteHabitForDate,
-} from '../server/habits'
+  dismissReminder,
+  markReminderDelivered,
+  snoozeReminder,
+} from '../server/reminders'
 
-// ─── Query options ────────────────────────────────────────────────────────────
-
-const tasksQueryOptions = () =>
+const dashboardQueryOptions = () =>
   queryOptions({
-    queryKey: ['tasks'],
-    queryFn: () => listTasks(),
+    queryKey: ['dashboard'],
+    queryFn: () => getDashboardData(),
   })
-
-const habitsQueryOptions = () =>
-  queryOptions({
-    queryKey: ['habits'],
-    queryFn: () => listHabits(),
-  })
-
-function getCompletionsRange() {
-  const now = new Date()
-  const endDate = getTodayDateString(now)
-  const start = new Date(now)
-  start.setDate(start.getDate() - 29)
-  const startDate = getTodayDateString(start)
-  return { startDate, endDate }
-}
-
-const { startDate: COMP_START, endDate: COMP_END } = getCompletionsRange()
-
-const habitCompletionsQueryOptions = () =>
-  queryOptions({
-    queryKey: ['habit-completions', COMP_START, COMP_END],
-    queryFn: () => listHabitCompletions({ data: { startDate: COMP_START, endDate: COMP_END } }),
-  })
-
-// ─── Route ────────────────────────────────────────────────────────────────────
 
 export const Route = createFileRoute('/')({
-  loader: ({ context }) =>
-    Promise.all([
-      context.queryClient.ensureQueryData(tasksQueryOptions()),
-      context.queryClient.ensureQueryData(habitsQueryOptions()),
-      context.queryClient.ensureQueryData(habitCompletionsQueryOptions()),
-    ]),
+  loader: ({ context }) => context.queryClient.ensureQueryData(dashboardQueryOptions()),
   component: DashboardPage,
 })
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatTodayHeading() {
   return new Date().toLocaleDateString('en-US', {
@@ -78,31 +34,37 @@ function formatTodayHeading() {
   })
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
-
 function DashboardPage() {
   const queryClient = useQueryClient()
-  const { data: tasks } = useSuspenseQuery(tasksQueryOptions())
-  const { data: habits } = useSuspenseQuery(habitsQueryOptions())
-  const { data: completions } = useSuspenseQuery(habitCompletionsQueryOptions())
-
-  const today = getTodayDateString()
-  const taskSummary = getTaskSummary(tasks)
-  const habitSummary = getHabitSummary(habits, completions)
-
-  const overdueTasks = sortTasks(applyTaskFilter(tasks, 'overdue'), 'due-asc')
-  const dueTodayTasks = sortTasks(applyTaskFilter(tasks, 'today'), 'due-asc')
-  const todayHabits = applyHabitFilter(habits, completions, 'due-today')
+  const { data } = useSuspenseQuery(dashboardQueryOptions())
 
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [activeHabitId, setActiveHabitId] = useState<string | null>(null)
+  const [activeReminderId, setActiveReminderId] = useState<string | null>(null)
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      return 'unsupported'
+    }
 
-  const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ['tasks'] })
-  const invalidateHabits = () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['habits'] }),
-      queryClient.invalidateQueries({ queryKey: ['habit-completions'] }),
-    ])
+    return Notification.permission
+  })
+
+  const {
+    today,
+    taskSummary,
+    habitSummary,
+    overdueTasks,
+    dueTodayTasks,
+    todayHabits,
+    dueReminders,
+  } = data
+
+  const visibleReminders = useMemo(
+    () => dueReminders.filter((item) => !item.deliveredInAppAt),
+    [dueReminders],
+  )
+
+  const invalidateDashboard = () => queryClient.invalidateQueries({ queryKey: ['dashboard'] })
 
   const toggleTaskMutation = useMutation({
     mutationFn: async (task: Task) => {
@@ -115,14 +77,14 @@ function DashboardPage() {
     },
     onSettled: async () => {
       setActiveTaskId(null)
-      await invalidateTasks()
+      await invalidateDashboard()
     },
   })
 
   const toggleHabitMutation = useMutation({
-    mutationFn: async (habit: Habit) => {
+    mutationFn: async (habit: Habit, completedToday: boolean) => {
       setActiveHabitId(habit.id)
-      if (isHabitCompletedOnDate(habit, completions, today)) {
+      if (completedToday) {
         await uncompleteHabitForDate({ data: { habitId: habit.id, date: today } })
       } else {
         await completeHabitForDate({ data: { habitId: habit.id, date: today } })
@@ -130,15 +92,74 @@ function DashboardPage() {
     },
     onSettled: async () => {
       setActiveHabitId(null)
-      await invalidateHabits()
+      await invalidateDashboard()
     },
   })
+
+  const snoozeReminderMutation = useMutation({
+    mutationFn: async (id: string) => {
+      setActiveReminderId(id)
+      await snoozeReminder({ data: { id, minutes: 15 } })
+    },
+    onSettled: async () => {
+      setActiveReminderId(null)
+      await invalidateDashboard()
+    },
+  })
+
+  const dismissReminderMutation = useMutation({
+    mutationFn: async (id: string) => {
+      setActiveReminderId(id)
+      await dismissReminder({ data: { id } })
+    },
+    onSettled: async () => {
+      setActiveReminderId(null)
+      await invalidateDashboard()
+    },
+  })
+
+  useEffect(() => {
+    if (!visibleReminders.length) {
+      return
+    }
+
+    visibleReminders.forEach((item) => {
+      markReminderDelivered({ data: { id: item.id, channel: 'in-app' } }).catch(() => {})
+    })
+  }, [visibleReminders])
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined' ||
+      notificationPermission !== 'granted' ||
+      !('Notification' in window)
+    ) {
+      return
+    }
+
+    const browserEligible = dueReminders.filter((item) => !item.deliveredBrowserAt)
+    browserEligible.forEach((item) => {
+      new Notification(item.title, {
+        body: item.timingLabel,
+      })
+      markReminderDelivered({ data: { id: item.id, channel: 'browser' } }).catch(() => {})
+    })
+  }, [dueReminders, notificationPermission])
+
+  async function requestNotifications() {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setNotificationPermission('unsupported')
+      return
+    }
+
+    const permission = await Notification.requestPermission()
+    setNotificationPermission(permission)
+  }
 
   const hasFocusTasks = overdueTasks.length > 0 || dueTodayTasks.length > 0
 
   return (
     <main className="page-wrap px-4 pb-12 pt-10 sm:pt-14">
-      {/* Date / stats hero */}
       <section className="hero-panel relative overflow-hidden rounded-[2rem] px-6 py-8 sm:px-10 sm:py-10">
         <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.24),transparent_66%)]" />
         <div className="pointer-events-none absolute -bottom-20 -right-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(16,185,129,0.18),transparent_66%)]" />
@@ -174,9 +195,43 @@ function DashboardPage() {
         </div>
       </section>
 
-      {/* Focus panels */}
+      <section className="mt-4 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+        <ReminderPanel
+          reminders={visibleReminders}
+          permission={notificationPermission}
+          activeReminderId={activeReminderId}
+          onRequestPermission={requestNotifications}
+          onSnooze={(id) => snoozeReminderMutation.mutate(id)}
+          onDismiss={(id) => dismissReminderMutation.mutate(id)}
+        />
+
+        <section className="panel rounded-[1.75rem] p-6 sm:p-7">
+          <div className="mb-3 flex items-center gap-2">
+            <Bell size={18} className="text-[var(--ink-soft)]" />
+            <h2 className="m-0 text-lg font-semibold text-[var(--ink-strong)]">Notification status</h2>
+          </div>
+          <p className="text-sm leading-7 text-[var(--ink-soft)]">
+            {notificationPermission === 'granted'
+              ? 'Browser notifications are enabled for reminders.'
+              : notificationPermission === 'denied'
+                ? 'Browser notifications are blocked. In-app reminders will still appear.'
+                : notificationPermission === 'unsupported'
+                  ? 'Browser notifications are not available in this environment.'
+                  : 'Enable browser notifications to receive reminders outside the app view.'}
+          </p>
+          {notificationPermission === 'default' ? (
+            <button
+              type="button"
+              onClick={requestNotifications}
+              className="primary-pill mt-2 cursor-pointer border-0 text-sm font-semibold"
+            >
+              Enable notifications
+            </button>
+          ) : null}
+        </section>
+      </section>
+
       <div className="mt-6 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-        {/* Tasks to action */}
         <section className="panel rounded-[1.75rem] p-6 sm:p-7">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="m-0 text-lg font-semibold text-[var(--ink-strong)]">Tasks to action</h2>
@@ -189,9 +244,7 @@ function DashboardPage() {
           </div>
 
           {!hasFocusTasks ? (
-            <p className="text-sm leading-7 text-[var(--ink-soft)]">
-              No overdue or due-today tasks.
-            </p>
+            <p className="text-sm leading-7 text-[var(--ink-soft)]">No overdue or due-today tasks.</p>
           ) : (
             <div className="space-y-2">
               {overdueTasks.length > 0 ? (
@@ -231,7 +284,6 @@ function DashboardPage() {
           )}
         </section>
 
-        {/* Habits today */}
         <section className="panel rounded-[1.75rem] p-6 sm:p-7">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="m-0 text-lg font-semibold text-[var(--ink-strong)]">Habits today</h2>
@@ -247,34 +299,31 @@ function DashboardPage() {
             <p className="text-sm leading-7 text-[var(--ink-soft)]">No habits due today.</p>
           ) : (
             <div className="space-y-2">
-              {todayHabits.map((habit) => {
-                const done = isHabitCompletedOnDate(habit, completions, today)
-                return (
-                  <article
-                    key={habit.id}
-                    className={`subpanel flex items-center justify-between gap-3 rounded-2xl px-4 py-3 transition-opacity ${done ? 'opacity-60' : ''}`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p
-                        className={`m-0 text-sm font-semibold ${done ? 'line-through text-[var(--ink-soft)]' : 'text-[var(--ink-strong)]'}`}
-                      >
-                        {habit.title}
-                      </p>
-                      <p className="m-0 mt-0.5 text-xs text-[var(--ink-soft)]">
-                        {getHabitCadenceLabel(habit)}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => toggleHabitMutation.mutate(habit)}
-                      disabled={activeHabitId === habit.id}
-                      className="shrink-0 cursor-pointer text-xs font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+              {todayHabits.map(({ habit, completedToday }) => (
+                <article
+                  key={habit.id}
+                  className={`subpanel flex items-center justify-between gap-3 rounded-2xl px-4 py-3 transition-opacity ${completedToday ? 'opacity-60' : ''}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className={`m-0 text-sm font-semibold ${completedToday ? 'line-through text-[var(--ink-soft)]' : 'text-[var(--ink-strong)]'}`}
                     >
-                      {done ? 'Undo' : 'Done'}
-                    </button>
-                  </article>
-                )
-              })}
+                      {habit.title}
+                    </p>
+                    <p className="m-0 mt-0.5 text-xs text-[var(--ink-soft)]">
+                      {getHabitCadenceLabel(habit)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => toggleHabitMutation.mutate(habit, completedToday)}
+                    disabled={activeHabitId === habit.id}
+                    className="shrink-0 cursor-pointer text-xs font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {completedToday ? 'Undo' : 'Done'}
+                  </button>
+                </article>
+              ))}
             </div>
           )}
 
@@ -286,7 +335,6 @@ function DashboardPage() {
         </section>
       </div>
 
-      {/* Quick navigation */}
       <section className="mt-6 grid grid-cols-2 gap-4 xl:grid-cols-4">
         {[
           { title: 'Tasks', icon: CheckSquare, href: '/tasks' },
@@ -308,7 +356,76 @@ function DashboardPage() {
   )
 }
 
-// ─── DashboardTaskRow ─────────────────────────────────────────────────────────
+function ReminderPanel({
+  reminders,
+  permission,
+  activeReminderId,
+  onRequestPermission,
+  onSnooze,
+  onDismiss,
+}: {
+  reminders: Array<ReminderItem>
+  permission: NotificationPermission | 'unsupported'
+  activeReminderId: string | null
+  onRequestPermission: () => void
+  onSnooze: (id: string) => void
+  onDismiss: (id: string) => void
+}) {
+  return (
+    <section className="panel rounded-[1.75rem] p-6 sm:p-7">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Bell size={18} className="text-[var(--ink-soft)]" />
+          <h2 className="m-0 text-lg font-semibold text-[var(--ink-strong)]">Reminders</h2>
+        </div>
+        {permission === 'default' ? (
+          <button
+            type="button"
+            onClick={onRequestPermission}
+            className="secondary-pill cursor-pointer border-0 text-sm font-semibold"
+          >
+            Enable browser alerts
+          </button>
+        ) : null}
+      </div>
+
+      {reminders.length === 0 ? (
+        <p className="text-sm leading-7 text-[var(--ink-soft)]">No reminders are due right now.</p>
+      ) : (
+        <div className="space-y-3">
+          {reminders.map((item) => (
+            <article key={item.id} className="subpanel rounded-2xl px-4 py-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">{item.title}</p>
+                  <p className="m-0 mt-1 text-xs text-[var(--ink-soft)]">{item.timingLabel}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onSnooze(item.id)}
+                    disabled={activeReminderId === item.id}
+                    className="secondary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Snooze 15m
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDismiss(item.id)}
+                    disabled={activeReminderId === item.id}
+                    className="secondary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
 
 function DashboardTaskRow({
   task,
