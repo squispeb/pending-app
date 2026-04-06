@@ -153,10 +153,7 @@ function SettingsPage() {
 
       <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
         <article className="panel rounded-[1.75rem] p-6 sm:p-8">
-          <p className="island-kicker mb-3">Milestone 4</p>
-          <h1 className="display-title mb-4 text-4xl font-bold text-[var(--ink-strong)]">
-            Settings and integrations
-          </h1>
+          <h1 className="display-title mb-4 text-3xl font-bold text-[var(--ink-strong)]">Settings</h1>
           <p className="max-w-3xl text-base leading-7 text-[var(--ink-soft)]">
             {renderConnectionCopy()}
           </p>
@@ -229,7 +226,7 @@ function SettingsPage() {
             </>
           )}
 
-          <div className="mt-5 rounded-2xl border border-[var(--line)] bg-[var(--panel-alt)] px-4 py-4 text-sm leading-7 text-[var(--ink-soft)]">
+          <div className="subpanel mt-5 rounded-2xl px-4 py-4 text-sm leading-7 text-[var(--ink-soft)]">
             <p className="m-0 font-semibold text-[var(--ink-strong)]">Current integration state</p>
             <p className="m-0 mt-2">
               {data.account ? (
@@ -258,7 +255,6 @@ function SettingsPage() {
       <section className="panel mt-4 rounded-[1.75rem] p-6 sm:p-8">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="island-kicker mb-2">Calendar selection</p>
             <h2 className="m-0 text-2xl font-semibold text-[var(--ink-strong)]">Choose planning calendars</h2>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--ink-soft)]">
               Visible calendars are selected automatically on first connect. Hidden calendars stay available to inspect but do not affect planning until you opt in.
@@ -303,7 +299,7 @@ function SettingsPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-[var(--ink-strong)]">{calendar.calendarName}</span>
                       {calendar.primaryFlag ? (
-                        <span className="rounded-full bg-[var(--panel-soft)] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--ink-soft)]">
+                        <span className="rounded-full bg-[var(--surface-inset)] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--ink-soft)]">
                           Primary
                         </span>
                       ) : null}
