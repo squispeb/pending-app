@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import type { Database } from '../db/client'
-import { tasks, users } from '../db/schema'
+import { tasks } from '../db/schema'
 import {
   normalizeTaskValuesForStorage,
   taskCreateSchema,
@@ -8,41 +8,13 @@ import {
   type CreateTaskInput,
   type UpdateTaskInput,
 } from '../lib/tasks'
-
-export const DEFAULT_USER = {
-  id: 'local-user',
-  email: 'local@pending.app',
-  displayName: 'Local User',
-  timezone: 'UTC',
-} as const
+import { ensureDefaultUser } from './default-user'
 
 export function createTasksService(database: Database) {
-  async function ensureDefaultUser() {
-    const existing = await database.query.users.findFirst({
-      where: eq(users.id, DEFAULT_USER.id),
-    })
-
-    if (existing) {
-      return existing
-    }
-
-    await database.insert(users).values(DEFAULT_USER).onConflictDoNothing()
-
-    const created = await database.query.users.findFirst({
-      where: eq(users.id, DEFAULT_USER.id),
-    })
-
-    if (!created) {
-      throw new Error('Failed to initialize the local user')
-    }
-
-    return created
-  }
-
   return {
-    ensureDefaultUser,
+    ensureDefaultUser: () => ensureDefaultUser(database),
     async listTasks() {
-      const user = await ensureDefaultUser()
+      const user = await ensureDefaultUser(database)
 
       return database.query.tasks.findMany({
         where: and(eq(tasks.userId, user.id), isNull(tasks.archivedAt)),
@@ -51,7 +23,7 @@ export function createTasksService(database: Database) {
     },
     async createTask(input: CreateTaskInput) {
       const data = taskCreateSchema.parse(input)
-      const user = await ensureDefaultUser()
+      const user = await ensureDefaultUser(database)
       const now = new Date()
 
       await database.insert(tasks).values({
@@ -66,7 +38,7 @@ export function createTasksService(database: Database) {
     },
     async updateTask(input: UpdateTaskInput) {
       const data = taskUpdateSchema.parse(input)
-      const user = await ensureDefaultUser()
+      const user = await ensureDefaultUser(database)
 
       await database
         .update(tasks)
@@ -85,7 +57,7 @@ export function createTasksService(database: Database) {
       return { ok: true as const }
     },
     async completeTask(id: string) {
-      const user = await ensureDefaultUser()
+      const user = await ensureDefaultUser(database)
 
       await database
         .update(tasks)
@@ -99,7 +71,7 @@ export function createTasksService(database: Database) {
       return { ok: true as const }
     },
     async reopenTask(id: string) {
-      const user = await ensureDefaultUser()
+      const user = await ensureDefaultUser(database)
 
       await database
         .update(tasks)
@@ -113,7 +85,7 @@ export function createTasksService(database: Database) {
       return { ok: true as const }
     },
     async archiveTask(id: string) {
-      const user = await ensureDefaultUser()
+      const user = await ensureDefaultUser(database)
 
       await database
         .update(tasks)

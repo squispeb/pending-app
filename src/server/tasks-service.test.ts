@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { drizzle } from 'drizzle-orm/libsql'
 import { sql } from 'drizzle-orm'
 import * as schema from '../db/schema'
-import { createTasksService, DEFAULT_USER } from './tasks-service'
+import { createTasksService } from './tasks-service'
+import { DEFAULT_USER } from './default-user'
 
 function makeDatabase() {
   const client = createClient({ url: ':memory:' })
