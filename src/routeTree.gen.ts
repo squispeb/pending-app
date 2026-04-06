@@ -14,6 +14,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as HabitsRouteImport } from './routes/habits'
 import { Route as CalendarRouteImport } from './routes/calendar'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthGoogleCallbackRouteImport } from './routes/auth/google/callback'
 
 const TasksRoute = TasksRouteImport.update({
   id: '/tasks',
@@ -40,6 +41,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthGoogleCallbackRoute = AuthGoogleCallbackRouteImport.update({
+  id: '/auth/google/callback',
+  path: '/auth/google/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   '/habits': typeof HabitsRoute
   '/settings': typeof SettingsRoute
   '/tasks': typeof TasksRoute
+  '/auth/google/callback': typeof AuthGoogleCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   '/habits': typeof HabitsRoute
   '/settings': typeof SettingsRoute
   '/tasks': typeof TasksRoute
+  '/auth/google/callback': typeof AuthGoogleCallbackRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,13 +70,33 @@ export interface FileRoutesById {
   '/habits': typeof HabitsRoute
   '/settings': typeof SettingsRoute
   '/tasks': typeof TasksRoute
+  '/auth/google/callback': typeof AuthGoogleCallbackRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/calendar' | '/habits' | '/settings' | '/tasks'
+  fullPaths:
+    | '/'
+    | '/calendar'
+    | '/habits'
+    | '/settings'
+    | '/tasks'
+    | '/auth/google/callback'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/calendar' | '/habits' | '/settings' | '/tasks'
-  id: '__root__' | '/' | '/calendar' | '/habits' | '/settings' | '/tasks'
+  to:
+    | '/'
+    | '/calendar'
+    | '/habits'
+    | '/settings'
+    | '/tasks'
+    | '/auth/google/callback'
+  id:
+    | '__root__'
+    | '/'
+    | '/calendar'
+    | '/habits'
+    | '/settings'
+    | '/tasks'
+    | '/auth/google/callback'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -77,6 +105,7 @@ export interface RootRouteChildren {
   HabitsRoute: typeof HabitsRoute
   SettingsRoute: typeof SettingsRoute
   TasksRoute: typeof TasksRoute
+  AuthGoogleCallbackRoute: typeof AuthGoogleCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -116,6 +145,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth/google/callback': {
+      id: '/auth/google/callback'
+      path: '/auth/google/callback'
+      fullPath: '/auth/google/callback'
+      preLoaderRoute: typeof AuthGoogleCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -125,6 +161,7 @@ const rootRouteChildren: RootRouteChildren = {
   HabitsRoute: HabitsRoute,
   SettingsRoute: SettingsRoute,
   TasksRoute: TasksRoute,
+  AuthGoogleCallbackRoute: AuthGoogleCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
