@@ -24,6 +24,12 @@ export const dismissReminder = createServerFn({ method: 'POST' })
     return remindersService.dismissReminder(data.id)
   })
 
+export const deferReminder = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string; minutes?: number }) => input)
+  .handler(async ({ data }) => {
+    return remindersService.deferReminder(data.id, data.minutes)
+  })
+
 export const markReminderDelivered = createServerFn({ method: 'POST' })
   .inputValidator((input: { id: string; channel: 'in-app' | 'browser' }) => input)
   .handler(async ({ data }) => {

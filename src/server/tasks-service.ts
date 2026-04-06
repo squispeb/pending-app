@@ -98,5 +98,28 @@ export function createTasksService(database: Database) {
 
       return { ok: true as const }
     },
+    async deferTaskReminder(id: string, minutes = 30, now = new Date()) {
+      const user = await ensureDefaultUser(database)
+      const task = await database.query.tasks.findFirst({
+        where: and(eq(tasks.id, id), eq(tasks.userId, user.id), isNull(tasks.archivedAt)),
+      })
+
+      if (!task) {
+        throw new Error('Task not found')
+      }
+
+      const baseTime = task.reminderAt && task.reminderAt.getTime() > now.getTime() ? task.reminderAt : now
+      const nextReminder = new Date(baseTime.getTime() + minutes * 60_000)
+
+      await database
+        .update(tasks)
+        .set({
+          reminderAt: nextReminder,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(tasks.id, id), eq(tasks.userId, user.id), isNull(tasks.archivedAt)))
+
+      return { ok: true as const, reminderAt: nextReminder }
+    },
   }
 }

@@ -157,4 +157,29 @@ describe('tasks service', () => {
     const remaining = await service.listTasks()
     expect(remaining).toHaveLength(0)
   })
+
+  it('defers a task reminder forward', async () => {
+    await service.createTask({
+      title: 'Review invoices',
+      notes: '',
+      priority: 'medium',
+      dueDate: '2026-04-04',
+      dueTime: '',
+      reminderAt: '2026-04-04T09:00',
+      estimatedMinutes: undefined,
+      preferredStartTime: '',
+      preferredEndTime: '',
+    })
+
+    const [task] = await service.listTasks()
+
+    const result = await service.deferTaskReminder(
+      task!.id,
+      30,
+      new Date('2026-04-04T09:15:00'),
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.reminderAt.getTime()).toBe(new Date('2026-04-04T09:15:00').getTime() + 30 * 60_000)
+  })
 })

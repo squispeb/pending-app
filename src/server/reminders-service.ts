@@ -12,8 +12,11 @@ import {
   type ReminderSourceType,
 } from '../lib/reminders'
 import { getTodayDateString } from '../lib/tasks'
+import { createTasksService } from './tasks-service'
 
 export function createRemindersService(database: Database) {
+  const tasksService = createTasksService(database)
+
   return {
     ensureDefaultUser: () => ensureDefaultUser(database),
     async syncReminderEvents(now = new Date()) {
@@ -126,6 +129,29 @@ export function createRemindersService(database: Database) {
       await database
         .update(reminderEvents)
         .set({ dismissedAt: new Date(), updatedAt: new Date() })
+        .where(eq(reminderEvents.id, id))
+
+      return { ok: true as const }
+    },
+    async deferReminder(id: string, minutes = 30) {
+      const user = await ensureDefaultUser(database)
+      const event = await database.query.reminderEvents.findFirst({
+        where: and(eq(reminderEvents.id, id), eq(reminderEvents.userId, user.id)),
+      })
+
+      if (!event) {
+        throw new Error('Reminder not found')
+      }
+
+      if (event.sourceType !== 'task') {
+        throw new Error('Only task reminders can be deferred')
+      }
+
+      await tasksService.deferTaskReminder(event.sourceId, minutes)
+
+      await database
+        .update(reminderEvents)
+        .set({ completedViaReminderAt: new Date(), updatedAt: new Date() })
         .where(eq(reminderEvents.id, id))
 
       return { ok: true as const }

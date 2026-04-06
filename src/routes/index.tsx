@@ -10,6 +10,7 @@ import { completeTask, reopenTask } from '../server/tasks'
 import { completeHabitForDate, uncompleteHabitForDate } from '../server/habits'
 import { getDashboardData } from '../server/dashboard'
 import {
+  deferReminder,
   dismissReminder,
   markReminderDelivered,
   snoozeReminder,
@@ -118,6 +119,17 @@ function DashboardPage() {
     },
   })
 
+  const deferReminderMutation = useMutation({
+    mutationFn: async (id: string) => {
+      setActiveReminderId(id)
+      await deferReminder({ data: { id, minutes: 30 } })
+    },
+    onSettled: async () => {
+      setActiveReminderId(null)
+      await invalidateDashboard()
+    },
+  })
+
   useEffect(() => {
     if (!visibleReminders.length) {
       return
@@ -202,6 +214,7 @@ function DashboardPage() {
           activeReminderId={activeReminderId}
           onRequestPermission={requestNotifications}
           onSnooze={(id) => snoozeReminderMutation.mutate(id)}
+          onDefer={(id) => deferReminderMutation.mutate(id)}
           onDismiss={(id) => dismissReminderMutation.mutate(id)}
         />
 
@@ -362,6 +375,7 @@ function ReminderPanel({
   activeReminderId,
   onRequestPermission,
   onSnooze,
+  onDefer,
   onDismiss,
 }: {
   reminders: Array<ReminderItem>
@@ -369,6 +383,7 @@ function ReminderPanel({
   activeReminderId: string | null
   onRequestPermission: () => void
   onSnooze: (id: string) => void
+  onDefer: (id: string) => void
   onDismiss: (id: string) => void
 }) {
   return (
@@ -409,6 +424,16 @@ function ReminderPanel({
                   >
                     Snooze 15m
                   </button>
+                  {item.sourceType === 'task' ? (
+                    <button
+                      type="button"
+                      onClick={() => onDefer(item.id)}
+                      disabled={activeReminderId === item.id}
+                      className="secondary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Defer 30m
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => onDismiss(item.id)}

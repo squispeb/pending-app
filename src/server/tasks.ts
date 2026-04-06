@@ -38,3 +38,9 @@ export const archiveTask = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     return tasksService.archiveTask(data.id)
   })
+
+export const deferTaskReminder = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string; minutes?: number }) => input)
+  .handler(async ({ data }) => {
+    return tasksService.deferTaskReminder(data.id, data.minutes)
+  })
