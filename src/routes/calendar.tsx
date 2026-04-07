@@ -38,6 +38,15 @@ function formatEventTimeRange(start: Date, end: Date, allDay: boolean) {
   })}`
 }
 
+function formatRelativeSyncTime(syncedAt: Date, now: Date): string {
+  const diffMins = Math.floor((now.getTime() - syncedAt.getTime()) / 60_000)
+  if (diffMins < 1) return 'Just synced'
+  if (diffMins < 60) return `Synced ${diffMins}m ago`
+  const diffHours = Math.floor(diffMins / 60)
+  if (diffHours < 24) return `Synced ${diffHours}h ago`
+  return `Synced ${Math.floor(diffHours / 24)}d ago`
+}
+
 function getDayLabel(eventStart: Date, now: Date): string {
   const todayStr = getTodayDateString(now)
   const eventDayStr = getTodayDateString(eventStart)
@@ -188,71 +197,64 @@ function CalendarPage() {
     return null
   }, [upcomingGroups, now])
 
-  function renderStatusCopy() {
-    if (!data.account) {
-      return 'Connect Google Calendar in Settings to bring your meetings here.'
-    }
-    if (data.account.status === 'disconnected') {
-      return 'Google Calendar is disconnected. Cached meetings stay visible until you reconnect.'
-    }
-    if (data.syncStatus?.lastSyncedAt) {
-      return `Connected as ${data.account.email}. Last synced ${new Date(data.syncStatus.lastSyncedAt).toLocaleString()}.`
-    }
-    return `Connected as ${data.account.email}. Run a sync to import your upcoming meetings.`
-  }
-
   const liveDate = now.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
+    weekday: 'short',
+    month: 'short',
     day: 'numeric',
   })
   const liveTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 
+  const syncLabel = !data.account
+    ? null
+    : data.account.status === 'disconnected'
+      ? 'Disconnected'
+      : data.syncStatus?.lastSyncedAt
+        ? formatRelativeSyncTime(new Date(data.syncStatus.lastSyncedAt), now)
+        : 'Never synced'
+
   return (
     <main className="page-wrap px-4 pb-12 pt-10">
-      <article className="panel rounded-[1.75rem] p-6 sm:p-8">
-        <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h1 className="display-title m-0 text-3xl font-bold text-[var(--ink-strong)]">Calendar</h1>
-          <span className="text-base text-[var(--ink-soft)]">
-            {liveDate} · {liveTime}
-          </span>
-        </div>
-        <p className="max-w-3xl text-base leading-7 text-[var(--ink-soft)]">{renderStatusCopy()}</p>
-
-        <div className="mt-6 flex flex-wrap gap-3">
-          <button
-            type="button"
-            disabled={
-              data.account?.status !== 'connected' ||
-              data.selectedCalendars.length === 0 ||
-              syncMutation.isPending
-            }
-            onClick={() => syncMutation.mutate()}
-            className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <span className="inline-flex items-center gap-2">
-              <RefreshCw size={16} className={syncMutation.isPending ? 'animate-spin' : ''} />
-              Sync now
-            </span>
-          </button>
-
-          <a
-            href="/settings"
-            className="secondary-pill inline-flex cursor-pointer items-center gap-2 border-0 text-sm font-semibold no-underline"
-          >
-            <Settings2 size={16} />
-            Manage calendars
-          </a>
+      <article className="panel rounded-[1.75rem] px-5 py-4 sm:px-6 sm:py-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="display-title m-0 text-3xl font-bold text-[var(--ink-strong)]">Calendar</h1>
+            <p className="m-0 mt-1 text-sm leading-5 text-[var(--ink-soft)]">
+              {liveDate} · {liveTime}
+              {syncLabel ? <> · {syncLabel}</> : null}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 pt-1">
+            <button
+              type="button"
+              disabled={
+                data.account?.status !== 'connected' ||
+                data.selectedCalendars.length === 0 ||
+                syncMutation.isPending
+              }
+              onClick={() => syncMutation.mutate()}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border-0 bg-[var(--brand)] px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={syncMutation.isPending ? 'animate-spin' : ''} />
+              Sync
+            </button>
+            <a
+              href="/settings"
+              title="Manage calendars"
+              className="flex size-8 items-center justify-center rounded-full text-[var(--ink-soft)] no-underline transition hover:bg-[var(--surface-inset)] hover:text-[var(--ink-strong)]"
+            >
+              <Settings2 size={16} />
+            </a>
+          </div>
         </div>
 
         {syncMutation.error instanceof Error ? (
-          <p className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm leading-6 text-red-400">
+          <p className="mt-3 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm leading-6 text-red-400">
             {syncMutation.error.message}
           </p>
         ) : null}
 
         {data.syncStatus?.lastError ? (
-          <p className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm leading-6 text-amber-300">
+          <p className="mt-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm leading-6 text-amber-300">
             {data.syncStatus.lastError}
           </p>
         ) : null}
