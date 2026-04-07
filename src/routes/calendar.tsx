@@ -139,6 +139,8 @@ function CalendarPage() {
   const [showPastToday, setShowPastToday] = useState(false)
 
   useEffect(() => {
+    // Correct stale SSR-rendered time immediately on mount, then tick every 60s
+    setNow(new Date())
     const id = setInterval(() => setNow(new Date()), 60_000)
     return () => clearInterval(id)
   }, [])
