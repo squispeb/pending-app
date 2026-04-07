@@ -175,7 +175,6 @@ function DashboardPage() {
       <section className="hero-panel relative overflow-hidden rounded-[2rem] px-6 py-8 sm:px-10 sm:py-10">
         <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.24),transparent_66%)]" />
         <div className="pointer-events-none absolute -bottom-20 -right-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(16,185,129,0.18),transparent_66%)]" />
-        <p className="island-kicker mb-3">Today</p>
         <h1 className="display-title mb-6 text-3xl font-bold tracking-tight text-[var(--ink-strong)] sm:text-4xl">
           {formatTodayHeading()}
         </h1>
@@ -207,7 +206,7 @@ function DashboardPage() {
         </div>
       </section>
 
-      <section className="mt-4 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+      <div className="mt-4">
         <ReminderPanel
           reminders={visibleReminders}
           permission={notificationPermission}
@@ -217,32 +216,7 @@ function DashboardPage() {
           onDefer={(id) => deferReminderMutation.mutate(id)}
           onDismiss={(id) => dismissReminderMutation.mutate(id)}
         />
-
-        <section className="panel rounded-[1.75rem] p-6 sm:p-7">
-          <div className="mb-3 flex items-center gap-2">
-            <Bell size={18} className="text-[var(--ink-soft)]" />
-            <h2 className="m-0 text-lg font-semibold text-[var(--ink-strong)]">Notification status</h2>
-          </div>
-          <p className="text-sm leading-7 text-[var(--ink-soft)]">
-            {notificationPermission === 'granted'
-              ? 'Browser notifications are enabled for reminders.'
-              : notificationPermission === 'denied'
-                ? 'Browser notifications are blocked. In-app reminders will still appear.'
-                : notificationPermission === 'unsupported'
-                  ? 'Browser notifications are not available in this environment.'
-                  : 'Enable browser notifications to receive reminders outside the app view.'}
-          </p>
-          {notificationPermission === 'default' ? (
-            <button
-              type="button"
-              onClick={requestNotifications}
-              className="primary-pill mt-2 cursor-pointer border-0 text-sm font-semibold"
-            >
-              Enable notifications
-            </button>
-          ) : null}
-        </section>
-      </section>
+      </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
         <section className="panel rounded-[1.75rem] p-6 sm:p-7">
