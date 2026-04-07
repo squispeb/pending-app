@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { CalendarDays, CloudOff, RefreshCw, Settings2 } from 'lucide-react'
+import { RefreshCw, Settings2 } from 'lucide-react'
 import { getCalendarView, syncGoogleCalendar } from '../server/calendar'
 
 const calendarViewQueryOptions = () =>
@@ -68,93 +68,65 @@ function CalendarPage() {
     return Array.from(groups.entries())
   }, [data.events])
 
+  function renderStatusCopy() {
+    if (!data.account) {
+      return 'Connect Google Calendar in Settings to bring your meetings here.'
+    }
+    if (data.account.status === 'disconnected') {
+      return 'Google Calendar is disconnected. Cached meetings stay visible until you reconnect.'
+    }
+    if (data.syncStatus?.lastSyncedAt) {
+      return `Connected as ${data.account.email}. Last synced ${new Date(data.syncStatus.lastSyncedAt).toLocaleString()}.`
+    }
+    return `Connected as ${data.account.email}. Run a sync to import your upcoming meetings.`
+  }
+
   return (
     <main className="page-wrap px-4 pb-12 pt-10">
-      <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-        <article className="panel rounded-[1.75rem] p-6 sm:p-8">
-          <p className="island-kicker mb-3">Milestone 4</p>
-          <h1 className="display-title mb-4 text-4xl font-bold text-[var(--ink-strong)]">
-            Calendar context
-          </h1>
-          <p className="max-w-3xl text-base leading-7 text-[var(--ink-soft)]">
-            Read-only Google Calendar snapshots live here. The app only shows selected calendars and never writes back to Google.
+      <article className="panel rounded-[1.75rem] p-6 sm:p-8">
+        <h1 className="display-title mb-4 text-3xl font-bold text-[var(--ink-strong)]">Calendar</h1>
+        <p className="max-w-3xl text-base leading-7 text-[var(--ink-soft)]">
+          {renderStatusCopy()}
+        </p>
+
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            type="button"
+            disabled={
+              data.account?.status !== 'connected' ||
+              data.selectedCalendars.length === 0 ||
+              syncMutation.isPending
+            }
+            onClick={() => syncMutation.mutate()}
+            className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <span className="inline-flex items-center gap-2">
+              <RefreshCw size={16} className={syncMutation.isPending ? 'animate-spin' : ''} />
+              Sync now
+            </span>
+          </button>
+
+          <a
+            href="/settings"
+            className="secondary-pill inline-flex cursor-pointer items-center gap-2 border-0 text-sm font-semibold no-underline"
+          >
+            <Settings2 size={16} />
+            Manage calendars
+          </a>
+        </div>
+
+        {syncMutation.error instanceof Error ? (
+          <p className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm leading-6 text-red-400">
+            {syncMutation.error.message}
           </p>
+        ) : null}
 
-          <div className="mt-6 flex flex-wrap gap-3">
-            <button
-              type="button"
-              disabled={
-                data.account?.status !== 'connected' ||
-                data.selectedCalendars.length === 0 ||
-                syncMutation.isPending
-              }
-              onClick={() => syncMutation.mutate()}
-              className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <span className="inline-flex items-center gap-2">
-                <RefreshCw size={16} className={syncMutation.isPending ? 'animate-spin' : ''} />
-                Sync now
-              </span>
-            </button>
-
-            <a
-              href="/settings"
-              className="secondary-pill inline-flex cursor-pointer items-center gap-2 border-0 text-sm font-semibold no-underline"
-            >
-              <Settings2 size={16} />
-              Manage calendars
-            </a>
-          </div>
-        </article>
-
-        <article className="panel rounded-[1.75rem] p-6 sm:p-8">
-          <div className="mb-3 flex items-center gap-2">
-            {data.syncStatus?.isStale ? (
-              <CloudOff size={18} className="text-amber-400" />
-            ) : (
-              <CalendarDays size={18} className="text-emerald-400" />
-            )}
-            <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">Sync status</p>
-          </div>
-
-          <p className="text-sm leading-7 text-[var(--ink-soft)]">
-            {data.syncStatus?.disconnected
-              ? 'Google is disconnected. Cached meetings stay visible until you reconnect and refresh.'
-              : data.syncStatus?.lastSyncedAt
-                ? `Last synced ${new Date(data.syncStatus.lastSyncedAt).toLocaleString()}.`
-                : 'No calendar event sync has run yet.'}
+        {data.syncStatus?.lastError ? (
+          <p className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm leading-6 text-amber-300">
+            {data.syncStatus.lastError}
           </p>
-
-          {syncMutation.error instanceof Error ? (
-            <p className="mt-3 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm leading-6 text-red-400">
-              {syncMutation.error.message}
-            </p>
-          ) : null}
-
-          {data.syncStatus?.lastError ? (
-            <p className="mt-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm leading-6 text-amber-300">
-              {data.syncStatus.lastError}
-            </p>
-          ) : null}
-
-          <div className="mt-4 rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-4 text-sm leading-7 text-[var(--ink-soft)]">
-            <p className="m-0">
-              Selected calendars:{' '}
-              <span className="text-[var(--ink-strong)]">{data.selectedCalendars.length}</span>
-            </p>
-            <p className="m-0 mt-1">
-              Cached events: <span className="text-[var(--ink-strong)]">{data.events.length}</span>
-            </p>
-            <p className="m-0 mt-1">
-              Window:{' '}
-              <span className="text-[var(--ink-strong)]">
-                {formatEventDate(new Date(data.planningWindow.start))} to{' '}
-                {formatEventDate(new Date(data.planningWindow.end))}
-              </span>
-            </p>
-          </div>
-        </article>
-      </section>
+        ) : null}
+      </article>
 
       <section className="panel mt-4 rounded-[1.75rem] p-6 sm:p-8">
         <h2 className="m-0 text-2xl font-semibold text-[var(--ink-strong)]">Upcoming meetings</h2>
