@@ -104,9 +104,12 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
   `)
 }
 
-function makeGoogleApi(): GoogleIntegrationApi {
-  let calendarListVersion = 1
+type GoogleApiControls = {
+  calendarListVersion: number
+  eventVersion: number
+}
 
+function makeGoogleApi(controls: GoogleApiControls): GoogleIntegrationApi {
   return {
     buildAuthUrl(userId) {
       return `https://accounts.example.test/connect?user=${userId}`
@@ -141,8 +144,8 @@ function makeGoogleApi(): GoogleIntegrationApi {
       }
     },
     async fetchCalendarList() {
-      if (calendarListVersion === 1) {
-        calendarListVersion = 2
+      if (controls.calendarListVersion === 1) {
+        controls.calendarListVersion = 2
         return [
           {
             calendarId: 'primary',
@@ -186,6 +189,72 @@ function makeGoogleApi(): GoogleIntegrationApi {
         },
       ]
     },
+    async fetchCalendarEvents(_accessToken, calendarId) {
+      if (controls.eventVersion === 1) {
+        if (calendarId === 'primary') {
+          return [
+            {
+              googleEventId: 'primary-meeting-1',
+              googleRecurringEventId: null,
+              status: 'confirmed',
+              summary: 'Primary kickoff',
+              description: null,
+              location: 'Room A',
+              startsAt: new Date('2026-04-07T16:00:00.000Z'),
+              endsAt: new Date('2026-04-07T17:00:00.000Z'),
+              allDay: false,
+              eventTimezone: 'UTC',
+              htmlLink: 'https://calendar.google.com/event?eid=primary-meeting-1',
+              organizerEmail: 'owner@example.com',
+              attendeeCount: 2,
+              updatedAtRemote: new Date('2026-04-06T10:00:00.000Z'),
+            },
+          ]
+        }
+
+        return [
+          {
+            googleEventId: 'team-offsite',
+            googleRecurringEventId: null,
+            status: 'confirmed',
+            summary: 'Team offsite',
+            description: null,
+            location: null,
+            startsAt: new Date('2026-04-08T12:00:00.000Z'),
+            endsAt: new Date('2026-04-09T12:00:00.000Z'),
+            allDay: true,
+            eventTimezone: 'UTC',
+            htmlLink: null,
+            organizerEmail: 'team@example.com',
+            attendeeCount: 6,
+            updatedAtRemote: new Date('2026-04-06T12:00:00.000Z'),
+          },
+        ]
+      }
+
+      if (calendarId === 'primary') {
+        return [
+          {
+            googleEventId: 'primary-meeting-2',
+            googleRecurringEventId: null,
+            status: 'confirmed',
+            summary: 'Updated planning review',
+            description: null,
+            location: 'Room B',
+            startsAt: new Date('2026-04-09T15:00:00.000Z'),
+            endsAt: new Date('2026-04-09T15:30:00.000Z'),
+            allDay: false,
+            eventTimezone: 'UTC',
+            htmlLink: null,
+            organizerEmail: 'owner@example.com',
+            attendeeCount: 3,
+            updatedAtRemote: new Date('2026-04-08T08:00:00.000Z'),
+          },
+        ]
+      }
+
+      return []
+    },
   }
 }
 
@@ -193,13 +262,18 @@ describe('calendar service', () => {
   let client: ReturnType<typeof createClient>
   let db: ReturnType<typeof drizzle<typeof schema>>
   let service: ReturnType<typeof createCalendarService>
+  let controls: GoogleApiControls
 
   beforeEach(async () => {
     const database = makeDatabase()
     client = database.client
     db = database.db
     await createSchema(db)
-    service = createCalendarService(db, makeGoogleApi())
+    controls = {
+      calendarListVersion: 1,
+      eventVersion: 1,
+    }
+    service = createCalendarService(db, makeGoogleApi(controls))
   })
 
   it('starts the connect flow for the default user', async () => {
@@ -259,5 +333,37 @@ describe('calendar service', () => {
     expect(account?.accessToken).toBeNull()
     expect(account?.refreshToken).toBeNull()
     expect(account?.disconnectedAt).toBeInstanceOf(Date)
+  })
+
+  it('syncs selected calendars into local read-only event snapshots', async () => {
+    await service.completeGoogleConnect('code', 'state')
+
+    const result = await service.syncSelectedCalendarEvents(new Date('2026-04-07T09:00:00.000Z'))
+
+    expect(result.ok).toBe(true)
+    expect(result.calendarCount).toBe(2)
+    expect(result.eventCount).toBe(2)
+
+    const page = await service.getCalendarViewData(new Date('2026-04-07T09:00:00.000Z'))
+
+    expect(page.events.map((event) => [event.calendarId, event.summary])).toEqual([
+      ['primary', 'Primary kickoff'],
+      ['team', 'Team offsite'],
+    ])
+    expect(page.syncStatus?.lastStatus).toBe('success')
+    expect(page.syncStatus?.lastSyncedAt).toBeInstanceOf(Date)
+  })
+
+  it('replaces cached events on a later full sync instead of appending duplicates', async () => {
+    await service.completeGoogleConnect('code', 'state')
+    await service.syncSelectedCalendarEvents(new Date('2026-04-07T09:00:00.000Z'))
+
+    controls.eventVersion = 2
+    await service.syncSelectedCalendarEvents(new Date('2026-04-09T09:00:00.000Z'))
+
+    const page = await service.getCalendarViewData(new Date('2026-04-09T09:00:00.000Z'))
+
+    expect(page.events.map((event) => event.summary)).toEqual(['Updated planning review'])
+    expect(page.events).toHaveLength(1)
   })
 })

@@ -9,6 +9,10 @@ export const getCalendarSettings = createServerFn({ method: 'GET' }).handler(asy
   return calendarService.getSettingsData()
 })
 
+export const getCalendarView = createServerFn({ method: 'GET' }).handler(async () => {
+  return calendarService.getCalendarViewData()
+})
+
 export const startGoogleConnect = createServerFn({ method: 'POST' }).handler(async () => {
   return calendarService.startGoogleConnect()
 })
@@ -21,6 +25,10 @@ export const completeGoogleConnect = createServerFn({ method: 'POST' })
 
 export const refreshGoogleCalendars = createServerFn({ method: 'POST' }).handler(async () => {
   return calendarService.refreshCalendarConnections()
+})
+
+export const syncGoogleCalendar = createServerFn({ method: 'POST' }).handler(async () => {
+  return calendarService.syncSelectedCalendarEvents()
 })
 
 export const saveGoogleCalendarSelections = createServerFn({ method: 'POST' })

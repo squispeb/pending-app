@@ -32,6 +32,44 @@ const googleCalendarListResponseSchema = z.object({
     .default([]),
 })
 
+const googleEventDateSchema = z.object({
+  dateTime: z.string().optional(),
+  date: z.string().optional(),
+  timeZone: z.string().optional(),
+})
+
+const googleCalendarEventsResponseSchema = z.object({
+  nextPageToken: z.string().optional(),
+  items: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        status: z.string().optional(),
+        summary: z.string().optional().nullable(),
+        description: z.string().optional().nullable(),
+        location: z.string().optional().nullable(),
+        htmlLink: z.string().optional().nullable(),
+        recurringEventId: z.string().optional().nullable(),
+        updated: z.string().optional(),
+        organizer: z
+          .object({
+            email: z.string().optional().nullable(),
+          })
+          .optional(),
+        attendees: z
+          .array(
+            z.object({
+              email: z.string().optional().nullable(),
+            }),
+          )
+          .optional(),
+        start: googleEventDateSchema,
+        end: googleEventDateSchema,
+      }),
+    )
+    .default([]),
+})
+
 export type GoogleTokenExchange = {
   accessToken: string
   refreshToken?: string
@@ -51,6 +89,23 @@ export type GoogleCalendarSummary = {
   visible: boolean
 }
 
+export type GoogleCalendarEventInstance = {
+  googleEventId: string
+  googleRecurringEventId: string | null
+  status: string
+  summary: string | null
+  description: string | null
+  location: string | null
+  startsAt: Date
+  endsAt: Date
+  allDay: boolean
+  eventTimezone: string | null
+  htmlLink: string | null
+  organizerEmail: string | null
+  attendeeCount: number | null
+  updatedAtRemote: Date | null
+}
+
 export interface GoogleIntegrationApi {
   buildAuthUrl(userId: string): string
   verifyState(state: string): { userId: string; nonce: string; exp: number }
@@ -58,6 +113,11 @@ export interface GoogleIntegrationApi {
   refreshAccessToken(refreshToken: string): Promise<GoogleTokenExchange>
   fetchUserInfo(accessToken: string): Promise<GoogleUserInfo>
   fetchCalendarList(accessToken: string): Promise<Array<GoogleCalendarSummary>>
+  fetchCalendarEvents(
+    accessToken: string,
+    calendarId: string,
+    options: { timeMin: Date; timeMax: Date },
+  ): Promise<Array<GoogleCalendarEventInstance>>
 }
 
 async function fetchGoogleJson<T>(input: RequestInfo | URL, init: RequestInit, schema: z.ZodSchema<T>) {
@@ -78,7 +138,6 @@ async function fetchGoogleJson<T>(input: RequestInfo | URL, init: RequestInit, s
         const parsed = JSON.parse(errorBody) as {
           error?: {
             message?: string
-            status?: string
           }
         }
 
@@ -109,6 +168,29 @@ function requireGoogleCredentials() {
     clientSecret: env.GOOGLE_CLIENT_SECRET,
     redirectUri: env.GOOGLE_REDIRECT_URI,
   }
+}
+
+function parseGoogleEventBoundary(input: z.infer<typeof googleEventDateSchema>) {
+  if (input.dateTime) {
+    return {
+      at: new Date(input.dateTime),
+      allDay: false,
+      timeZone: input.timeZone ?? null,
+    }
+  }
+
+  if (input.date) {
+    const [year, month, day] = input.date.split('-').map(Number)
+
+    return {
+      // Noon UTC avoids most local-date shifts for all-day rendering.
+      at: new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0)),
+      allDay: true,
+      timeZone: input.timeZone ?? null,
+    }
+  }
+
+  throw new Error('Google Calendar event is missing a start or end time.')
 }
 
 async function exchangeGoogleGrant(params: URLSearchParams) {
@@ -224,5 +306,60 @@ export const googleIntegrationApi: GoogleIntegrationApi = {
     } while (nextPageToken)
 
     return calendars
+  },
+  async fetchCalendarEvents(accessToken, calendarId, options) {
+    const events: Array<GoogleCalendarEventInstance> = []
+    let nextPageToken: string | undefined
+
+    do {
+      const url = new URL(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+      )
+      url.searchParams.set('maxResults', '2500')
+      url.searchParams.set('singleEvents', 'true')
+      url.searchParams.set('orderBy', 'startTime')
+      url.searchParams.set('timeMin', options.timeMin.toISOString())
+      url.searchParams.set('timeMax', options.timeMax.toISOString())
+
+      if (nextPageToken) {
+        url.searchParams.set('pageToken', nextPageToken)
+      }
+
+      const response = await fetchGoogleJson(
+        url,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        },
+        googleCalendarEventsResponseSchema,
+      )
+
+      for (const item of response.items) {
+        const start = parseGoogleEventBoundary(item.start)
+        const end = parseGoogleEventBoundary(item.end)
+
+        events.push({
+          googleEventId: item.id,
+          googleRecurringEventId: item.recurringEventId ?? null,
+          status: item.status ?? 'confirmed',
+          summary: item.summary ?? null,
+          description: item.description ?? null,
+          location: item.location ?? null,
+          startsAt: start.at,
+          endsAt: end.at,
+          allDay: start.allDay,
+          eventTimezone: start.timeZone ?? end.timeZone,
+          htmlLink: item.htmlLink ?? null,
+          organizerEmail: item.organizer?.email ?? null,
+          attendeeCount: item.attendees?.length ?? null,
+          updatedAtRemote: item.updated ? new Date(item.updated) : null,
+        })
+      }
+
+      nextPageToken = response.nextPageToken
+    } while (nextPageToken)
+
+    return events
   },
 }

@@ -7,6 +7,7 @@ import {
   getCalendarSettings,
   refreshGoogleCalendars,
   saveGoogleCalendarSelections,
+  syncGoogleCalendar,
   startGoogleConnect,
 } from '../server/calendar'
 
@@ -77,6 +78,24 @@ function SettingsPage() {
     onError: (error) => {
       setFeedbackTone('error')
       setFeedbackMessage(error instanceof Error ? error.message : 'Could not refresh calendars.')
+    },
+  })
+
+  const syncCalendarMutation = useMutation({
+    mutationFn: async () => syncGoogleCalendar(),
+    onSuccess: async ({ calendarCount, eventCount }) => {
+      setFeedbackTone('success')
+      setFeedbackMessage(
+        `Synced ${eventCount} event${eventCount === 1 ? '' : 's'} from ${calendarCount} calendar${calendarCount === 1 ? '' : 's'}.`,
+      )
+      await Promise.all([
+        invalidateSettings(),
+        queryClient.invalidateQueries({ queryKey: ['calendar-view'] }),
+      ])
+    },
+    onError: (error) => {
+      setFeedbackTone('error')
+      setFeedbackMessage(error instanceof Error ? error.message : 'Could not sync Google Calendar events.')
     },
   })
 
@@ -152,49 +171,83 @@ function SettingsPage() {
       ) : null}
 
       <article className="panel rounded-[1.75rem] p-6 sm:p-8">
-          <h1 className="display-title mb-4 text-3xl font-bold text-[var(--ink-strong)]">Settings</h1>
-          <p className="max-w-3xl text-base leading-7 text-[var(--ink-soft)]">
-            {renderConnectionCopy()}
+        <h1 className="display-title mb-4 text-3xl font-bold text-[var(--ink-strong)]">Settings</h1>
+        <p className="max-w-3xl text-base leading-7 text-[var(--ink-soft)]">{renderConnectionCopy()}</p>
+
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            type="button"
+            disabled={connectMutation.isPending}
+            onClick={() => connectMutation.mutate()}
+            className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <span className="inline-flex items-center gap-2">
+              <Link2 size={16} />
+              {isConnected ? 'Reconnect Google' : 'Connect Google'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            disabled={!isConnected || refreshCalendarsMutation.isPending}
+            onClick={() => refreshCalendarsMutation.mutate()}
+            className="secondary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <span className="inline-flex items-center gap-2">
+              <RefreshCw size={16} className={refreshCalendarsMutation.isPending ? 'animate-spin' : ''} />
+              Refresh calendars
+            </span>
+          </button>
+
+          <button
+            type="button"
+            disabled={!isConnected || selectedFromServer.length === 0 || syncCalendarMutation.isPending}
+            onClick={() => syncCalendarMutation.mutate()}
+            className="secondary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <span className="inline-flex items-center gap-2">
+              <RefreshCw size={16} className={syncCalendarMutation.isPending ? 'animate-spin' : ''} />
+              Sync events
+            </span>
+          </button>
+
+          <button
+            type="button"
+            disabled={!data.account || disconnectMutation.isPending}
+            onClick={() => disconnectMutation.mutate()}
+            className="secondary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <span className="inline-flex items-center gap-2">
+              <Unplug size={16} />
+              Disconnect
+            </span>
+          </button>
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-4 text-sm leading-7 text-[var(--ink-soft)]">
+          <p className="m-0">
+            Cached event snapshots: <span className="text-[var(--ink-strong)]">{data.cachedEventCount}</span>
           </p>
-
-          <div className="mt-6 flex flex-wrap gap-3">
-            <button
-              type="button"
-              disabled={connectMutation.isPending}
-              onClick={() => connectMutation.mutate()}
-              className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <span className="inline-flex items-center gap-2">
-                <Link2 size={16} />
-                {isConnected ? 'Reconnect Google' : 'Connect Google'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              disabled={!isConnected || refreshCalendarsMutation.isPending}
-              onClick={() => refreshCalendarsMutation.mutate()}
-              className="secondary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <span className="inline-flex items-center gap-2">
-                <RefreshCw size={16} className={refreshCalendarsMutation.isPending ? 'animate-spin' : ''} />
-                Refresh calendars
-              </span>
-            </button>
-
-            <button
-              type="button"
-              disabled={!data.account || disconnectMutation.isPending}
-              onClick={() => disconnectMutation.mutate()}
-              className="secondary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <span className="inline-flex items-center gap-2">
-                <Unplug size={16} />
-                Disconnect
-              </span>
-            </button>
-          </div>
-        </article>
+          <p className="m-0 mt-1">
+            Last event sync:{' '}
+            <span className="text-[var(--ink-strong)]">
+              {data.syncStatus?.lastSyncedAt
+                ? new Date(data.syncStatus.lastSyncedAt).toLocaleString()
+                : 'Not synced yet'}
+            </span>
+          </p>
+          <p className="m-0 mt-1">
+            Status:{' '}
+            <span className="text-[var(--ink-strong)]">
+              {data.syncStatus?.disconnected
+                ? 'Disconnected with cached data'
+                : data.syncStatus?.isStale
+                  ? 'Stale or not yet synced'
+                  : 'Healthy'}
+            </span>
+          </p>
+        </div>
+      </article>
 
       <section className="panel mt-4 rounded-[1.75rem] p-6 sm:p-8">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

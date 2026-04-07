@@ -1,10 +1,19 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
+import type { CalendarConnection, SyncState } from '../db/schema'
 import type { Database } from '../db/client'
 import { calendarConnections, calendarEvents, googleAccounts, syncStates } from '../db/schema'
-import type { GoogleIntegrationApi, GoogleTokenExchange } from './google-client'
+import type {
+  GoogleCalendarEventInstance,
+  GoogleIntegrationApi,
+  GoogleTokenExchange,
+} from './google-client'
 import { googleIntegrationApi } from './google-client'
 import { getGoogleConfigStatus } from './google-auth'
-import { GOOGLE_CALENDAR_PROVIDER, type GoogleCalendarSelectionInput } from '../lib/google'
+import {
+  GOOGLE_CALENDAR_PROVIDER,
+  getGoogleSyncWindow,
+  type GoogleCalendarSelectionInput,
+} from '../lib/google'
 import { ensureDefaultUser } from './default-user'
 
 function sortCalendarConnections<T extends { primaryFlag: boolean; isSelected: boolean; calendarName: string }>(
@@ -27,6 +36,23 @@ export function createCalendarService(
   database: Database,
   googleApi: GoogleIntegrationApi = googleIntegrationApi,
 ) {
+  async function listSyncStates(userId: string) {
+    return database.query.syncStates.findMany({
+      where: and(eq(syncStates.userId, userId), eq(syncStates.provider, GOOGLE_CALENDAR_PROVIDER)),
+      orderBy: [desc(syncStates.updatedAt)],
+    })
+  }
+
+  async function findSyncState(userId: string, scopeKey: string) {
+    return database.query.syncStates.findFirst({
+      where: and(
+        eq(syncStates.userId, userId),
+        eq(syncStates.provider, GOOGLE_CALENDAR_PROVIDER),
+        eq(syncStates.scopeKey, scopeKey),
+      ),
+    })
+  }
+
   async function listUserAccounts(userId: string) {
     return database.query.googleAccounts.findMany({
       where: eq(googleAccounts.userId, userId),
@@ -54,18 +80,131 @@ export function createCalendarService(
     return sortCalendarConnections(connections)
   }
 
+  async function listSelectedConnections(userId: string, googleAccountId: string) {
+    const connections = await listConnectionsForAccount(userId, googleAccountId)
+    return connections.filter((connection) => connection.isSelected)
+  }
+
+  function getSyncSummary(states: Array<SyncState>, options?: { disconnected: boolean }) {
+    if (!states.length && !options?.disconnected) {
+      return null
+    }
+
+    const lastSyncedAt = states.reduce<Date | null>((latest, state) => {
+      if (!state.lastSyncedAt) {
+        return latest
+      }
+
+      if (!latest || state.lastSyncedAt.getTime() > latest.getTime()) {
+        return state.lastSyncedAt
+      }
+
+      return latest
+    }, null)
+
+    const latestState = states[0] ?? null
+    const latestErrorState = states.find((state) => state.lastStatus === 'error' && state.lastError) ?? null
+
+    return {
+      lastSyncedAt,
+      lastStatus: latestState?.lastStatus ?? null,
+      lastError: latestErrorState?.lastError ?? latestState?.lastError ?? null,
+      disconnected: !!options?.disconnected,
+      isStale: !!options?.disconnected || !lastSyncedAt || latestState?.lastStatus === 'error',
+    }
+  }
+
+  async function upsertSyncState(
+    userId: string,
+    scopeKey: string,
+    values: {
+      lastSyncedAt: Date | null
+      nextSyncToken: string | null
+      syncWindowStart: Date | null
+      syncWindowEnd: Date | null
+      lastStatus: string | null
+      lastError: string | null
+    },
+    now: Date,
+  ) {
+    const existing = await findSyncState(userId, scopeKey)
+
+    if (existing) {
+      await database
+        .update(syncStates)
+        .set({
+          ...values,
+          updatedAt: now,
+        })
+        .where(eq(syncStates.id, existing.id))
+
+      return
+    }
+
+    await database.insert(syncStates).values({
+      id: crypto.randomUUID(),
+      userId,
+      provider: GOOGLE_CALENDAR_PROVIDER,
+      scopeKey,
+      ...values,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  async function replaceCalendarEvents(
+    userId: string,
+    calendarId: string,
+    events: Array<GoogleCalendarEventInstance>,
+    now: Date,
+  ) {
+    await database
+      .delete(calendarEvents)
+      .where(and(eq(calendarEvents.userId, userId), eq(calendarEvents.calendarId, calendarId)))
+
+    if (!events.length) {
+      return
+    }
+
+    await database.insert(calendarEvents).values(
+      events.map((event) => ({
+        id: crypto.randomUUID(),
+        userId,
+        calendarId,
+        googleEventId: event.googleEventId,
+        googleRecurringEventId: event.googleRecurringEventId,
+        status: event.status,
+        summary: event.summary,
+        description: event.description,
+        location: event.location,
+        startsAt: event.startsAt,
+        endsAt: event.endsAt,
+        allDay: event.allDay,
+        eventTimezone: event.eventTimezone,
+        htmlLink: event.htmlLink,
+        organizerEmail: event.organizerEmail,
+        attendeeCount: event.attendeeCount,
+        syncedAt: now,
+        updatedAtRemote: event.updatedAtRemote,
+        createdAt: now,
+        updatedAt: now,
+      })),
+    )
+  }
+
+  async function getAccountAndConnections(userId: string) {
+    const account = await getRelevantAccount(userId)
+    const connections = account ? await listConnectionsForAccount(userId, account.id) : []
+
+    return { account, connections }
+  }
+
   async function getSettingsData() {
     const user = await ensureDefaultUser(database)
     const config = getGoogleConfigStatus()
-    const account = await getRelevantAccount(user.id)
-    const connections = account ? await listConnectionsForAccount(user.id, account.id) : []
-    const syncState = await database.query.syncStates.findFirst({
-      where: and(
-        eq(syncStates.userId, user.id),
-        eq(syncStates.provider, GOOGLE_CALENDAR_PROVIDER),
-      ),
-      orderBy: [desc(syncStates.updatedAt)],
-    })
+    const { account, connections } = await getAccountAndConnections(user.id)
+    const states = await listSyncStates(user.id)
+    const syncSummary = getSyncSummary(states, { disconnected: !!account?.disconnectedAt })
     const [{ count: cachedEventCount }] = await database
       .select({ count: sql<number>`count(*)` })
       .from(calendarEvents)
@@ -84,13 +223,7 @@ export function createCalendarService(
         : null,
       calendars: connections,
       cachedEventCount,
-      syncStatus: syncState
-        ? {
-            lastSyncedAt: syncState.lastSyncedAt,
-            lastStatus: syncState.lastStatus,
-            lastError: syncState.lastError,
-          }
-        : null,
+      syncStatus: syncSummary,
     }
   }
 
@@ -257,9 +390,132 @@ export function createCalendarService(
     return refreshed.accessToken
   }
 
+  async function getCalendarViewData(now = new Date()) {
+    const user = await ensureDefaultUser(database)
+    const { account, connections } = await getAccountAndConnections(user.id)
+    const selectedConnections = connections.filter((connection) => connection.isSelected)
+    const selectedCalendarIds = selectedConnections.map((connection) => connection.calendarId)
+    const states = await listSyncStates(user.id)
+    const syncSummary = getSyncSummary(
+      states.filter((state) => selectedCalendarIds.includes(state.scopeKey)),
+      { disconnected: !!account?.disconnectedAt },
+    )
+    const planningWindow = getGoogleSyncWindow(now)
+
+    const events = selectedCalendarIds.length
+      ? await database.query.calendarEvents.findMany({
+          where: and(
+            eq(calendarEvents.userId, user.id),
+            inArray(calendarEvents.calendarId, selectedCalendarIds),
+          ),
+          orderBy: [asc(calendarEvents.startsAt), asc(calendarEvents.endsAt)],
+        })
+      : []
+
+    const connectionByCalendarId = new Map(
+      selectedConnections.map((connection) => [connection.calendarId, connection]),
+    )
+
+    return {
+      account: account
+        ? {
+            id: account.id,
+            email: account.email,
+            connectedAt: account.connectedAt,
+            disconnectedAt: account.disconnectedAt,
+            status: account.disconnectedAt ? ('disconnected' as const) : ('connected' as const),
+          }
+        : null,
+      selectedCalendars: selectedConnections,
+      syncStatus: syncSummary,
+      planningWindow,
+      events: events.map((event) => {
+        const connection = connectionByCalendarId.get(event.calendarId)
+
+        return {
+          ...event,
+          calendarName: connection?.calendarName ?? event.calendarId,
+          primaryFlag: connection?.primaryFlag ?? false,
+        }
+      }),
+    }
+  }
+
+  async function syncSelectedCalendarEvents(now = new Date()) {
+    const user = await ensureDefaultUser(database)
+    const { account } = await getAccountAndConnections(user.id)
+
+    if (!account || account.disconnectedAt) {
+      throw new Error('Reconnect Google Calendar before syncing events.')
+    }
+
+    const selectedConnections = await listSelectedConnections(user.id, account.id)
+
+    if (!selectedConnections.length) {
+      throw new Error('Select at least one calendar before syncing events.')
+    }
+
+    const accessToken = await getFreshAccessToken(account.id)
+    const planningWindow = getGoogleSyncWindow(now)
+    let eventCount = 0
+
+    for (const connection of selectedConnections) {
+      try {
+        const events = await googleApi.fetchCalendarEvents(accessToken, connection.calendarId, {
+          timeMin: planningWindow.start,
+          timeMax: planningWindow.end,
+        })
+
+        await replaceCalendarEvents(user.id, connection.calendarId, events, now)
+        await upsertSyncState(
+          user.id,
+          connection.calendarId,
+          {
+            lastSyncedAt: now,
+            nextSyncToken: null,
+            syncWindowStart: planningWindow.start,
+            syncWindowEnd: planningWindow.end,
+            lastStatus: 'success',
+            lastError: null,
+          },
+          now,
+        )
+
+        eventCount += events.length
+      } catch (error) {
+        const existingState = await findSyncState(user.id, connection.calendarId)
+
+        await upsertSyncState(
+          user.id,
+          connection.calendarId,
+          {
+            lastSyncedAt: existingState?.lastSyncedAt ?? null,
+            nextSyncToken: null,
+            syncWindowStart: planningWindow.start,
+            syncWindowEnd: planningWindow.end,
+            lastStatus: 'error',
+            lastError: error instanceof Error ? error.message : 'Calendar sync failed unexpectedly.',
+          },
+          now,
+        )
+
+        throw error
+      }
+    }
+
+    return {
+      ok: true as const,
+      syncedAt: now,
+      calendarCount: selectedConnections.length,
+      eventCount,
+    }
+  }
+
   return {
     ensureDefaultUser: () => ensureDefaultUser(database),
     getSettingsData,
+    getCalendarViewData,
+    syncSelectedCalendarEvents,
     startGoogleConnect,
     async completeGoogleConnect(code: string, state: string) {
       const payload = googleApi.verifyState(state)
