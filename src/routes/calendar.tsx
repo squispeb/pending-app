@@ -1,14 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
+import { queryOptions, useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { ChevronDown, ChevronUp, RefreshCw, Settings2 } from 'lucide-react'
-import { getCalendarView, syncGoogleCalendar } from '../server/calendar'
+import { getCalendarView, getCalendarEventsForDay, syncGoogleCalendar } from '../server/calendar'
 import { getTodayDateString } from '../lib/tasks'
 
+// Meta query — account, sync status, which days have events (no event payloads)
 const calendarViewQueryOptions = () =>
   queryOptions({
     queryKey: ['calendar-view'],
     queryFn: () => getCalendarView(),
+  })
+
+// Per-day query — full event list for a single day, fetched on demand
+const calendarDayQueryOptions = (dateStr: string) =>
+  queryOptions({
+    queryKey: ['calendar-day', dateStr],
+    queryFn: () => getCalendarEventsForDay({ data: { dateStr } }),
+    staleTime: 60_000, // re-use cached result for 60s before background refresh
   })
 
 export const Route = createFileRoute('/calendar')({
@@ -34,7 +43,7 @@ function formatRelativeSyncTime(syncedAt: Date, now: Date): string {
   return `Synced ${Math.floor(diffHours / 24)}d ago`
 }
 
-type CalendarEvent = {
+type DayEvent = {
   id: string
   summary: string | null
   startsAt: Date | string
@@ -50,7 +59,7 @@ function EventCard({
   isInProgress,
   isNext,
 }: {
-  event: CalendarEvent
+  event: DayEvent
   isInProgress: boolean
   isNext: boolean
 }) {
@@ -133,6 +142,7 @@ function CalendarPage() {
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['calendar-view'] }),
+        queryClient.invalidateQueries({ queryKey: ['calendar-day'] }),
         queryClient.invalidateQueries({ queryKey: ['calendar-settings'] }),
       ])
     },
@@ -155,38 +165,31 @@ function CalendarPage() {
     return getTodayDateString(new Date(y, m - 1, d + dayOffset))
   }, [todayStr, dayOffset])
 
-  // Bucket events by day key; split today's already-finished events into a collapsible
-  const { eventsByDay, todayPastEvents } = useMemo(() => {
-    const byDay = new Map<string, Array<(typeof data.events)[number]>>()
-    const todayPast: Array<(typeof data.events)[number]> = []
-
-    for (const event of data.events) {
-      const eventStart = new Date(event.startsAt)
-      const eventEnd = new Date(event.endsAt)
-      const dayStr = getTodayDateString(eventStart)
-
-      if (dayStr === todayStr && eventEnd < now) {
-        todayPast.push(event)
-        continue
-      }
-
-      const bucket = byDay.get(dayStr) ?? []
-      bucket.push(event)
-      byDay.set(dayStr, bucket)
-    }
-
-    return { eventsByDay: byDay, todayPastEvents: todayPast }
-  }, [data.events, now, todayStr])
+  // Per-day event query — fetches on demand, cached per dateStr
+  const dayQuery = useQuery(calendarDayQueryOptions(selectedDayStr))
 
   const isToday = dayOffset === 0
-  const selectedEvents = eventsByDay.get(selectedDayStr) ?? []
+  const daysWithEvents = useMemo(() => new Set(data.daysWithEvents), [data.daysWithEvents])
+
+  // Bucket today's events into past/upcoming; all other days show events as-is
+  const { selectedEvents, todayPastEvents } = useMemo(() => {
+    const allEvents = dayQuery.data?.events ?? []
+    if (!isToday) {
+      return { selectedEvents: allEvents, todayPastEvents: [] }
+    }
+    const past: typeof allEvents = []
+    const upcoming: typeof allEvents = []
+    for (const event of allEvents) {
+      new Date(event.endsAt) < now ? past.push(event) : upcoming.push(event)
+    }
+    return { selectedEvents: upcoming, todayPastEvents: past }
+  }, [dayQuery.data, isToday, now])
 
   // "Next up" — first future event on today's tab only
   const nextEventId = useMemo(() => {
     if (!isToday) return null
-    const todayEvents = eventsByDay.get(todayStr) ?? []
-    return todayEvents.find((e) => new Date(e.startsAt) > now)?.id ?? null
-  }, [eventsByDay, todayStr, now, isToday])
+    return selectedEvents.find((e) => new Date(e.startsAt) > now)?.id ?? null
+  }, [selectedEvents, now, isToday])
 
   const liveTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 
@@ -243,9 +246,7 @@ function CalendarPage() {
             const dayStr = getTodayDateString(date)
             const isDayToday = offset === 0
             const isSelected = dayStr === selectedDayStr
-            const hasEvents =
-              (eventsByDay.get(dayStr)?.length ?? 0) > 0 ||
-              (isDayToday && todayPastEvents.length > 0)
+            const hasEvents = daysWithEvents.has(dayStr)
 
             return (
               <button
@@ -290,7 +291,7 @@ function CalendarPage() {
       </article>
 
       {/* Events for selected day */}
-      <section className="mt-4 space-y-3">
+      <section className={`mt-4 space-y-3 transition-opacity ${dayQuery.isFetching ? 'opacity-50' : 'opacity-100'}`}>
         {!data.account ? (
           <div className="rounded-2xl border border-dashed border-[var(--line)] px-4 py-5 text-sm leading-7 text-[var(--ink-soft)]">
             Connect Google Calendar in settings to see meetings here.
@@ -298,6 +299,10 @@ function CalendarPage() {
         ) : data.selectedCalendars.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-[var(--line)] px-4 py-5 text-sm leading-7 text-[var(--ink-soft)]">
             Select at least one calendar in settings.
+          </div>
+        ) : dayQuery.isLoading ? (
+          <div className="rounded-2xl border border-dashed border-[var(--line)] px-4 py-5 text-sm leading-7 text-[var(--ink-soft)]">
+            Loading…
           </div>
         ) : selectedEvents.length === 0 && !(isToday && todayPastEvents.length > 0) ? (
           <div className="rounded-2xl border border-dashed border-[var(--line)] px-4 py-5 text-sm leading-7 text-[var(--ink-soft)]">

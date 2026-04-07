@@ -1,4 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
+import { z } from 'zod'
 import { db } from '../db/client'
 import { googleCallbackInputSchema, googleCalendarSelectionSchema } from '../lib/google'
 import { createCalendarService } from './calendar-service'
@@ -12,6 +13,12 @@ export const getCalendarSettings = createServerFn({ method: 'GET' }).handler(asy
 export const getCalendarView = createServerFn({ method: 'GET' }).handler(async () => {
   return calendarService.getCalendarViewData()
 })
+
+export const getCalendarEventsForDay = createServerFn({ method: 'GET' })
+  .inputValidator((input) => z.object({ dateStr: z.string() }).parse(input))
+  .handler(async ({ data }) => {
+    return calendarService.getCalendarEventsForDay(data.dateStr)
+  })
 
 export const startGoogleConnect = createServerFn({ method: 'POST' }).handler(async () => {
   return calendarService.startGoogleConnect()

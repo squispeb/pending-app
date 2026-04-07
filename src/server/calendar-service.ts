@@ -402,8 +402,8 @@ export function createCalendarService(
     )
     const planningWindow = getGoogleSyncWindow(now)
 
-    // Swipeable view window: 30 days past + 90 days future.
-    // Overlap filter: event ends on/after window start AND starts on/before window end.
+    // Lightweight: fetch only startsAt timestamps to derive which days have events.
+    // The full event list is fetched per-day on demand via getCalendarEventsForDay.
     const viewStart = new Date(now)
     viewStart.setDate(viewStart.getDate() - 30)
     viewStart.setHours(0, 0, 0, 0)
@@ -411,21 +411,28 @@ export function createCalendarService(
     viewEnd.setDate(viewEnd.getDate() + 90)
     viewEnd.setHours(23, 59, 59, 999)
 
-    const events = selectedCalendarIds.length
-      ? await database.query.calendarEvents.findMany({
-          where: and(
-            eq(calendarEvents.userId, user.id),
-            inArray(calendarEvents.calendarId, selectedCalendarIds),
-            gte(calendarEvents.endsAt, viewStart),
-            lte(calendarEvents.startsAt, viewEnd),
-          ),
-          orderBy: [asc(calendarEvents.startsAt), asc(calendarEvents.endsAt)],
-        })
+    const eventStartRows = selectedCalendarIds.length
+      ? await database
+          .select({ startsAt: calendarEvents.startsAt })
+          .from(calendarEvents)
+          .where(
+            and(
+              eq(calendarEvents.userId, user.id),
+              inArray(calendarEvents.calendarId, selectedCalendarIds),
+              gte(calendarEvents.endsAt, viewStart),
+              lte(calendarEvents.startsAt, viewEnd),
+            ),
+          )
       : []
 
-    const connectionByCalendarId = new Map(
-      selectedConnections.map((connection) => [connection.calendarId, connection]),
-    )
+    // Derive unique YYYY-MM-DD day strings (server local time, which is UTC for this app)
+    const daysWithEventsSet = new Set<string>()
+    for (const { startsAt } of eventStartRows) {
+      const d = new Date(startsAt)
+      daysWithEventsSet.add(
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+      )
+    }
 
     return {
       account: account
@@ -440,11 +447,49 @@ export function createCalendarService(
       selectedCalendars: selectedConnections,
       syncStatus: syncSummary,
       planningWindow,
+      daysWithEvents: [...daysWithEventsSet],
+    }
+  }
+
+  async function getCalendarEventsForDay(dateStr: string) {
+    const user = await ensureDefaultUser(database)
+    const { account, connections } = await getAccountAndConnections(user.id)
+    const selectedConnections = connections.filter((connection) => connection.isSelected)
+    const selectedCalendarIds = selectedConnections.map((connection) => connection.calendarId)
+
+    if (!selectedCalendarIds.length) {
+      return { events: [] as Array<{ id: string; summary: string | null; startsAt: Date; endsAt: Date; allDay: boolean; calendarName: string; location: string | null; htmlLink: string | null; primaryFlag: boolean }> }
+    }
+
+    const [y, m, d] = dateStr.split('-').map(Number)
+    const dayStart = new Date(y, m - 1, d, 0, 0, 0, 0)
+    const dayEnd = new Date(y, m - 1, d, 23, 59, 59, 999)
+
+    const events = await database.query.calendarEvents.findMany({
+      where: and(
+        eq(calendarEvents.userId, user.id),
+        inArray(calendarEvents.calendarId, selectedCalendarIds),
+        gte(calendarEvents.endsAt, dayStart),
+        lte(calendarEvents.startsAt, dayEnd),
+      ),
+      orderBy: [asc(calendarEvents.startsAt), asc(calendarEvents.endsAt)],
+    })
+
+    const connectionByCalendarId = new Map(
+      selectedConnections.map((connection) => [connection.calendarId, connection]),
+    )
+
+    return {
       events: events.map((event) => {
         const connection = connectionByCalendarId.get(event.calendarId)
-
         return {
-          ...event,
+          id: event.id,
+          summary: event.summary,
+          startsAt: event.startsAt,
+          endsAt: event.endsAt,
+          allDay: event.allDay,
+          location: event.location,
+          htmlLink: event.htmlLink,
           calendarName: connection?.calendarName ?? event.calendarId,
           primaryFlag: connection?.primaryFlag ?? false,
         }
@@ -526,6 +571,7 @@ export function createCalendarService(
     ensureDefaultUser: () => ensureDefaultUser(database),
     getSettingsData,
     getCalendarViewData,
+    getCalendarEventsForDay,
     syncSelectedCalendarEvents,
     startGoogleConnect,
     async completeGoogleConnect(code: string, state: string) {
