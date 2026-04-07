@@ -76,7 +76,7 @@ function EventCard({
           <p className="m-0 text-sm font-semibold leading-snug text-[var(--ink-strong)]">
             {event.summary || '(Untitled event)'}
           </p>
-          <p className="m-0 mt-0.5 text-xs leading-5 text-[var(--ink-soft)]">
+          <p className="m-0 mt-0.5 truncate text-xs leading-5 text-[var(--ink-soft)]">
             {formatEventTimeRange(start, end, event.allDay)}
             {event.location ? ` · ${event.location}` : ''}
           </p>
