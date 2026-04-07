@@ -225,38 +225,12 @@ function SettingsPage() {
           </button>
         </div>
 
-        <div className="mt-5 rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-4 text-sm leading-7 text-[var(--ink-soft)]">
-          <p className="m-0">
-            Cached event snapshots: <span className="text-[var(--ink-strong)]">{data.cachedEventCount}</span>
-          </p>
-          <p className="m-0 mt-1">
-            Last event sync:{' '}
-            <span className="text-[var(--ink-strong)]">
-              {data.syncStatus?.lastSyncedAt
-                ? new Date(data.syncStatus.lastSyncedAt).toLocaleString()
-                : 'Not synced yet'}
-            </span>
-          </p>
-          <p className="m-0 mt-1">
-            Status:{' '}
-            <span className="text-[var(--ink-strong)]">
-              {data.syncStatus?.disconnected
-                ? 'Disconnected with cached data'
-                : data.syncStatus?.isStale
-                  ? 'Stale or not yet synced'
-                  : 'Healthy'}
-            </span>
-          </p>
-        </div>
       </article>
 
       <section className="panel mt-4 rounded-[1.75rem] p-6 sm:p-8">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="m-0 text-2xl font-semibold text-[var(--ink-strong)]">Choose planning calendars</h2>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--ink-soft)]">
-              Visible calendars are selected automatically on first connect. Hidden calendars stay available to inspect but do not affect planning until you opt in.
-            </p>
           </div>
 
           <button
@@ -308,9 +282,6 @@ function SettingsPage() {
                         </span>
                       ) : null}
                     </div>
-                    <p className="m-0 mt-1 text-sm leading-6 text-[var(--ink-soft)]">
-                      <code>{calendar.calendarId}</code>
-                    </p>
                   </div>
                 </label>
               )
