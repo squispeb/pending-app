@@ -402,12 +402,13 @@ export function createCalendarService(
     )
     const planningWindow = getGoogleSyncWindow(now)
 
-    // Compact view window: today through +6 days (7 tabs).
-    // Overlap filter: event ends on/after start-of-today AND starts on/before end-of-window.
+    // Swipeable view window: 30 days past + 90 days future.
+    // Overlap filter: event ends on/after window start AND starts on/before window end.
     const viewStart = new Date(now)
+    viewStart.setDate(viewStart.getDate() - 30)
     viewStart.setHours(0, 0, 0, 0)
     const viewEnd = new Date(now)
-    viewEnd.setDate(viewEnd.getDate() + 6)
+    viewEnd.setDate(viewEnd.getDate() + 90)
     viewEnd.setHours(23, 59, 59, 999)
 
     const events = selectedCalendarIds.length

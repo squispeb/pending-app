@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { ChevronDown, ChevronUp, RefreshCw, Settings2 } from 'lucide-react'
@@ -16,7 +16,9 @@ export const Route = createFileRoute('/calendar')({
   component: CalendarPage,
 })
 
-const VIEW_DAYS = 7
+// Days rendered in the swipeable strip
+const DAYS_BACK = 30
+const DAYS_FORWARD = 90
 
 function formatEventTimeRange(start: Date, end: Date, allDay: boolean) {
   if (allDay) return 'All day'
@@ -105,13 +107,25 @@ function CalendarPage() {
 
   const [now, setNow] = useState(() => new Date())
   const [showPastToday, setShowPastToday] = useState(false)
-  const [selectedDayIndex, setSelectedDayIndex] = useState(0)
+  // Offset in days from today; 0 = today, negative = past, positive = future
+  const [dayOffset, setDayOffset] = useState(0)
+
+  const stripRef = useRef<HTMLDivElement>(null)
+  const todayBtnRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     // Correct stale SSR-rendered time immediately on mount, then tick every 60s
     setNow(new Date())
     const id = setInterval(() => setNow(new Date()), 60_000)
     return () => clearInterval(id)
+  }, [])
+
+  // Center today's chip in the strip on mount
+  useEffect(() => {
+    const btn = todayBtnRef.current
+    const strip = stripRef.current
+    if (!btn || !strip) return
+    strip.scrollLeft = btn.offsetLeft - strip.clientWidth / 2 + btn.offsetWidth / 2
   }, [])
 
   const syncMutation = useMutation({
@@ -126,11 +140,20 @@ function CalendarPage() {
 
   const todayStr = getTodayDateString(now)
 
-  // 7-day tab window — recompute only when the calendar day changes, not every minute tick
+  // All days in the swipeable strip — recompute only when the calendar day changes
   const viewDays = useMemo(() => {
     const [y, m, d] = todayStr.split('-').map(Number)
-    return Array.from({ length: VIEW_DAYS }, (_, i) => new Date(y, m - 1, d + i))
+    return Array.from({ length: DAYS_BACK + DAYS_FORWARD + 1 }, (_, i) => ({
+      date: new Date(y, m - 1, d - DAYS_BACK + i),
+      offset: i - DAYS_BACK,
+    }))
   }, [todayStr])
+
+  // Selected day string derived from offset
+  const selectedDayStr = useMemo(() => {
+    const [y, m, d] = todayStr.split('-').map(Number)
+    return getTodayDateString(new Date(y, m - 1, d + dayOffset))
+  }, [todayStr, dayOffset])
 
   // Bucket events by day key; split today's already-finished events into a collapsible
   const { eventsByDay, todayPastEvents } = useMemo(() => {
@@ -155,8 +178,7 @@ function CalendarPage() {
     return { eventsByDay: byDay, todayPastEvents: todayPast }
   }, [data.events, now, todayStr])
 
-  const isToday = selectedDayIndex === 0
-  const selectedDayStr = getTodayDateString(viewDays[selectedDayIndex])
+  const isToday = dayOffset === 0
   const selectedEvents = eventsByDay.get(selectedDayStr) ?? []
 
   // "Next up" — first future event on today's tab only
@@ -212,20 +234,25 @@ function CalendarPage() {
           </div>
         </div>
 
-        {/* 7-day tab strip */}
-        <div className="mt-4 flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {viewDays.map((day, i) => {
-            const dayStr = getTodayDateString(day)
-            const isSelected = i === selectedDayIndex
+        {/* Swipeable day strip */}
+        <div
+          ref={stripRef}
+          className="mt-4 flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {viewDays.map(({ date, offset }) => {
+            const dayStr = getTodayDateString(date)
+            const isDayToday = offset === 0
+            const isSelected = dayStr === selectedDayStr
             const hasEvents =
               (eventsByDay.get(dayStr)?.length ?? 0) > 0 ||
-              (i === 0 && todayPastEvents.length > 0)
+              (isDayToday && todayPastEvents.length > 0)
 
             return (
               <button
                 key={dayStr}
+                ref={isDayToday ? todayBtnRef : undefined}
                 type="button"
-                onClick={() => setSelectedDayIndex(i)}
+                onClick={() => setDayOffset(offset)}
                 className={`flex min-w-[52px] flex-col items-center gap-0.5 rounded-2xl px-2 py-2.5 transition ${
                   isSelected
                     ? 'bg-[var(--brand)] text-white'
@@ -233,9 +260,9 @@ function CalendarPage() {
                 }`}
               >
                 <span className="text-[10px] font-semibold uppercase leading-none tracking-wide">
-                  {i === 0 ? 'Today' : day.toLocaleDateString('en-US', { weekday: 'short' })}
+                  {isDayToday ? 'Today' : date.toLocaleDateString('en-US', { weekday: 'short' })}
                 </span>
-                <span className="text-xl font-bold tabular-nums leading-none">{day.getDate()}</span>
+                <span className="text-xl font-bold tabular-nums leading-none">{date.getDate()}</span>
                 <span
                   className={`size-1.5 rounded-full transition ${
                     hasEvents
