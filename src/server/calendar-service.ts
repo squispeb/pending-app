@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
 import type { CalendarConnection, SyncState } from '../db/schema'
 import type { Database } from '../db/client'
 import { calendarConnections, calendarEvents, googleAccounts, syncStates } from '../db/schema'
@@ -402,11 +402,21 @@ export function createCalendarService(
     )
     const planningWindow = getGoogleSyncWindow(now)
 
+    // Compact view window: today through +6 days (7 tabs).
+    // Overlap filter: event ends on/after start-of-today AND starts on/before end-of-window.
+    const viewStart = new Date(now)
+    viewStart.setHours(0, 0, 0, 0)
+    const viewEnd = new Date(now)
+    viewEnd.setDate(viewEnd.getDate() + 6)
+    viewEnd.setHours(23, 59, 59, 999)
+
     const events = selectedCalendarIds.length
       ? await database.query.calendarEvents.findMany({
           where: and(
             eq(calendarEvents.userId, user.id),
             inArray(calendarEvents.calendarId, selectedCalendarIds),
+            gte(calendarEvents.endsAt, viewStart),
+            lte(calendarEvents.startsAt, viewEnd),
           ),
           orderBy: [asc(calendarEvents.startsAt), asc(calendarEvents.endsAt)],
         })
