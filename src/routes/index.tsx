@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { Bell, CalendarDays, CheckSquare, Repeat, Settings2 } from 'lucide-react'
@@ -65,6 +65,16 @@ function DashboardPage() {
     [dueReminders],
   )
 
+  // Stable primitive keys — effects use these as deps to avoid firing on every array re-reference.
+  const visibleReminderKey = visibleReminders.map((r) => r.id).join(',')
+  const dueReminderKey = dueReminders.map((r) => r.id).join(',')
+
+  // Refs so the effects always read the latest arrays without listing them as deps.
+  const visibleRemindersRef = useRef(visibleReminders)
+  visibleRemindersRef.current = visibleReminders
+  const dueRemindersRef = useRef(dueReminders)
+  dueRemindersRef.current = dueReminders
+
   const invalidateDashboard = () => queryClient.invalidateQueries({ queryKey: ['dashboard'] })
 
   const toggleTaskMutation = useMutation({
@@ -130,16 +140,21 @@ function DashboardPage() {
     },
   })
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!visibleReminders.length) {
+    const reminders = visibleRemindersRef.current
+    if (!reminders.length) {
       return
     }
 
-    visibleReminders.forEach((item) => {
+    reminders.forEach((item) => {
       markReminderDelivered({ data: { id: item.id, channel: 'in-app' } }).catch(() => {})
     })
-  }, [visibleReminders])
+  // visibleReminderKey is a stable primitive derived from the IDs — fires exactly when the set changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleReminderKey])
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (
       typeof window === 'undefined' ||
@@ -149,14 +164,16 @@ function DashboardPage() {
       return
     }
 
-    const browserEligible = dueReminders.filter((item) => !item.deliveredBrowserAt)
+    const browserEligible = dueRemindersRef.current.filter((item) => !item.deliveredBrowserAt)
     browserEligible.forEach((item) => {
       new Notification(item.title, {
         body: item.timingLabel,
       })
       markReminderDelivered({ data: { id: item.id, channel: 'browser' } }).catch(() => {})
     })
-  }, [dueReminders, notificationPermission])
+  // dueReminderKey is a stable primitive derived from the IDs — fires exactly when the set changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dueReminderKey, notificationPermission])
 
   async function requestNotifications() {
     if (typeof window === 'undefined' || !('Notification' in window)) {

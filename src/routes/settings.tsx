@@ -25,7 +25,9 @@ export const Route = createFileRoute('/settings')({
 function SettingsPage() {
   const queryClient = useQueryClient()
   const { data } = useSuspenseQuery(settingsQueryOptions())
-  const [selectedCalendars, setSelectedCalendars] = useState<Array<string>>([])
+  const [selectedCalendars, setSelectedCalendars] = useState<Array<string>>(() =>
+    data.calendars.filter((c) => c.isSelected).map((c) => c.calendarId),
+  )
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
   const [feedbackTone, setFeedbackTone] = useState<'success' | 'error' | null>(null)
 
@@ -33,10 +35,6 @@ function SettingsPage() {
     () => data.calendars.filter((calendar) => calendar.isSelected).map((calendar) => calendar.calendarId),
     [data.calendars],
   )
-
-  useEffect(() => {
-    setSelectedCalendars(selectedFromServer)
-  }, [selectedFromServer])
 
   useEffect(() => {
     if (!feedbackMessage) {
@@ -109,6 +107,9 @@ function SettingsPage() {
     onSuccess: async ({ selectedCount }) => {
       setFeedbackTone('success')
       setFeedbackMessage(`Saved ${selectedCount} calendar selection${selectedCount === 1 ? '' : 's'}.`)
+      // Reset draft to the just-saved value so hasSelectionChanges returns false
+      // without needing a useEffect to sync server state back into local state.
+      setSelectedCalendars(selectedCalendars)
       await invalidateSettings()
     },
     onError: (error) => {
