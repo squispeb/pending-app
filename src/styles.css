@@ -316,3 +316,39 @@ a {
     transform: translateY(0);
   }
 }
+
+@keyframes mic-ripple {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.22;
+  }
+  60% {
+    opacity: 0.12;
+  }
+  100% {
+    transform: scale(1.45);
+    opacity: 0;
+  }
+}
+
+/* Idle waveform bars — gentle breathing animation for transcribing/interpreting states */
+.bar-idle {
+  width: 3px;
+  background: linear-gradient(180deg, var(--brand), var(--accent));
+  opacity: 0.35;
+  animation: bar-idle-pulse 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes bar-idle-pulse {
+  0% {
+    height: 6px;
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    height: 28px;
+    opacity: 0.35;
+  }
+}

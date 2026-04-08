@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react'
-import { CalendarDays, ChevronDown, Mic, Square, X } from 'lucide-react'
+import { useRef, useState, useEffect, useCallback } from 'react'
+import { CalendarDays, CheckCircle, ChevronDown, Mic, Square, X } from 'lucide-react'
 import {
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query'
-import { useRouterState } from '@tanstack/react-router'
+import { useNavigate, useRouterState } from '@tanstack/react-router'
+import { CaptureContext } from '../contexts/CaptureContext'
 import {
   habitFormSchema,
   toHabitFormValues,
@@ -17,7 +18,7 @@ import {
   getTodayDateString,
   type TaskFormValues,
 } from '../lib/tasks'
-import type { CandidateType, TypedTaskDraft } from '../lib/capture'
+import type { CandidateType, ProcessVoiceCaptureAutoSaved, TypedTaskDraft } from '../lib/capture'
 import {
   confirmCapturedHabit as confirmCapturedHabitFn,
   confirmCapturedTask as confirmCapturedTaskFn,
@@ -43,7 +44,7 @@ function routeContext(pathname: string): RouteContext {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-type CaptureMode = 'closed' | 'recording' | 'input' | 'review' | 'clarify'
+type CaptureMode = 'closed' | 'recording' | 'transcribing' | 'interpreting' | 'input' | 'review' | 'clarify' | 'success'
 
 const EMPTY_TASK_FORM = toTaskFormValues(null)
 const EMPTY_HABIT_FORM = toHabitFormValues(null)
@@ -75,9 +76,9 @@ function draftToTaskForm(draft: TypedTaskDraft): TaskFormValues {
 function draftToHabitForm(draft: TypedTaskDraft): HabitFormValues {
   return {
     title: draft.title ?? '',
-    cadenceType: 'daily',
-    cadenceDays: [],
-    targetCount: 1,
+    cadenceType: draft.cadenceType ?? 'daily',
+    cadenceDays: draft.cadenceDays ?? [],
+    targetCount: draft.targetCount ?? 1,
     preferredStartTime: draft.preferredStartTime ?? '',
     preferredEndTime: draft.preferredEndTime ?? '',
     reminderAt: '',
@@ -87,8 +88,9 @@ function draftToHabitForm(draft: TypedTaskDraft): HabitFormValues {
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
-export default function GlobalCaptureHost() {
+export default function GlobalCaptureHost({ children }: { children?: React.ReactNode }) {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const ctx = routeContext(pathname)
 
@@ -98,6 +100,12 @@ export default function GlobalCaptureHost() {
   const [captureRawInput, setCaptureRawInput] = useState('')
   const [captureDraft, setCaptureDraft] = useState<TypedTaskDraft | null>(null)
   const [captureNotes, setCaptureNotes] = useState<string[]>([])
+
+  // Auto-save success result
+  const [captureAutoSaved, setCaptureAutoSaved] = useState<ProcessVoiceCaptureAutoSaved | null>(null)
+
+  // Track which mode to return to when pressing Back from review
+  const [captureReviewBackMode, setCaptureReviewBackMode] = useState<CaptureMode>('input')
 
   // Task review form
   const [taskForm, setTaskForm] = useState<TaskFormValues>(EMPTY_TASK_FORM)
@@ -117,6 +125,56 @@ export default function GlobalCaptureHost() {
   const [transcribeError, setTranscribeError] = useState<string | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
+
+  // Audio level visualizer — 32 bar heights (0–1 each)
+  const BAR_COUNT = 32
+  const [audioLevels, setAudioLevels] = useState<number[]>(Array(BAR_COUNT).fill(0))
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const rafRef = useRef<number | null>(null)
+
+  const stopVisualizer = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+    analyserRef.current = null
+    if (audioCtxRef.current) {
+      void audioCtxRef.current.close()
+      audioCtxRef.current = null
+    }
+    setAudioLevels(Array(BAR_COUNT).fill(0))
+  }, [])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => { stopVisualizer() }
+  }, [stopVisualizer])
+
+  function startVisualizer(stream: MediaStream) {
+    const ctx = new AudioContext()
+    const analyser = ctx.createAnalyser()
+    analyser.fftSize = 128
+    analyser.smoothingTimeConstant = 0.7
+    ctx.createMediaStreamSource(stream).connect(analyser)
+    audioCtxRef.current = ctx
+    analyserRef.current = analyser
+
+    const data = new Uint8Array(analyser.frequencyBinCount)
+    function tick() {
+      if (!analyserRef.current) return
+      analyserRef.current.getByteFrequencyData(data)
+      const step = Math.floor(data.length / BAR_COUNT)
+      const levels = Array.from({ length: BAR_COUNT }, (_, i) => {
+        const raw = data[i * step] / 255
+        // Add a small baseline so bars are always slightly visible
+        return Math.max(raw, 0.06 + Math.random() * 0.04)
+      })
+      setAudioLevels(levels)
+      rafRef.current = requestAnimationFrame(tick)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+  }
 
   // ---------------------------------------------------------------------------
   // Mutations
@@ -202,8 +260,8 @@ export default function GlobalCaptureHost() {
       }
 
       if (result.outcome === 'auto_saved') {
-        setTranscribeError(null)
-        resetCapture()
+        setCaptureAutoSaved(result)
+        setCaptureMode('success')
         void queryClient.invalidateQueries({ queryKey: ['tasks'] })
         void queryClient.invalidateQueries({ queryKey: ['habits'] })
         void queryClient.invalidateQueries({ queryKey: ['habit-completions'] })
@@ -217,7 +275,7 @@ export default function GlobalCaptureHost() {
         return
       }
 
-      applyDraftForReview(result.draft, result.transcript)
+      applyDraftForReview(result.draft, result.transcript, 'recording')
       setTranscribeError(null)
     },
     onError: (error) => {
@@ -237,14 +295,16 @@ export default function GlobalCaptureHost() {
         if (e.data.size > 0) audioChunksRef.current.push(e.data)
       }
       recorder.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
         stream.getTracks().forEach((t) => t.stop())
+        stopVisualizer()
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
         voiceProcessMutation.mutate(blob)
       }
       recorder.start()
       mediaRecorderRef.current = recorder
       setIsRecording(true)
       setTranscribeError(null)
+      startVisualizer(stream)
     } catch {
       setTranscribeError('Microphone access denied.')
     }
@@ -254,17 +314,34 @@ export default function GlobalCaptureHost() {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop()
       setIsRecording(false)
+      setCaptureMode('transcribing')
+    }
+  }
+
+  /** Stop recorder without processing audio — used when switching to typed input */
+  function cancelRecording() {
+    if (mediaRecorderRef.current && isRecording) {
+      // Remove the onstop handler before stopping so the audio is discarded
+      mediaRecorderRef.current.onstop = null
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+      stopVisualizer()
     }
   }
 
   function resetCapture() {
     if (mediaRecorderRef.current && isRecording) {
+      // Discard audio by removing the onstop handler before stopping
+      mediaRecorderRef.current.onstop = null
       mediaRecorderRef.current.stop()
       setIsRecording(false)
     }
+    stopVisualizer()
     setCaptureMode('closed')
     setCaptureRawInput('')
     setCaptureDraft(null)
+    setCaptureAutoSaved(null)
+    setCaptureReviewBackMode('input')
     setTaskForm(EMPTY_TASK_FORM)
     setTaskFieldErrors({})
     setHabitForm(EMPTY_HABIT_FORM)
@@ -281,6 +358,8 @@ export default function GlobalCaptureHost() {
     const resolved: CandidateType = ctx.defaultType === 'auto' ? 'task' : ctx.defaultType
     setCaptureType(resolved)
     setCaptureMode('recording')
+    // Auto-start recording when the sheet opens — no extra tap required
+    void startRecording()
   }
 
   // ---------------------------------------------------------------------------
@@ -329,551 +408,9 @@ export default function GlobalCaptureHost() {
     }
   }
 
-  const isOpen = captureMode !== 'closed'
-  const isConfirming = confirmTaskMutation.isPending || confirmHabitMutation.isPending
-
-  // Sheet title
-  const sheetTitle =
-    captureMode === 'recording'
-      ? 'Voice capture'
-      : captureMode === 'review'
-        ? captureType === 'habit'
-          ? 'Review habit'
-          : 'Review task'
-        : captureMode === 'clarify'
-          ? 'Need a bit more detail'
-        : 'What do you need?'
-
-  // Confirm button label
-  const confirmLabel = isConfirming
-    ? 'Saving…'
-    : captureType === 'habit'
-      ? 'Create habit'
-      : 'Create task'
-
   // ---------------------------------------------------------------------------
-  // Render
+  // Voice capture helper transitions
   // ---------------------------------------------------------------------------
-  return (
-    <>
-      {/* Global mic FAB — bottom-left, avoids collision with page FABs (bottom-right) */}
-      <button
-        type="button"
-        onClick={openCapture}
-        aria-label="Voice capture"
-        className="fixed bottom-6 left-6 z-30 flex size-14 cursor-pointer items-center justify-center rounded-full bg-[var(--brand)] text-white shadow-lg transition hover:opacity-90 active:scale-95"
-      >
-        <Mic size={24} />
-      </button>
-
-      {/* Backdrop */}
-      <div
-        onClick={resetCapture}
-        className={`fixed inset-0 z-40 bg-black/40 transition-opacity duration-300 ${isOpen ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
-      />
-
-      {/* Bottom sheet */}
-      <div
-        className={`fixed inset-x-0 bottom-0 z-50 duration-300 lg:inset-0 lg:flex lg:items-center lg:justify-center ${
-          isOpen
-            ? 'translate-y-0 opacity-100 transition-[transform,opacity] lg:pointer-events-auto'
-            : 'translate-y-full opacity-0 transition-[transform,opacity] lg:translate-y-0 lg:pointer-events-none'
-        }`}
-      >
-        <div className="mx-auto w-full max-w-2xl lg:px-4">
-          <div className="panel rounded-t-[2rem] px-6 pb-10 pt-3 lg:rounded-[2rem]">
-            {/* Drag handle */}
-            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[var(--line)] lg:hidden" />
-
-            {/* Header */}
-            <div className="mb-5 flex items-center justify-between gap-4">
-              <h2 className="m-0 text-xl font-semibold text-[var(--ink-strong)]">{sheetTitle}</h2>
-              <button
-                type="button"
-                onClick={resetCapture}
-                aria-label="Close"
-                className="flex size-8 cursor-pointer items-center justify-center rounded-full text-[var(--ink-soft)] transition hover:bg-[var(--surface-strong)] hover:text-[var(--ink-strong)]"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="max-h-[70vh] overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
-              {/* ── Recording step ── */}
-              {captureMode === 'recording' ? (
-                <div className="flex flex-col items-center gap-6 py-6">
-                  <button
-                    type="button"
-                    onClick={isRecording ? stopRecording : startRecording}
-                    disabled={voiceProcessMutation.isPending}
-                    aria-label={isRecording ? 'Stop recording' : 'Start recording'}
-                    className={`flex size-20 cursor-pointer items-center justify-center rounded-full transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${
-                      isRecording
-                        ? 'animate-pulse bg-red-500 text-white shadow-lg'
-                        : 'bg-[var(--brand)] text-white shadow-lg hover:opacity-90'
-                    }`}
-                  >
-                    {isRecording ? <Square size={28} /> : <Mic size={28} />}
-                  </button>
-
-                  <p className="m-0 text-sm font-semibold text-[var(--ink-soft)]">
-                    {voiceProcessMutation.isPending
-                      ? 'Understanding…'
-                      : isRecording
-                        ? 'Tap to stop'
-                        : 'Tap to start recording'}
-                  </p>
-
-                  {transcribeError ? (
-                    <p className="m-0 text-sm font-medium text-red-500">{transcribeError}</p>
-                  ) : null}
-
-                  <button
-                    type="button"
-                    onClick={() => setCaptureMode('input')}
-                    className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
-                  >
-                    Type instead
-                  </button>
-                </div>
-              ) : null}
-
-              {/* ── Input step ── */}
-              {captureMode === 'input' ? (
-                <form className="space-y-4" onSubmit={handleInterpret}>
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
-                      {ctx.defaultType === 'habit'
-                        ? 'Describe a habit'
-                        : ctx.defaultType === 'task'
-                          ? 'What do you need to do?'
-                          : 'What do you need?'}
-                    </span>
-                    <textarea
-                      autoFocus
-                      value={captureRawInput}
-                      onChange={(e) => setCaptureRawInput(e.target.value)}
-                      rows={4}
-                      placeholder={
-                        ctx.defaultType === 'habit'
-                          ? 'Exercise every morning, meditate for 10 min'
-                          : 'Call the bank tomorrow morning, high priority'
-                      }
-                      className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                    />
-                  </label>
-
-                  {captureError ? (
-                    <p className="m-0 text-sm font-medium text-red-500">{captureError}</p>
-                  ) : null}
-
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="submit"
-                      disabled={interpretMutation.isPending || !captureRawInput.trim()}
-                      className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {interpretMutation.isPending ? 'Interpreting…' : 'Interpret'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={resetCapture}
-                      className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              ) : null}
-
-              {/* ── Review step ── */}
-              {captureMode === 'review' ? (
-                <form className="space-y-4" onSubmit={handleConfirm}>
-                  {/* Type switcher — only on auto routes where both types are allowed */}
-                  {ctx.allowed.length > 1 ? (
-                    <div className="flex gap-2">
-                      {ctx.allowed.map((t) => (
-                        <button
-                          key={t}
-                          type="button"
-                          onClick={() => {
-                            setCaptureType(t)
-                            if (t === 'habit' && captureDraft) setHabitForm(draftToHabitForm(captureDraft))
-                            if (t === 'task' && captureDraft) setTaskForm(draftToTaskForm(captureDraft))
-                          }}
-                          className={
-                            captureType === t
-                              ? 'primary-pill inline-flex cursor-pointer items-center border-0 !py-1.5 !px-3.5 text-sm font-semibold'
-                              : 'secondary-pill inline-flex cursor-pointer items-center border-0 !py-1.5 !px-3.5 text-sm font-semibold'
-                          }
-                        >
-                          {t === 'task' ? 'Task' : 'Habit'}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  {/* Original input */}
-                  <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
-                    <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
-                      Original input
-                    </span>
-                    <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureDraft?.rawInput}</p>
-                  </div>
-
-                  {captureDraft?.matchedCalendarContext ? (
-                    <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
-                      <div className="mb-2 flex items-center gap-2">
-                        <CalendarDays size={15} className="text-[var(--ink-soft)]" />
-                        <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
-                          Linked calendar context
-                        </span>
-                      </div>
-                      <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">
-                        {captureDraft.matchedCalendarContext.summary}
-                      </p>
-                      <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
-                        {captureDraft.matchedCalendarContext.reason}
-                      </p>
-                    </div>
-                  ) : null}
-
-                  {/* Interpretation notes */}
-                  {captureNotes.length > 0 ? (
-                    <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
-                      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
-                        Notes
-                      </span>
-                      <ul className="m-0 space-y-1 pl-4">
-                        {captureNotes.map((note, i) => (
-                          <li key={i} className="text-xs leading-5 text-[var(--ink-soft)]">{note}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-
-                  {/* ── Task review fields ── */}
-                  {captureType === 'task' ? (
-                    <>
-                      <label className="block">
-                        <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Title</span>
-                        <input
-                          autoFocus
-                          value={taskForm.title}
-                          onChange={(e) => handleTaskChange('title', e.target.value)}
-                          placeholder="Task title"
-                          className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                        />
-                        {taskFieldErrors.title ? (
-                          <span className="mt-2 block text-sm font-medium text-red-500">{taskFieldErrors.title}</span>
-                        ) : null}
-                      </label>
-
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <label className="block">
-                          <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Due date</span>
-                          <input
-                            type="date"
-                            value={taskForm.dueDate ?? ''}
-                            onChange={(e) => handleTaskChange('dueDate', e.target.value)}
-                            className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                          />
-                        </label>
-                        <label className="block">
-                          <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Priority</span>
-                          <select
-                            value={taskForm.priority}
-                            onChange={(e) => handleTaskChange('priority', e.target.value as TaskFormValues['priority'])}
-                            className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                          >
-                            <option value="low">Low</option>
-                            <option value="medium">Medium</option>
-                            <option value="high">High</option>
-                          </select>
-                        </label>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setCaptureShowAdvanced((v) => !v)}
-                        className="flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
-                      >
-                        <ChevronDown size={16} className={`transition-transform duration-200 ${captureShowAdvanced ? 'rotate-180' : ''}`} />
-                        More options
-                      </button>
-
-                      {captureShowAdvanced ? (
-                        <div className="space-y-4">
-                          <label className="block">
-                            <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Notes</span>
-                            <textarea
-                              value={taskForm.notes ?? ''}
-                              onChange={(e) => handleTaskChange('notes', e.target.value)}
-                              rows={3}
-                              placeholder="Add context or next steps"
-                              className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                            />
-                          </label>
-                          <div className="grid gap-4 sm:grid-cols-2">
-                            <label className="block">
-                              <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Due time</span>
-                              <input
-                                type="time"
-                                value={taskForm.dueTime ?? ''}
-                                onChange={(e) => handleTaskChange('dueTime', e.target.value)}
-                                className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                              />
-                            </label>
-                            <label className="block">
-                              <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Est. min</span>
-                              <input
-                                type="number"
-                                min="1"
-                                max="1440"
-                                value={taskForm.estimatedMinutes ?? ''}
-                                onChange={(e) =>
-                                  handleTaskChange('estimatedMinutes', e.target.value ? Number(e.target.value) : undefined)
-                                }
-                                className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                              />
-                            </label>
-                          </div>
-                          <div>
-                            <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Preferred window</span>
-                            <div className="grid grid-cols-2 gap-2">
-                              <input
-                                type="time"
-                                value={taskForm.preferredStartTime ?? ''}
-                                onChange={(e) => handleTaskChange('preferredStartTime', e.target.value)}
-                                className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                              />
-                              <input
-                                type="time"
-                                value={taskForm.preferredEndTime ?? ''}
-                                onChange={(e) => handleTaskChange('preferredEndTime', e.target.value)}
-                                className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </>
-                  ) : null}
-
-                  {/* ── Habit review fields ── */}
-                  {captureType === 'habit' ? (
-                    <>
-                      <label className="block">
-                        <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Title</span>
-                        <input
-                          autoFocus
-                          value={habitForm.title}
-                          onChange={(e) => handleHabitChange('title', e.target.value)}
-                          placeholder="Habit title"
-                          className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                        />
-                        {habitFieldErrors.title ? (
-                          <span className="mt-2 block text-sm font-medium text-red-500">{habitFieldErrors.title}</span>
-                        ) : null}
-                      </label>
-
-                      <div>
-                        <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Cadence</span>
-                        <div className="flex gap-2">
-                          {(['daily', 'selected_days'] as const).map((c) => (
-                            <button
-                              key={c}
-                              type="button"
-                              onClick={() => handleHabitChange('cadenceType', c)}
-                              className={
-                                habitForm.cadenceType === c
-                                  ? 'primary-pill inline-flex cursor-pointer items-center border-0 !py-1.5 !px-3.5 text-sm font-semibold'
-                                  : 'secondary-pill inline-flex cursor-pointer items-center border-0 !py-1.5 !px-3.5 text-sm font-semibold'
-                              }
-                            >
-                              {c === 'daily' ? 'Daily' : 'Selected days'}
-                            </button>
-                          ))}
-                        </div>
-
-                        {habitForm.cadenceType === 'selected_days' ? (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {WEEKDAYS.map(({ value, label }) => (
-                              <button
-                                key={value}
-                                type="button"
-                                onClick={() => toggleWeekday(value)}
-                                className={
-                                  habitForm.cadenceDays?.includes(value)
-                                    ? 'primary-pill inline-flex cursor-pointer items-center border-0 !py-1 !px-3 text-xs font-semibold'
-                                    : 'secondary-pill inline-flex cursor-pointer items-center border-0 !py-1 !px-3 text-xs font-semibold'
-                                }
-                              >
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        ) : null}
-
-                        {habitFieldErrors.cadenceDays ? (
-                          <span className="mt-2 block text-sm font-medium text-red-500">{habitFieldErrors.cadenceDays}</span>
-                        ) : null}
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setCaptureShowAdvanced((v) => !v)}
-                        className="flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
-                      >
-                        <ChevronDown size={16} className={`transition-transform duration-200 ${captureShowAdvanced ? 'rotate-180' : ''}`} />
-                        More options
-                      </button>
-
-                      {captureShowAdvanced ? (
-                        <div className="space-y-4">
-                          <div>
-                            <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Preferred window</span>
-                            <div className="grid grid-cols-2 gap-2">
-                              <input
-                                type="time"
-                                value={habitForm.preferredStartTime ?? ''}
-                                onChange={(e) => handleHabitChange('preferredStartTime', e.target.value)}
-                                className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                              />
-                              <input
-                                type="time"
-                                value={habitForm.preferredEndTime ?? ''}
-                                onChange={(e) => handleHabitChange('preferredEndTime', e.target.value)}
-                                className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                              />
-                            </div>
-                          </div>
-                          <label className="block">
-                            <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Target count / day</span>
-                            <input
-                              type="number"
-                              min="1"
-                              max="20"
-                              value={habitForm.targetCount ?? 1}
-                              onChange={(e) => handleHabitChange('targetCount', Number(e.target.value))}
-                              className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                            />
-                          </label>
-                        </div>
-                      ) : null}
-                    </>
-                  ) : null}
-
-                  {captureError ? (
-                    <p className="m-0 text-sm font-medium text-red-500">{captureError}</p>
-                  ) : null}
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="submit"
-                      disabled={isConfirming}
-                      className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {confirmLabel}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCaptureMode('input')}
-                      className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="button"
-                      onClick={resetCapture}
-                      className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              ) : null}
-
-              {captureMode === 'clarify' ? (
-                <div className="space-y-4">
-                  <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
-                    <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
-                      Transcript
-                    </span>
-                    <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureRawInput}</p>
-                  </div>
-
-                  <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3">
-                    <p className="m-0 text-sm font-medium text-amber-200">{captureClarifyMessage}</p>
-                    {captureClarifyQuestions.length > 0 ? (
-                      <ul className="m-0 mt-3 space-y-1 pl-4">
-                        {captureClarifyQuestions.map((question, index) => (
-                          <li key={index} className="text-sm leading-6 text-amber-100">
-                            {question}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-
-                  {captureDraft?.matchedCalendarContext ? (
-                    <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
-                      <div className="mb-2 flex items-center gap-2">
-                        <CalendarDays size={15} className="text-[var(--ink-soft)]" />
-                        <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
-                          Linked calendar context
-                        </span>
-                      </div>
-                      <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">
-                        {captureDraft.matchedCalendarContext.summary}
-                      </p>
-                      <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
-                        {captureDraft.matchedCalendarContext.reason}
-                      </p>
-                    </div>
-                  ) : null}
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setCaptureMode('input')}
-                      className="primary-pill cursor-pointer border-0 text-sm font-semibold"
-                    >
-                      Edit transcript
-                    </button>
-                    {captureDraft ? (
-                      <button
-                        type="button"
-                        onClick={() => applyDraftForReview(captureDraft, captureRawInput)}
-                        className="secondary-pill cursor-pointer border-0 text-sm font-semibold"
-                      >
-                        Review draft anyway
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => setCaptureMode('recording')}
-                      className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
-                    >
-                      Try again
-                    </button>
-                    <button
-                      type="button"
-                      onClick={resetCapture}
-                      className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </div>
-    </>
-  )
-}
   function applyClarifyState(
     message: string,
     questions: string[],
@@ -888,10 +425,12 @@ export default function GlobalCaptureHost() {
     setCaptureError(null)
     setCaptureMode('clarify')
   }
-  function applyDraftForReview(draft: TypedTaskDraft, rawInput: string) {
+
+  function applyDraftForReview(draft: TypedTaskDraft, rawInput: string, backTo: CaptureMode = 'input') {
     setCaptureRawInput(rawInput)
     setCaptureDraft(draft)
     setCaptureNotes(draft.interpretationNotes)
+    setCaptureReviewBackMode(backTo)
 
     const resolvedType: CandidateType =
       ctx.defaultType === 'auto'
@@ -915,3 +454,700 @@ export default function GlobalCaptureHost() {
     setCaptureClarifyQuestions([])
     setCaptureMode('review')
   }
+
+  const isOpen = captureMode !== 'closed'
+  const isConfirming = confirmTaskMutation.isPending || confirmHabitMutation.isPending
+  const isVoiceStep = captureMode === 'recording' || captureMode === 'transcribing' || captureMode === 'interpreting'
+
+  // Sheet title
+  const sheetTitle =
+    captureMode === 'recording' || captureMode === 'transcribing' || captureMode === 'interpreting'
+      ? 'Voice capture'
+      : captureMode === 'success'
+        ? captureAutoSaved?.candidateType === 'habit'
+          ? 'Habit saved'
+          : 'Task saved'
+        : captureMode === 'review'
+          ? captureType === 'habit'
+            ? 'Review habit'
+            : 'Review task'
+          : captureMode === 'clarify'
+            ? 'Need a bit more detail'
+            : 'What do you need?'
+
+  // Confirm button label
+  const confirmLabel = isConfirming
+    ? 'Saving…'
+    : captureType === 'habit'
+      ? 'Create habit'
+      : 'Create task'
+
+  // ---------------------------------------------------------------------------
+  // Waveform bar renderer — live amplitude bars during recording
+  // ---------------------------------------------------------------------------
+  function WaveformBars({ levels }: { levels: number[] }) {
+    return (
+      <div className="flex items-center justify-center gap-[3px]" style={{ height: 56 }}>
+        {levels.map((level, i) => (
+          <span
+            key={i}
+            aria-hidden="true"
+            className="rounded-full transition-none"
+            style={{
+              width: 3,
+              height: Math.max(8, Math.round(level * 52)),
+              background: `linear-gradient(180deg, var(--brand), var(--accent))`,
+              opacity: Math.max(0.35, level),
+            }}
+          />
+        ))}
+      </div>
+    )
+  }
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+  return (
+    <CaptureContext.Provider value={{ openCapture }}>
+      {/* Backdrop */}
+      <div
+        onClick={resetCapture}
+        className={`fixed inset-0 z-40 bg-black/40 transition-opacity duration-300 ${isOpen ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+      />
+
+      {/* Bottom sheet */}
+      <div
+        className={`fixed inset-x-0 bottom-0 z-50 duration-300 lg:inset-0 lg:flex lg:items-center lg:justify-center ${
+          isOpen
+            ? 'translate-y-0 opacity-100 transition-[transform,opacity] lg:pointer-events-auto'
+            : 'translate-y-full opacity-0 transition-[transform,opacity] lg:translate-y-0 lg:pointer-events-none'
+        }`}
+      >
+        <div className="mx-auto w-full max-w-2xl lg:px-4">
+          <div className={`panel w-full ${isVoiceStep ? 'rounded-t-[2rem] pb-0 pt-0 lg:rounded-[2rem]' : 'rounded-t-[2rem] px-6 pb-10 pt-3 lg:rounded-[2rem]'}`}>
+
+            {/* ── Voice step UI (recording / transcribing / interpreting) ── */}
+            {isVoiceStep ? (
+              <div className="flex flex-col" style={{ height: '52vh', minHeight: 320, maxHeight: 480 }}>
+                {/* Top bar: drag handle + dismiss */}
+                <div className="flex items-center justify-between px-6 pt-3 pb-0 shrink-0">
+                  <div className="h-1 w-10 rounded-full bg-[var(--line)] lg:hidden" />
+                  <div className="hidden lg:block" />
+                  <button
+                    type="button"
+                    onClick={resetCapture}
+                    aria-label="Close"
+                    className="flex size-8 cursor-pointer items-center justify-center rounded-full text-[var(--ink-soft)] transition hover:bg-[var(--surface-strong)] hover:text-[var(--ink-strong)]"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {/* Center content */}
+                <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6">
+                  {/* Waveform area */}
+                  {captureMode === 'recording' ? (
+                    <WaveformBars levels={audioLevels} />
+                  ) : (
+                    /* Idle/processing bars — CSS animated */
+                    <div className="flex items-center justify-center gap-[3px]" style={{ height: 56 }}>
+                      {Array.from({ length: BAR_COUNT }, (_, i) => (
+                        <span
+                          key={i}
+                          aria-hidden="true"
+                          className="rounded-full bar-idle"
+                          style={{ width: 3, animationDelay: `${i * 55}ms` }}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Status label */}
+                  <div className="flex flex-col items-center gap-1">
+                    <p className="m-0 text-base font-semibold text-[var(--ink-strong)]">
+                      {captureMode === 'recording'
+                        ? isRecording ? 'Listening…' : 'Starting…'
+                        : captureMode === 'interpreting'
+                          ? 'Interpreting…'
+                          : 'Transcribing…'}
+                    </p>
+                    {captureMode === 'recording' && isRecording ? (
+                      <p className="m-0 text-xs text-[var(--ink-soft)]">Tap the button to stop</p>
+                    ) : null}
+                  </div>
+
+                  {/* Error */}
+                  {transcribeError ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <p className="m-0 text-sm font-medium text-red-500">{transcribeError}</p>
+                      <button
+                        type="button"
+                        onClick={() => { setTranscribeError(null); setCaptureMode('recording'); void startRecording() }}
+                        className="cursor-pointer text-sm font-semibold text-[var(--brand)] transition hover:underline"
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+
+                {/* Bottom controls */}
+                <div className="flex flex-col items-center gap-4 pb-8 pt-2 shrink-0">
+                  {/* Mic stop button */}
+                  {captureMode === 'recording' ? (
+                    <button
+                      type="button"
+                      onClick={isRecording ? stopRecording : startRecording}
+                      aria-label={isRecording ? 'Stop recording' : 'Start recording'}
+                      className="group relative flex size-[88px] cursor-pointer items-center justify-center rounded-full focus:outline-none active:scale-95"
+                      style={{ WebkitTapHighlightColor: 'transparent' }}
+                    >
+                      {/* Ripple rings */}
+                      {isRecording ? (
+                        <>
+                          <span aria-hidden="true" className="absolute inset-0 rounded-full bg-[var(--brand)] opacity-20" style={{ animation: 'mic-ripple 1.8s ease-out infinite' }} />
+                          <span aria-hidden="true" className="absolute inset-0 rounded-full bg-[var(--brand)] opacity-15" style={{ animation: 'mic-ripple 1.8s ease-out infinite 0.5s' }} />
+                          <span aria-hidden="true" className="absolute inset-0 rounded-full bg-[var(--brand)] opacity-10" style={{ animation: 'mic-ripple 1.8s ease-out infinite 1s' }} />
+                        </>
+                      ) : null}
+                      {/* Center circle */}
+                      <span className="relative flex size-[72px] items-center justify-center rounded-full bg-gradient-to-br from-[var(--brand)] to-[var(--accent)] text-white shadow-[0_8px_24px_rgba(37,99,235,0.4)] transition-transform group-active:scale-95">
+                        {isRecording ? <Square size={26} fill="white" strokeWidth={0} /> : <Mic size={26} />}
+                      </span>
+                    </button>
+                  ) : (
+                    /* Processing — non-interactive pulsing mic */
+                    <div className="flex size-[72px] items-center justify-center rounded-full bg-[var(--brand)]/10">
+                      <Mic size={26} className="animate-pulse text-[var(--brand)]" />
+                    </div>
+                  )}
+
+                  {/* Type instead link */}
+                  {captureMode === 'recording' ? (
+                    <button
+                      type="button"
+                      onClick={() => { cancelRecording(); setCaptureMode('input') }}
+                      className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                    >
+                      Type instead
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              /* ── All other steps — standard header + scrollable content ── */
+              <>
+                {/* Drag handle */}
+                <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[var(--line)] lg:hidden" />
+
+                {/* Header */}
+                <div className="mb-5 flex items-center justify-between gap-4">
+                  <h2 className="m-0 text-xl font-semibold text-[var(--ink-strong)]">{sheetTitle}</h2>
+                  <button
+                    type="button"
+                    onClick={resetCapture}
+                    aria-label="Close"
+                    className="flex size-8 cursor-pointer items-center justify-center rounded-full text-[var(--ink-soft)] transition hover:bg-[var(--surface-strong)] hover:text-[var(--ink-strong)]"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="max-h-[70vh] overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
+                  {/* ── Input step ── */}
+                  {captureMode === 'input' ? (
+                    <form className="space-y-4" onSubmit={handleInterpret}>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
+                          {ctx.defaultType === 'habit'
+                            ? 'Describe a habit'
+                            : ctx.defaultType === 'task'
+                              ? 'What do you need to do?'
+                              : 'What do you need?'}
+                        </span>
+                        <textarea
+                          autoFocus
+                          value={captureRawInput}
+                          onChange={(e) => setCaptureRawInput(e.target.value)}
+                          rows={4}
+                          placeholder={
+                            ctx.defaultType === 'habit'
+                              ? 'Exercise every morning, meditate for 10 min'
+                              : 'Call the bank tomorrow morning, high priority'
+                          }
+                          className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                        />
+                      </label>
+
+                      {captureError ? (
+                        <p className="m-0 text-sm font-medium text-red-500">{captureError}</p>
+                      ) : null}
+
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="submit"
+                          disabled={interpretMutation.isPending || !captureRawInput.trim()}
+                          className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {interpretMutation.isPending ? 'Interpreting…' : 'Interpret'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={resetCapture}
+                          className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : null}
+
+                  {/* ── Review step ── */}
+                  {captureMode === 'review' ? (
+                    <form className="space-y-4" onSubmit={handleConfirm}>
+                      {/* Type switcher — only on auto routes where both types are allowed */}
+                      {ctx.allowed.length > 1 ? (
+                        <div className="flex gap-2">
+                          {ctx.allowed.map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => {
+                                setCaptureType(t)
+                                if (t === 'habit' && captureDraft) setHabitForm(draftToHabitForm(captureDraft))
+                                if (t === 'task' && captureDraft) setTaskForm(draftToTaskForm(captureDraft))
+                              }}
+                              className={
+                                captureType === t
+                                  ? 'primary-pill inline-flex cursor-pointer items-center border-0 !py-1.5 !px-3.5 text-sm font-semibold'
+                                  : 'secondary-pill inline-flex cursor-pointer items-center border-0 !py-1.5 !px-3.5 text-sm font-semibold'
+                              }
+                            >
+                              {t === 'task' ? 'Task' : 'Habit'}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {/* Original input */}
+                      <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                          Original input
+                        </span>
+                        <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureDraft?.rawInput}</p>
+                      </div>
+
+                      {captureDraft?.matchedCalendarContext ? (
+                        <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+                          <div className="mb-2 flex items-center gap-2">
+                            <CalendarDays size={15} className="text-[var(--ink-soft)]" />
+                            <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                              Linked calendar context
+                            </span>
+                          </div>
+                          <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">
+                            {captureDraft.matchedCalendarContext.summary}
+                          </p>
+                          <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
+                            {captureDraft.matchedCalendarContext.reason}
+                          </p>
+                        </div>
+                      ) : null}
+
+                      {/* Interpretation notes */}
+                      {captureNotes.length > 0 ? (
+                        <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+                          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                            Notes
+                          </span>
+                          <ul className="m-0 space-y-1 pl-4">
+                            {captureNotes.map((note, i) => (
+                              <li key={i} className="text-xs leading-5 text-[var(--ink-soft)]">{note}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {/* ── Task review fields ── */}
+                      {captureType === 'task' ? (
+                        <>
+                          <label className="block">
+                            <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Title</span>
+                            <input
+                              autoFocus
+                              value={taskForm.title}
+                              onChange={(e) => handleTaskChange('title', e.target.value)}
+                              placeholder="Task title"
+                              className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                            />
+                            {taskFieldErrors.title ? (
+                              <span className="mt-2 block text-sm font-medium text-red-500">{taskFieldErrors.title}</span>
+                            ) : null}
+                          </label>
+
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <label className="block">
+                              <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Due date</span>
+                              <input
+                                type="date"
+                                value={taskForm.dueDate ?? ''}
+                                onChange={(e) => handleTaskChange('dueDate', e.target.value)}
+                                className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Priority</span>
+                              <select
+                                value={taskForm.priority}
+                                onChange={(e) => handleTaskChange('priority', e.target.value as TaskFormValues['priority'])}
+                                className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                              >
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                              </select>
+                            </label>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setCaptureShowAdvanced((v) => !v)}
+                            className="flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                          >
+                            <ChevronDown size={16} className={`transition-transform duration-200 ${captureShowAdvanced ? 'rotate-180' : ''}`} />
+                            More options
+                          </button>
+
+                          {captureShowAdvanced ? (
+                            <div className="space-y-4">
+                              <label className="block">
+                                <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Notes</span>
+                                <textarea
+                                  value={taskForm.notes ?? ''}
+                                  onChange={(e) => handleTaskChange('notes', e.target.value)}
+                                  rows={3}
+                                  placeholder="Add context or next steps"
+                                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                                />
+                              </label>
+                              <div className="grid gap-4 sm:grid-cols-2">
+                                <label className="block">
+                                  <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Due time</span>
+                                  <input
+                                    type="time"
+                                    value={taskForm.dueTime ?? ''}
+                                    onChange={(e) => handleTaskChange('dueTime', e.target.value)}
+                                    className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                                  />
+                                </label>
+                                <label className="block">
+                                  <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Est. min</span>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="1440"
+                                    value={taskForm.estimatedMinutes ?? ''}
+                                    onChange={(e) =>
+                                      handleTaskChange('estimatedMinutes', e.target.value ? Number(e.target.value) : undefined)
+                                    }
+                                    className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                                  />
+                                </label>
+                              </div>
+                              <div>
+                                <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Preferred window</span>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <input
+                                    type="time"
+                                    value={taskForm.preferredStartTime ?? ''}
+                                    onChange={(e) => handleTaskChange('preferredStartTime', e.target.value)}
+                                    className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                                  />
+                                  <input
+                                    type="time"
+                                    value={taskForm.preferredEndTime ?? ''}
+                                    onChange={(e) => handleTaskChange('preferredEndTime', e.target.value)}
+                                    className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : null}
+
+                      {/* ── Habit review fields ── */}
+                      {captureType === 'habit' ? (
+                        <>
+                          <label className="block">
+                            <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Title</span>
+                            <input
+                              autoFocus
+                              value={habitForm.title}
+                              onChange={(e) => handleHabitChange('title', e.target.value)}
+                              placeholder="Habit title"
+                              className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                            />
+                            {habitFieldErrors.title ? (
+                              <span className="mt-2 block text-sm font-medium text-red-500">{habitFieldErrors.title}</span>
+                            ) : null}
+                          </label>
+
+                          <div>
+                            <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Cadence</span>
+                            <div className="flex gap-2">
+                              {(['daily', 'selected_days'] as const).map((c) => (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  onClick={() => handleHabitChange('cadenceType', c)}
+                                  className={
+                                    habitForm.cadenceType === c
+                                      ? 'primary-pill inline-flex cursor-pointer items-center border-0 !py-1.5 !px-3.5 text-sm font-semibold'
+                                      : 'secondary-pill inline-flex cursor-pointer items-center border-0 !py-1.5 !px-3.5 text-sm font-semibold'
+                                  }
+                                >
+                                  {c === 'daily' ? 'Daily' : 'Selected days'}
+                                </button>
+                              ))}
+                            </div>
+
+                            {habitForm.cadenceType === 'selected_days' ? (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {WEEKDAYS.map(({ value, label }) => (
+                                  <button
+                                    key={value}
+                                    type="button"
+                                    onClick={() => toggleWeekday(value)}
+                                    className={
+                                      habitForm.cadenceDays?.includes(value)
+                                        ? 'primary-pill inline-flex cursor-pointer items-center border-0 !py-1 !px-3 text-xs font-semibold'
+                                        : 'secondary-pill inline-flex cursor-pointer items-center border-0 !py-1 !px-3 text-xs font-semibold'
+                                    }
+                                  >
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+
+                            {habitFieldErrors.cadenceDays ? (
+                              <span className="mt-2 block text-sm font-medium text-red-500">{habitFieldErrors.cadenceDays}</span>
+                            ) : null}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setCaptureShowAdvanced((v) => !v)}
+                            className="flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                          >
+                            <ChevronDown size={16} className={`transition-transform duration-200 ${captureShowAdvanced ? 'rotate-180' : ''}`} />
+                            More options
+                          </button>
+
+                          {captureShowAdvanced ? (
+                            <div className="space-y-4">
+                              <div>
+                                <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Preferred window</span>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <input
+                                    type="time"
+                                    value={habitForm.preferredStartTime ?? ''}
+                                    onChange={(e) => handleHabitChange('preferredStartTime', e.target.value)}
+                                    className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                                  />
+                                  <input
+                                    type="time"
+                                    value={habitForm.preferredEndTime ?? ''}
+                                    onChange={(e) => handleHabitChange('preferredEndTime', e.target.value)}
+                                    className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                                  />
+                                </div>
+                              </div>
+                              <label className="block">
+                                <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Target count / day</span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="20"
+                                  value={habitForm.targetCount ?? 1}
+                                  onChange={(e) => handleHabitChange('targetCount', Number(e.target.value))}
+                                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                                />
+                              </label>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : null}
+
+                      {captureError ? (
+                        <p className="m-0 text-sm font-medium text-red-500">{captureError}</p>
+                      ) : null}
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          type="submit"
+                          disabled={isConfirming}
+                          className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {confirmLabel}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCaptureMode(captureReviewBackMode)}
+                          className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                        >
+                          Back
+                        </button>
+                        <button
+                          type="button"
+                          onClick={resetCapture}
+                          className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : null}
+
+                  {captureMode === 'clarify' ? (
+                    <div className="space-y-4">
+                      <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                          Transcript
+                        </span>
+                        <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureRawInput}</p>
+                      </div>
+
+                      <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3">
+                        <p className="m-0 text-sm font-medium text-amber-200">{captureClarifyMessage}</p>
+                        {captureClarifyQuestions.length > 0 ? (
+                          <ul className="m-0 mt-3 space-y-1 pl-4">
+                            {captureClarifyQuestions.map((question, index) => (
+                              <li key={index} className="text-sm leading-6 text-amber-100">
+                                {question}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+
+                      {captureDraft?.matchedCalendarContext ? (
+                        <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+                          <div className="mb-2 flex items-center gap-2">
+                            <CalendarDays size={15} className="text-[var(--ink-soft)]" />
+                            <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                              Linked calendar context
+                            </span>
+                          </div>
+                          <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">
+                            {captureDraft.matchedCalendarContext.summary}
+                          </p>
+                          <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
+                            {captureDraft.matchedCalendarContext.reason}
+                          </p>
+                        </div>
+                      ) : null}
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setCaptureMode('input')}
+                          className="primary-pill cursor-pointer border-0 text-sm font-semibold"
+                        >
+                          Type instead
+                        </button>
+                        {captureDraft ? (
+                          <button
+                            type="button"
+                            onClick={() => applyDraftForReview(captureDraft, captureRawInput)}
+                            className="secondary-pill cursor-pointer border-0 text-sm font-semibold"
+                          >
+                            Review draft anyway
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => { setCaptureMode('recording'); void startRecording() }}
+                          className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                        >
+                          Try again
+                        </button>
+                        <button
+                          type="button"
+                          onClick={resetCapture}
+                          className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {captureMode === 'success' && captureAutoSaved ? (
+                    <div className="space-y-4">
+                      <div className="flex flex-col items-center gap-3 py-4">
+                        <div className="flex size-16 items-center justify-center rounded-full bg-green-500/10">
+                          <CheckCircle size={32} className="text-green-500" />
+                        </div>
+                        <p className="m-0 text-center text-base font-semibold text-[var(--ink-strong)]">
+                          {captureAutoSaved.candidateType === 'habit' ? 'Habit saved' : 'Task saved'}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                          Transcript
+                        </span>
+                        <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureAutoSaved.transcript}</p>
+                      </div>
+
+                      {captureAutoSaved.matchedCalendarContext ? (
+                        <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+                          <div className="mb-2 flex items-center gap-2">
+                            <CalendarDays size={15} className="text-[var(--ink-soft)]" />
+                            <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                              Linked calendar context
+                            </span>
+                          </div>
+                          <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">
+                            {captureAutoSaved.matchedCalendarContext.summary}
+                          </p>
+                          <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
+                            {captureAutoSaved.matchedCalendarContext.reason}
+                          </p>
+                        </div>
+                      ) : null}
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void navigate({ to: captureAutoSaved.candidateType === 'habit' ? '/habits' : '/tasks' })
+                            resetCapture()
+                          }}
+                          className="primary-pill cursor-pointer border-0 text-sm font-semibold"
+                        >
+                          View {captureAutoSaved.candidateType}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={resetCapture}
+                          className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                        >
+                          Done
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+      {children}
+    </CaptureContext.Provider>
+  )
+}
