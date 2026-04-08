@@ -12,7 +12,7 @@ function getRequiredAudioFilePath() {
 
   if (!audioFilePath) {
     throw new Error(
-      'Set TRANSCRIPTION_SMOKE_AUDIO_FILE to a real audio file path before running pnpm test:transcription-live.',
+      'Set TRANSCRIPTION_SMOKE_AUDIO_FILE to a real audio file path before running bun test:transcription-live.',
     )
   }
 

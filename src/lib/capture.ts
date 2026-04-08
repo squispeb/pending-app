@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { taskCreateSchema, taskPrioritySchema } from './tasks'
-import { habitCreateSchema } from './habits'
+import { habitCadenceSchema, habitCreateSchema, habitWeekdaySchema, type HabitWeekday } from './habits'
 
 const captureDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const captureTimeSchema = z.string().regex(/^\d{2}:\d{2}$/)
@@ -27,6 +27,9 @@ export const typedTaskDraftSchema = z
     dueTime: captureTimeSchema.nullable(),
     priority: taskPrioritySchema.nullable(),
     estimatedMinutes: z.number().int().positive().max(1440).nullable(),
+    cadenceType: habitCadenceSchema.nullable(),
+    cadenceDays: z.array(habitWeekdaySchema).default([]),
+    targetCount: z.number().int().positive().max(20).nullable(),
     preferredStartTime: captureTimeSchema.nullable(),
     preferredEndTime: captureTimeSchema.nullable(),
     interpretationNotes: z.array(z.string().trim().min(1)).default([]),
@@ -65,6 +68,9 @@ export const typedTaskDraftProviderOutputSchema = z
     dueTime: captureTimeSchema.nullable().optional(),
     priority: taskPrioritySchema.nullable().optional(),
     estimatedMinutes: z.number().int().positive().max(1440).nullable().optional(),
+    cadenceType: habitCadenceSchema.nullable().optional(),
+    cadenceDays: z.array(habitWeekdaySchema).optional(),
+    targetCount: z.number().int().positive().max(20).nullable().optional(),
     preferredStartTime: captureTimeSchema.nullable().optional(),
     preferredEndTime: captureTimeSchema.nullable().optional(),
     interpretationNotes: z.array(z.string().trim().min(1)).optional(),
@@ -131,6 +137,16 @@ export type InterpretCaptureSuccess = z.infer<typeof interpretCaptureSuccessSche
 export type InterpretCaptureFailure = z.infer<typeof interpretCaptureFailureSchema>
 export type ConfirmCapturedTaskInput = z.infer<typeof confirmCapturedTaskInputSchema>
 export type ConfirmCapturedHabitInput = z.infer<typeof confirmCapturedHabitInputSchema>
+
+const WEEKDAY_MATCHERS: Array<{ day: HabitWeekday; pattern: RegExp }> = [
+  { day: 'mon', pattern: /\b(monday|mondays|lunes)\b/i },
+  { day: 'tue', pattern: /\b(tuesday|tuesdays|martes)\b/i },
+  { day: 'wed', pattern: /\b(wednesday|wednesdays|miercoles|miércoles)\b/i },
+  { day: 'thu', pattern: /\b(thursday|thursdays|jueves)\b/i },
+  { day: 'fri', pattern: /\b(friday|fridays|viernes)\b/i },
+  { day: 'sat', pattern: /\b(saturday|saturdays|sabado|sábado)\b/i },
+  { day: 'sun', pattern: /\b(sunday|sundays|domingo|domingos)\b/i },
+] as const
 
 type LocalDateParts = {
   year: number
@@ -222,6 +238,48 @@ export function inferPriorityFromInput(normalizedInput: string) {
   return null
 }
 
+export function inferCadenceFromInput(normalizedInput: string) {
+  if (/\b(cada dia|cada día|todos los dias|todos los días|daily|every day)\b/i.test(normalizedInput)) {
+    return {
+      candidateType: 'habit' as const,
+      cadenceType: 'daily' as const,
+      cadenceDays: [] as Array<HabitWeekday>,
+      targetCount: 1,
+    }
+  }
+
+  if (/\b(every weekday|weekdays|cada dia laboral|cada día laboral|de lunes a viernes)\b/i.test(normalizedInput)) {
+    return {
+      candidateType: 'habit' as const,
+      cadenceType: 'selected_days' as const,
+      cadenceDays: ['mon', 'tue', 'wed', 'thu', 'fri'] satisfies Array<HabitWeekday>,
+      targetCount: 1,
+    }
+  }
+
+  const matchedDays = WEEKDAY_MATCHERS.filter(({ pattern }) => pattern.test(normalizedInput)).map(
+    ({ day }) => day,
+  )
+
+  const hasRecurringCue = /\b(cada|todos los|todas las|every|each|on)\b/i.test(normalizedInput)
+
+  if (hasRecurringCue && matchedDays.length > 0) {
+    return {
+      candidateType: 'habit' as const,
+      cadenceType: 'selected_days' as const,
+      cadenceDays: Array.from(new Set(matchedDays)),
+      targetCount: 1,
+    }
+  }
+
+  return {
+    candidateType: 'task' as const,
+    cadenceType: null,
+    cadenceDays: [] as Array<HabitWeekday>,
+    targetCount: null,
+  }
+}
+
 export function inferDueDateFromInput(normalizedInput: string, currentDate: string, timezone: string) {
   const baseDate = parseCurrentDateString(currentDate, timezone)
 
@@ -265,6 +323,7 @@ export function buildHeuristicTaskDraft(
   const dueDate = inferDueDateFromInput(normalizedInput, input.currentDate, input.timezone)
   const title = inferTitleFromInput(normalizedInput)
   const notes = title && normalizedInput !== title ? normalizedInput : null
+  const cadence = inferCadenceFromInput(normalizedInput)
 
   if (/\b(domingo que viene)\b/i.test(normalizedInput) && dueDate) {
     interpretationNotes.push("Interpreted 'domingo que viene' as the next upcoming Sunday.")
@@ -278,16 +337,23 @@ export function buildHeuristicTaskDraft(
     interpretationNotes.push('Could not infer a short task title.')
   }
 
+  if (cadence.candidateType === 'habit') {
+    interpretationNotes.push('Detected recurring routine; drafted as a habit candidate.')
+  }
+
   return {
     rawInput: input.rawInput,
     normalizedInput,
-    candidateType: 'task' as const,
+    candidateType: cadence.candidateType,
     title,
     notes,
     dueDate,
     dueTime: null,
     priority,
     estimatedMinutes: null,
+    cadenceType: cadence.cadenceType,
+    cadenceDays: cadence.cadenceDays,
+    targetCount: cadence.targetCount,
     preferredStartTime: null,
     preferredEndTime: null,
     interpretationNotes,
@@ -308,6 +374,9 @@ export function mergeTypedTaskDrafts(
     dueTime: providerDraft?.dueTime ?? heuristicDraft.dueTime,
     priority: providerDraft?.priority ?? heuristicDraft.priority,
     estimatedMinutes: providerDraft?.estimatedMinutes ?? heuristicDraft.estimatedMinutes,
+    cadenceType: providerDraft?.cadenceType ?? heuristicDraft.cadenceType,
+    cadenceDays: providerDraft?.cadenceDays ?? heuristicDraft.cadenceDays,
+    targetCount: providerDraft?.targetCount ?? heuristicDraft.targetCount,
     preferredStartTime: providerDraft?.preferredStartTime ?? heuristicDraft.preferredStartTime,
     preferredEndTime: providerDraft?.preferredEndTime ?? heuristicDraft.preferredEndTime,
     interpretationNotes: [
