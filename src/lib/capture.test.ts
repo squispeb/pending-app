@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildVoiceClarificationMessage,
+  buildVoiceClarificationQuestions,
   buildHeuristicTaskDraft,
+  evaluateVoiceCaptureConfidence,
   inferCadenceFromInput,
   inferDueDateFromInput,
   inferPriorityFromInput,
@@ -116,5 +119,93 @@ describe('capture helpers', () => {
     expect(merged.cadenceType).toBe('selected_days')
     expect(merged.cadenceDays).toEqual(['mon', 'thu'])
     expect(merged.targetCount).toBe(1)
+  })
+
+  it('evaluates high and review confidence for voice capture', () => {
+    const highConfidenceDraft = typedTaskDraftSchema.parse({
+      rawInput: 'Comprar focos para la sala mañana.',
+      normalizedInput: 'Comprar focos para la sala mañana.',
+      candidateType: 'task',
+      title: 'Comprar focos para la sala',
+      notes: null,
+      dueDate: '2026-04-09',
+      dueTime: null,
+      priority: null,
+      estimatedMinutes: null,
+      cadenceType: null,
+      cadenceDays: [],
+      targetCount: null,
+      matchedCalendarContext: null,
+      preferredStartTime: null,
+      preferredEndTime: null,
+      interpretationNotes: [],
+    })
+
+    const reviewDraft = typedTaskDraftSchema.parse({
+      ...highConfidenceDraft,
+      title: null,
+      interpretationNotes: ['Could not infer a short task title.'],
+    })
+
+    expect(evaluateVoiceCaptureConfidence(highConfidenceDraft, highConfidenceDraft.rawInput)).toBe('high')
+    expect(evaluateVoiceCaptureConfidence(reviewDraft, reviewDraft.rawInput)).toBe('review')
+  })
+
+  it('builds a clarification message for very weak voice captures', () => {
+    const weakDraft = typedTaskDraftSchema.parse({
+      rawInput: 'ehh',
+      normalizedInput: 'ehh',
+      candidateType: 'task',
+      title: null,
+      notes: null,
+      dueDate: null,
+      dueTime: null,
+      priority: null,
+      estimatedMinutes: null,
+      cadenceType: null,
+      cadenceDays: [],
+      targetCount: null,
+      matchedCalendarContext: null,
+      preferredStartTime: null,
+      preferredEndTime: null,
+      interpretationNotes: ['Could not infer a short task title.'],
+    })
+
+    expect(evaluateVoiceCaptureConfidence(weakDraft, weakDraft.rawInput)).toBe('clarify')
+    expect(buildVoiceClarificationMessage(weakDraft, weakDraft.rawInput)).toBe(
+      'I need you to restate that before I can save it.',
+    )
+    expect(buildVoiceClarificationQuestions(weakDraft, weakDraft.rawInput)).toEqual([
+      'What do you want to add?',
+    ])
+  })
+
+  it('asks task-vs-habit clarification questions when the intent is ambiguous', () => {
+    const ambiguousDraft = typedTaskDraftSchema.parse({
+      rawInput: 'Leer mas',
+      normalizedInput: 'Leer mas',
+      candidateType: 'task',
+      title: 'Leer mas',
+      notes: null,
+      dueDate: null,
+      dueTime: null,
+      priority: null,
+      estimatedMinutes: null,
+      cadenceType: null,
+      cadenceDays: [],
+      targetCount: null,
+      matchedCalendarContext: null,
+      preferredStartTime: null,
+      preferredEndTime: null,
+      interpretationNotes: ['Task-vs-habit intent is unclear from the transcript.'],
+    })
+
+    expect(evaluateVoiceCaptureConfidence(ambiguousDraft, ambiguousDraft.rawInput)).toBe('clarify')
+    expect(buildVoiceClarificationMessage(ambiguousDraft, ambiguousDraft.rawInput)).toBe(
+      'I need to confirm whether this belongs in tasks or habits.',
+    )
+    expect(buildVoiceClarificationQuestions(ambiguousDraft, ambiguousDraft.rawInput)).toEqual([
+      'Is this a one-time task or a habit you want to repeat?',
+    ])
   })
 })

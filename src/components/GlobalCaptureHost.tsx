@@ -22,8 +22,8 @@ import {
   confirmCapturedHabit as confirmCapturedHabitFn,
   confirmCapturedTask as confirmCapturedTaskFn,
   interpretCaptureInput,
+  processVoiceCapture,
 } from '../server/capture'
-import { transcribeCaptureAudio } from '../server/transcription'
 
 // ---------------------------------------------------------------------------
 // Route → context mapping
@@ -43,7 +43,7 @@ function routeContext(pathname: string): RouteContext {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-type CaptureMode = 'closed' | 'recording' | 'input' | 'review'
+type CaptureMode = 'closed' | 'recording' | 'input' | 'review' | 'clarify'
 
 const EMPTY_TASK_FORM = toTaskFormValues(null)
 const EMPTY_HABIT_FORM = toHabitFormValues(null)
@@ -108,6 +108,8 @@ export default function GlobalCaptureHost() {
   const [habitFieldErrors, setHabitFieldErrors] = useState<Partial<Record<keyof HabitFormValues, string>>>({})
 
   const [captureError, setCaptureError] = useState<string | null>(null)
+  const [captureClarifyMessage, setCaptureClarifyMessage] = useState<string | null>(null)
+  const [captureClarifyQuestions, setCaptureClarifyQuestions] = useState<string[]>([])
   const [captureShowAdvanced, setCaptureShowAdvanced] = useState(false)
 
   // Voice
@@ -130,30 +132,7 @@ export default function GlobalCaptureHost() {
         setCaptureError(result.message)
         return
       }
-      const draft = result.draft
-      setCaptureDraft(draft)
-      setCaptureNotes(draft.interpretationNotes)
-
-      // Determine candidate type: auto → use what the LLM returned, else use ctx default
-      const resolvedType: CandidateType =
-        ctx.defaultType === 'auto'
-          ? draft.candidateType ?? 'task'
-          : (ctx.defaultType as CandidateType)
-
-      setCaptureType(resolvedType)
-
-      if (resolvedType === 'habit') {
-        setHabitForm(draftToHabitForm(draft))
-        setHabitFieldErrors({})
-      } else {
-        setTaskForm(draftToTaskForm(draft))
-        setTaskFieldErrors({})
-      }
-
-      const hasAdvanced = !!(draft.dueTime || draft.estimatedMinutes || draft.preferredStartTime)
-      setCaptureShowAdvanced(hasAdvanced)
-      setCaptureError(null)
-      setCaptureMode('review')
+      applyDraftForReview(result.draft, result.draft.rawInput)
     },
     onError: (error) => {
       setCaptureError(error instanceof Error ? error.message : 'Interpretation failed.')
@@ -205,23 +184,41 @@ export default function GlobalCaptureHost() {
     },
   })
 
-  const transcribeMutation = useMutation({
+  const voiceProcessMutation = useMutation({
     mutationFn: async (audioBlob: Blob) => {
       const audioFile = new File([audioBlob], 'recording.webm', { type: audioBlob.type || 'audio/webm' })
       const formData = new FormData()
       formData.set('audio', audioFile, audioFile.name)
       formData.set('languageHint', 'auto')
       formData.set('source', 'pending-app')
-      return transcribeCaptureAudio({ data: formData })
+      formData.set('currentDate', getTodayDateString())
+      formData.set('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone)
+      return processVoiceCapture({ data: formData })
     },
     onSuccess: (result) => {
       if (!result.ok) {
         setTranscribeError(result.message)
         return
       }
-      setCaptureRawInput(result.transcript)
+
+      if (result.outcome === 'auto_saved') {
+        setTranscribeError(null)
+        resetCapture()
+        void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+        void queryClient.invalidateQueries({ queryKey: ['habits'] })
+        void queryClient.invalidateQueries({ queryKey: ['habit-completions'] })
+        void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+        return
+      }
+
+      if (result.outcome === 'clarify') {
+        applyClarifyState(result.message, result.questions, result.transcript, result.draft)
+        setTranscribeError(null)
+        return
+      }
+
+      applyDraftForReview(result.draft, result.transcript)
       setTranscribeError(null)
-      setCaptureMode('input')
     },
     onError: (error) => {
       setTranscribeError(error instanceof Error ? error.message : 'Transcription failed.')
@@ -242,7 +239,7 @@ export default function GlobalCaptureHost() {
       recorder.onstop = () => {
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
         stream.getTracks().forEach((t) => t.stop())
-        transcribeMutation.mutate(blob)
+        voiceProcessMutation.mutate(blob)
       }
       recorder.start()
       mediaRecorderRef.current = recorder
@@ -273,6 +270,8 @@ export default function GlobalCaptureHost() {
     setHabitForm(EMPTY_HABIT_FORM)
     setHabitFieldErrors({})
     setCaptureError(null)
+    setCaptureClarifyMessage(null)
+    setCaptureClarifyQuestions([])
     setCaptureNotes([])
     setCaptureShowAdvanced(false)
     setTranscribeError(null)
@@ -341,6 +340,8 @@ export default function GlobalCaptureHost() {
         ? captureType === 'habit'
           ? 'Review habit'
           : 'Review task'
+        : captureMode === 'clarify'
+          ? 'Need a bit more detail'
         : 'What do you need?'
 
   // Confirm button label
@@ -404,7 +405,7 @@ export default function GlobalCaptureHost() {
                   <button
                     type="button"
                     onClick={isRecording ? stopRecording : startRecording}
-                    disabled={transcribeMutation.isPending}
+                    disabled={voiceProcessMutation.isPending}
                     aria-label={isRecording ? 'Stop recording' : 'Start recording'}
                     className={`flex size-20 cursor-pointer items-center justify-center rounded-full transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${
                       isRecording
@@ -416,8 +417,8 @@ export default function GlobalCaptureHost() {
                   </button>
 
                   <p className="m-0 text-sm font-semibold text-[var(--ink-soft)]">
-                    {transcribeMutation.isPending
-                      ? 'Transcribing…'
+                    {voiceProcessMutation.isPending
+                      ? 'Understanding…'
                       : isRecording
                         ? 'Tap to stop'
                         : 'Tap to start recording'}
@@ -792,6 +793,80 @@ export default function GlobalCaptureHost() {
                   </div>
                 </form>
               ) : null}
+
+              {captureMode === 'clarify' ? (
+                <div className="space-y-4">
+                  <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
+                    <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                      Transcript
+                    </span>
+                    <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureRawInput}</p>
+                  </div>
+
+                  <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3">
+                    <p className="m-0 text-sm font-medium text-amber-200">{captureClarifyMessage}</p>
+                    {captureClarifyQuestions.length > 0 ? (
+                      <ul className="m-0 mt-3 space-y-1 pl-4">
+                        {captureClarifyQuestions.map((question, index) => (
+                          <li key={index} className="text-sm leading-6 text-amber-100">
+                            {question}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+
+                  {captureDraft?.matchedCalendarContext ? (
+                    <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+                      <div className="mb-2 flex items-center gap-2">
+                        <CalendarDays size={15} className="text-[var(--ink-soft)]" />
+                        <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                          Linked calendar context
+                        </span>
+                      </div>
+                      <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">
+                        {captureDraft.matchedCalendarContext.summary}
+                      </p>
+                      <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
+                        {captureDraft.matchedCalendarContext.reason}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setCaptureMode('input')}
+                      className="primary-pill cursor-pointer border-0 text-sm font-semibold"
+                    >
+                      Edit transcript
+                    </button>
+                    {captureDraft ? (
+                      <button
+                        type="button"
+                        onClick={() => applyDraftForReview(captureDraft, captureRawInput)}
+                        className="secondary-pill cursor-pointer border-0 text-sm font-semibold"
+                      >
+                        Review draft anyway
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setCaptureMode('recording')}
+                      className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                    >
+                      Try again
+                    </button>
+                    <button
+                      type="button"
+                      onClick={resetCapture}
+                      className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -799,3 +874,44 @@ export default function GlobalCaptureHost() {
     </>
   )
 }
+  function applyClarifyState(
+    message: string,
+    questions: string[],
+    transcript: string,
+    draft: TypedTaskDraft | null,
+  ) {
+    setCaptureRawInput(transcript)
+    setCaptureDraft(draft)
+    setCaptureNotes(draft?.interpretationNotes ?? [])
+    setCaptureClarifyMessage(message)
+    setCaptureClarifyQuestions(questions)
+    setCaptureError(null)
+    setCaptureMode('clarify')
+  }
+  function applyDraftForReview(draft: TypedTaskDraft, rawInput: string) {
+    setCaptureRawInput(rawInput)
+    setCaptureDraft(draft)
+    setCaptureNotes(draft.interpretationNotes)
+
+    const resolvedType: CandidateType =
+      ctx.defaultType === 'auto'
+        ? draft.candidateType ?? 'task'
+        : (ctx.defaultType as CandidateType)
+
+    setCaptureType(resolvedType)
+
+    if (resolvedType === 'habit') {
+      setHabitForm(draftToHabitForm(draft))
+      setHabitFieldErrors({})
+    } else {
+      setTaskForm(draftToTaskForm(draft))
+      setTaskFieldErrors({})
+    }
+
+    const hasAdvanced = !!(draft.dueTime || draft.estimatedMinutes || draft.preferredStartTime)
+    setCaptureShowAdvanced(hasAdvanced)
+    setCaptureError(null)
+    setCaptureClarifyMessage(null)
+    setCaptureClarifyQuestions([])
+    setCaptureMode('review')
+  }

@@ -1,6 +1,10 @@
 import { z } from 'zod'
 import { taskCreateSchema, taskPrioritySchema } from './tasks'
 import { habitCadenceSchema, habitCreateSchema, habitWeekdaySchema, type HabitWeekday } from './habits'
+import {
+  transcriptionDetectedLanguageSchema,
+  transcribeAudioUploadInputSchema,
+} from './transcription'
 
 const captureDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const captureTimeSchema = z.string().regex(/^\d{2}:\d{2}$/)
@@ -138,6 +142,52 @@ export const confirmCapturedHabitInputSchema = z.object({
   habit: habitCreateSchema,
 })
 
+export const processVoiceCaptureInputSchema = transcribeAudioUploadInputSchema.extend({
+  currentDate: captureDateSchema,
+  timezone: z.string().trim().min(1).max(120),
+})
+
+export const processVoiceCaptureAutoSavedSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('auto_saved'),
+  transcript: z.string().trim().min(1),
+  language: transcriptionDetectedLanguageSchema,
+  candidateType: candidateTypeSchema,
+  createdId: z.string().min(1),
+  matchedCalendarContext: matchedCalendarContextSchema.nullable(),
+})
+
+export const processVoiceCaptureReviewSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('review'),
+  transcript: z.string().trim().min(1),
+  language: transcriptionDetectedLanguageSchema,
+  draft: typedTaskDraftSchema,
+})
+
+export const processVoiceCaptureClarifySchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('clarify'),
+  transcript: z.string().trim().min(1),
+  language: transcriptionDetectedLanguageSchema,
+  message: z.string().trim().min(1),
+  questions: z.array(z.string().trim().min(1)).min(1),
+  draft: typedTaskDraftSchema.nullable(),
+})
+
+export const processVoiceCaptureFailureSchema = z.object({
+  ok: z.literal(false),
+  code: z.string().trim().min(1),
+  message: z.string().trim().min(1),
+})
+
+export const processVoiceCaptureResponseSchema = z.union([
+  processVoiceCaptureAutoSavedSchema,
+  processVoiceCaptureReviewSchema,
+  processVoiceCaptureClarifySchema,
+  processVoiceCaptureFailureSchema,
+])
+
 export type CaptureLanguageHint = z.infer<typeof captureLanguageHintSchema>
 export type CandidateType = z.infer<typeof candidateTypeSchema>
 export type InterpretCaptureInput = z.infer<typeof interpretCaptureInputSchema>
@@ -148,6 +198,23 @@ export type InterpretCaptureFailure = z.infer<typeof interpretCaptureFailureSche
 export type ConfirmCapturedTaskInput = z.infer<typeof confirmCapturedTaskInputSchema>
 export type ConfirmCapturedHabitInput = z.infer<typeof confirmCapturedHabitInputSchema>
 export type MatchedCalendarContext = z.infer<typeof matchedCalendarContextSchema>
+export type ProcessVoiceCaptureInput = z.infer<typeof processVoiceCaptureInputSchema>
+export type ProcessVoiceCaptureAutoSaved = z.infer<typeof processVoiceCaptureAutoSavedSchema>
+export type ProcessVoiceCaptureReview = z.infer<typeof processVoiceCaptureReviewSchema>
+export type ProcessVoiceCaptureClarify = z.infer<typeof processVoiceCaptureClarifySchema>
+export type ProcessVoiceCaptureFailure = z.infer<typeof processVoiceCaptureFailureSchema>
+export type ProcessVoiceCaptureResponse = z.infer<typeof processVoiceCaptureResponseSchema>
+
+export type VoiceCaptureConfidence = 'high' | 'review' | 'clarify'
+
+function isTaskHabitAmbiguityNote(note: string) {
+  return (
+    /(task|habit|one[- ]off|recurring|repeat)/i.test(note) &&
+    /(ambiguous|unclear|not clear|could not determine|cannot determine|can't tell|cannot tell)/i.test(
+      note,
+    )
+  )
+}
 
 const WEEKDAY_MATCHERS: Array<{ day: HabitWeekday; pattern: RegExp }> = [
   { day: 'mon', pattern: /\b(monday|mondays|lunes)\b/i },
@@ -235,6 +302,15 @@ function cleanLeadingVerbPrefix(value: string) {
 
 export function normalizeCaptureInput(rawInput: string) {
   return rawInput.replace(/\s+/g, ' ').trim()
+}
+
+export function tokenizeForCaptureMatching(value: string) {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .split(/[^a-z0-9]+/i)
+    .filter((token) => token.length >= 3)
 }
 
 export function inferPriorityFromInput(normalizedInput: string) {
@@ -399,4 +475,141 @@ export function mergeTypedTaskDrafts(
   }
 
   return typedTaskDraftSchema.parse(merged)
+}
+
+export function draftToTaskCreateInput(draft: TypedTaskDraft) {
+  return taskCreateSchema.parse({
+    title: draft.title ?? '',
+    notes: draft.notes ?? '',
+    priority: draft.priority ?? 'medium',
+    dueDate: draft.dueDate ?? '',
+    dueTime: draft.dueTime ?? '',
+    reminderAt: '',
+    estimatedMinutes: draft.estimatedMinutes ?? undefined,
+    preferredStartTime: draft.preferredStartTime ?? '',
+    preferredEndTime: draft.preferredEndTime ?? '',
+  })
+}
+
+export function draftToHabitCreateInput(draft: TypedTaskDraft) {
+  return habitCreateSchema.parse({
+    title: draft.title ?? '',
+    cadenceType: draft.cadenceType ?? 'daily',
+    cadenceDays: draft.cadenceDays,
+    targetCount: draft.targetCount ?? 1,
+    preferredStartTime: draft.preferredStartTime ?? '',
+    preferredEndTime: draft.preferredEndTime ?? '',
+    reminderAt: '',
+  })
+}
+
+export function evaluateVoiceCaptureConfidence(draft: TypedTaskDraft, transcript: string): VoiceCaptureConfidence {
+  const normalizedTranscript = normalizeCaptureInput(transcript)
+  const transcriptTokens = tokenizeForCaptureMatching(normalizedTranscript)
+
+  if (!normalizedTranscript || normalizedTranscript.length < 4 || transcriptTokens.length === 0) {
+    return 'clarify'
+  }
+
+  const hasTaskHabitAmbiguity = draft.interpretationNotes.some((note) => isTaskHabitAmbiguityNote(note))
+  const hasBlockingInterpretationNote = draft.interpretationNotes.some((note) =>
+    /could not infer|ambiguous|unclear|clarify/i.test(note) && !isTaskHabitAmbiguityNote(note),
+  )
+
+  const hasNoUsefulStructure = !draft.title && !draft.dueDate && draft.cadenceType === null && !draft.notes
+
+  if (hasNoUsefulStructure || hasTaskHabitAmbiguity) {
+    return 'clarify'
+  }
+
+  if (hasBlockingInterpretationNote) {
+    return 'review'
+  }
+
+  try {
+    if (draft.candidateType === 'habit') {
+      draftToHabitCreateInput(draft)
+    } else {
+      draftToTaskCreateInput(draft)
+    }
+  } catch {
+    return 'review'
+  }
+
+  return 'high'
+}
+
+export function buildVoiceClarificationQuestions(draft: TypedTaskDraft, transcript: string) {
+  const normalizedTranscript = normalizeCaptureInput(transcript)
+  const transcriptTokens = tokenizeForCaptureMatching(normalizedTranscript)
+
+  if (!normalizedTranscript || normalizedTranscript.length < 4 || transcriptTokens.length === 0) {
+    return ['What do you want to add?']
+  }
+
+  const questions: Array<string> = []
+  const hasTaskHabitAmbiguity = draft.interpretationNotes.some((note) => isTaskHabitAmbiguityNote(note))
+
+  if (hasTaskHabitAmbiguity) {
+    questions.push('Is this a one-time task or a habit you want to repeat?')
+  }
+
+  if (!draft.title) {
+    questions.push(
+      hasTaskHabitAmbiguity
+        ? 'What should I call it?'
+        : draft.candidateType === 'habit'
+          ? 'What should I call this habit?'
+          : 'What should I call this task?',
+    )
+  }
+
+  if (draft.candidateType === 'habit') {
+    if (draft.cadenceType === null) {
+      questions.push('How often should it repeat?')
+    }
+  } else if (!hasTaskHabitAmbiguity && !draft.dueDate && !draft.dueTime && !draft.matchedCalendarContext) {
+    questions.push('When do you want to do it?')
+  }
+
+  if (questions.length === 0) {
+    questions.push('What detail should I use before I save this?')
+  }
+
+  return Array.from(new Set(questions)).slice(0, 3)
+}
+
+export function buildVoiceClarificationMessage(draft: TypedTaskDraft, transcript: string) {
+  const normalizedTranscript = normalizeCaptureInput(transcript)
+  const questions = buildVoiceClarificationQuestions(draft, transcript)
+
+  if (!normalizedTranscript || normalizedTranscript.length < 4) {
+    return 'I need you to restate that before I can save it.'
+  }
+
+  if (questions[0] === 'Is this a one-time task or a habit you want to repeat?') {
+    return 'I need to confirm whether this belongs in tasks or habits.'
+  }
+
+  return 'I need a little more detail before I can save this.'
+}
+
+export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCaptureInput {
+  if (!(input instanceof FormData)) {
+    throw new Error('Expected FormData.')
+  }
+
+  const audio = input.get('audio')
+  const languageHint = input.get('languageHint')
+  const source = input.get('source')
+  const currentDate = input.get('currentDate')
+  const timezone = input.get('timezone')
+
+  return processVoiceCaptureInputSchema.parse({
+    audio,
+    languageHint: typeof languageHint === 'string' && languageHint ? languageHint : undefined,
+    source: typeof source === 'string' && source ? source : undefined,
+    currentDate: typeof currentDate === 'string' ? currentDate : undefined,
+    timezone: typeof timezone === 'string' ? timezone : undefined,
+  })
 }

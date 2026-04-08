@@ -67,6 +67,7 @@ export const CAPTURE_INTERPRETATION_SYSTEM_PROMPT = [
   'If no calendar context is clearly relevant, matchedCalendarContext must be null.',
   'Use habit when the input clearly describes a recurring routine or cadence.',
   'Use task when the input clearly describes a one-off obligation.',
+  'If it is unclear whether the user means a one-off task or a recurring habit, keep the most likely candidateType but add an interpretation note that the task-vs-habit intent is unclear.',
   'If cadence is not explicit, keep cadenceType null and cadenceDays empty.',
   'If a title is uncertain, return null and add a note in interpretationNotes.',
   'If a date is ambiguous, return null unless the user text clearly supports a date; add an ambiguity note.',
