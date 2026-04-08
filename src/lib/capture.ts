@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { taskCreateSchema, taskPrioritySchema } from './tasks'
+import { habitCreateSchema } from './habits'
 
 const captureDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const captureTimeSchema = z.string().regex(/^\d{2}:\d{2}$/)
@@ -13,10 +14,13 @@ export const interpretCaptureInputSchema = z.object({
   languageHint: captureLanguageHintSchema.optional(),
 })
 
+export const candidateTypeSchema = z.enum(['task', 'habit'])
+
 export const typedTaskDraftSchema = z
   .object({
     rawInput: z.string().min(1),
     normalizedInput: z.string().min(1),
+    candidateType: candidateTypeSchema.default('task'),
     title: z.string().trim().min(1).max(120).nullable(),
     notes: z.string().trim().max(2000).nullable(),
     dueDate: captureDateSchema.nullable(),
@@ -54,6 +58,7 @@ export const typedTaskDraftSchema = z
 
 export const typedTaskDraftProviderOutputSchema = z
   .object({
+    candidateType: candidateTypeSchema.optional(),
     title: z.string().trim().min(1).max(120).nullable().optional(),
     notes: z.string().trim().max(2000).nullable().optional(),
     dueDate: captureDateSchema.nullable().optional(),
@@ -112,47 +117,87 @@ export const confirmCapturedTaskInputSchema = z.object({
   task: taskCreateSchema,
 })
 
+export const confirmCapturedHabitInputSchema = z.object({
+  rawInput: z.string().trim().min(1).max(4000),
+  habit: habitCreateSchema,
+})
+
 export type CaptureLanguageHint = z.infer<typeof captureLanguageHintSchema>
+export type CandidateType = z.infer<typeof candidateTypeSchema>
 export type InterpretCaptureInput = z.infer<typeof interpretCaptureInputSchema>
 export type TypedTaskDraft = z.infer<typeof typedTaskDraftSchema>
 export type TypedTaskDraftProviderOutput = z.infer<typeof typedTaskDraftProviderOutputSchema>
 export type InterpretCaptureSuccess = z.infer<typeof interpretCaptureSuccessSchema>
 export type InterpretCaptureFailure = z.infer<typeof interpretCaptureFailureSchema>
 export type ConfirmCapturedTaskInput = z.infer<typeof confirmCapturedTaskInputSchema>
+export type ConfirmCapturedHabitInput = z.infer<typeof confirmCapturedHabitInputSchema>
 
-function formatDateString(date: Date) {
+type LocalDateParts = {
+  year: number
+  month: number
+  day: number
+}
+
+function formatDateString(parts: LocalDateParts) {
   return [
-    date.getUTCFullYear(),
-    `${date.getUTCMonth() + 1}`.padStart(2, '0'),
-    `${date.getUTCDate()}`.padStart(2, '0'),
+    parts.year,
+    `${parts.month}`.padStart(2, '0'),
+    `${parts.day}`.padStart(2, '0'),
   ].join('-')
 }
 
-function parseCurrentDateString(currentDate: string) {
-  const parsed = new Date(`${currentDate}T12:00:00.000Z`)
+function validateTimeZone(timezone: string) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date())
+  } catch {
+    throw new Error(`Invalid timezone: ${timezone}`)
+  }
+}
+
+function parseCurrentDateString(currentDate: string, timezone: string) {
+  validateTimeZone(timezone)
+  const [year, month, day] = currentDate.split('-').map(Number)
+  const parsed = new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0))
 
   if (Number.isNaN(parsed.getTime())) {
     throw new Error(`Invalid current date: ${currentDate}`)
   }
 
-  return parsed
+  return {
+    year: parsed.getUTCFullYear(),
+    month: parsed.getUTCMonth() + 1,
+    day: parsed.getUTCDate(),
+  } satisfies LocalDateParts
 }
 
-function addUtcDays(date: Date, days: number) {
-  const next = new Date(date)
+function toUtcDate(parts: LocalDateParts) {
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0, 0))
+}
+
+function addUtcDays(parts: LocalDateParts, days: number) {
+  const next = toUtcDate(parts)
   next.setUTCDate(next.getUTCDate() + days)
-  return next
+
+  return {
+    year: next.getUTCFullYear(),
+    month: next.getUTCMonth() + 1,
+    day: next.getUTCDate(),
+  } satisfies LocalDateParts
 }
 
-function getNextUtcWeekday(date: Date, targetDay: number) {
-  const currentDay = date.getUTCDay()
+function getUtcWeekday(parts: LocalDateParts) {
+  return toUtcDate(parts).getUTCDay()
+}
+
+function getNextUtcWeekday(parts: LocalDateParts, targetDay: number) {
+  const currentDay = getUtcWeekday(parts)
   let delta = (targetDay - currentDay + 7) % 7
 
   if (delta === 0) {
     delta = 7
   }
 
-  return addUtcDays(date, delta)
+  return addUtcDays(parts, delta)
 }
 
 function cleanLeadingVerbPrefix(value: string) {
@@ -177,8 +222,8 @@ export function inferPriorityFromInput(normalizedInput: string) {
   return null
 }
 
-export function inferDueDateFromInput(normalizedInput: string, currentDate: string) {
-  const baseDate = parseCurrentDateString(currentDate)
+export function inferDueDateFromInput(normalizedInput: string, currentDate: string, timezone: string) {
+  const baseDate = parseCurrentDateString(currentDate, timezone)
 
   if (/\b(mañana|tomorrow)\b/i.test(normalizedInput)) {
     return formatDateString(addUtcDays(baseDate, 1))
@@ -189,7 +234,7 @@ export function inferDueDateFromInput(normalizedInput: string, currentDate: stri
   }
 
   if (/\b(este viernes|this friday)\b/i.test(normalizedInput)) {
-    const currentDay = baseDate.getUTCDay()
+    const currentDay = getUtcWeekday(baseDate)
     const targetDay = 5
     const delta = currentDay <= targetDay ? targetDay - currentDay : targetDay - currentDay + 7
     return formatDateString(addUtcDays(baseDate, delta))
@@ -211,11 +256,13 @@ export function inferTitleFromInput(normalizedInput: string) {
   return normalizedTitle || null
 }
 
-export function buildHeuristicTaskDraft(input: Pick<InterpretCaptureInput, 'rawInput' | 'currentDate'>) {
+export function buildHeuristicTaskDraft(
+  input: Pick<InterpretCaptureInput, 'rawInput' | 'currentDate' | 'timezone'>,
+) {
   const normalizedInput = normalizeCaptureInput(input.rawInput)
   const interpretationNotes: Array<string> = []
   const priority = inferPriorityFromInput(normalizedInput)
-  const dueDate = inferDueDateFromInput(normalizedInput, input.currentDate)
+  const dueDate = inferDueDateFromInput(normalizedInput, input.currentDate, input.timezone)
   const title = inferTitleFromInput(normalizedInput)
   const notes = title && normalizedInput !== title ? normalizedInput : null
 
@@ -234,6 +281,7 @@ export function buildHeuristicTaskDraft(input: Pick<InterpretCaptureInput, 'rawI
   return {
     rawInput: input.rawInput,
     normalizedInput,
+    candidateType: 'task' as const,
     title,
     notes,
     dueDate,
@@ -253,6 +301,7 @@ export function mergeTypedTaskDrafts(
   const merged: TypedTaskDraft = {
     rawInput: heuristicDraft.rawInput,
     normalizedInput: heuristicDraft.normalizedInput,
+    candidateType: providerDraft?.candidateType ?? heuristicDraft.candidateType,
     title: providerDraft?.title ?? heuristicDraft.title,
     notes: providerDraft?.notes ?? heuristicDraft.notes,
     dueDate: providerDraft?.dueDate ?? heuristicDraft.dueDate,

@@ -158,7 +158,7 @@ function SettingsPage() {
   }
 
   return (
-    <main className="page-wrap px-4 pb-12 pt-10">
+    <main className="page-wrap px-4 pb-24 pt-10">
       {feedbackMessage ? (
         <section
           className={

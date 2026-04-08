@@ -223,7 +223,7 @@ function CalendarPage() {
         : 'Never synced'
 
   return (
-    <main className="page-wrap px-4 pb-12 pt-10">
+    <main className="page-wrap px-4 pb-24 pt-10">
       <article className="panel rounded-[1.75rem] px-5 py-4 sm:px-6 sm:py-5">
         {/* Header row */}
         <div className="flex items-start justify-between gap-3">

@@ -6,6 +6,7 @@ import {
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 import Footer from '../components/Footer'
+import GlobalCaptureHost from '../components/GlobalCaptureHost'
 import Header from '../components/Header'
 import PwaLifecycle from '../components/PwaLifecycle'
 
@@ -73,6 +74,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <Header />
         <div className="min-h-[calc(100vh-4rem)]">{children}</div>
         <Footer />
+        <GlobalCaptureHost />
         <PwaLifecycle />
         <TanStackDevtools
           config={{

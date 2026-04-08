@@ -1,9 +1,11 @@
 import type { Database } from '../db/client'
 import {
   buildHeuristicTaskDraft,
+  confirmCapturedHabitInputSchema,
   confirmCapturedTaskInputSchema,
   interpretCaptureInputSchema,
   mergeTypedTaskDrafts,
+  type ConfirmCapturedHabitInput,
   type ConfirmCapturedTaskInput,
   type InterpretCaptureFailure,
   type InterpretCaptureInput,
@@ -11,6 +13,7 @@ import {
 } from '../lib/capture'
 import type { CaptureInterpreter } from './capture-interpreter'
 import { CaptureInterpreterError, createRemoteCaptureInterpreter } from './capture-interpreter'
+import { createHabitsService } from './habits-service'
 import { createTasksService } from './tasks-service'
 
 export function createCaptureService(
@@ -18,6 +21,7 @@ export function createCaptureService(
   interpreter: CaptureInterpreter | null = createRemoteCaptureInterpreter(),
 ) {
   const tasksService = createTasksService(database)
+  const habitsService = createHabitsService(database)
 
   return {
     async interpretTypedTaskInput(
@@ -55,27 +59,33 @@ export function createCaptureService(
           draft: mergeTypedTaskDrafts(heuristicDraft, providerDraft),
         }
       } catch (error) {
-        const fallbackNotes = [...heuristicDraft.interpretationNotes]
-
         if (error instanceof CaptureInterpreterError) {
-          fallbackNotes.push('Hosted interpretation was unavailable; review inferred fields carefully.')
+          return {
+            ok: false,
+            code:
+              error.code === 'INVALID_RESPONSE'
+                ? 'INVALID_PROVIDER_OUTPUT'
+                : 'INTERPRETATION_FAILED',
+            message: error.message,
+            rawInput: parsed.rawInput,
+          }
         } else {
-          fallbackNotes.push('Task interpretation failed; review inferred fields carefully.')
-        }
-
-        return {
-          ok: true,
-          draft: {
-            ...heuristicDraft,
-            interpretationNotes: fallbackNotes,
-          },
+          return {
+            ok: false,
+            code: 'INTERPRETATION_FAILED',
+            message: 'Task interpretation failed unexpectedly.',
+            rawInput: parsed.rawInput,
+          }
         }
       }
     },
     async confirmCapturedTask(input: ConfirmCapturedTaskInput) {
       const parsed = confirmCapturedTaskInputSchema.parse(input)
-
       return tasksService.createTask(parsed.task)
+    },
+    async confirmCapturedHabit(input: ConfirmCapturedHabitInput) {
+      const parsed = confirmCapturedHabitInputSchema.parse(input)
+      return habitsService.createHabit(parsed.habit)
     },
   }
 }

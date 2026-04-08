@@ -248,7 +248,7 @@ function DashboardPage() {
   const hasFocusTasks = overdueTasks.length > 0 || dueTodayTasks.length > 0
 
   return (
-    <main className="page-wrap px-4 pb-12 pt-10 sm:pt-14">
+    <main className="page-wrap px-4 pb-24 pt-10 sm:pt-14">
       <section className="hero-panel relative overflow-hidden rounded-[2rem] px-6 py-8 sm:px-10 sm:py-10">
         <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.24),transparent_66%)]" />
         <div className="pointer-events-none absolute -bottom-20 -right-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(16,185,129,0.18),transparent_66%)]" />
