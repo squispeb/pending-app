@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, Mic, Plus, X } from 'lucide-react'
+import { ChevronDown, Mic, Plus, Square, X } from 'lucide-react'
 import {
   queryOptions,
   useMutation,
@@ -38,6 +38,7 @@ import {
   interpretCaptureInput,
   confirmCapturedTask as confirmCapturedTaskFn,
 } from '../server/capture'
+import { transcribeCaptureAudio } from '../server/transcription'
 import type { TypedTaskDraft } from '../lib/capture'
 
 const tasksQueryOptions = () =>
@@ -71,7 +72,7 @@ const SORTS: Array<{ value: TaskSort; label: string }> = [
 
 const EMPTY_FORM = toTaskFormValues(null)
 
-type CaptureMode = 'closed' | 'input' | 'review'
+type CaptureMode = 'closed' | 'recording' | 'input' | 'review'
 
 function draftToFormValues(draft: TypedTaskDraft): TaskFormValues {
   return {
@@ -108,6 +109,12 @@ function TasksPage() {
   const [captureError, setCaptureError] = useState<string | null>(null)
   const [captureNotes, setCaptureNotes] = useState<string[]>([])
   const [captureShowAdvanced, setCaptureShowAdvanced] = useState(false)
+
+  // --- Voice recording state ---
+  const [isRecording, setIsRecording] = useState(false)
+  const [captureTranscribeError, setCaptureTranscribeError] = useState<string | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
 
   useEffect(() => {
     if (!feedbackMessage) return
@@ -307,7 +314,63 @@ function TasksPage() {
     },
   })
 
+  const transcribeMutation = useMutation({
+    mutationFn: async (audioBlob: Blob) => {
+      const audioFile = new File([audioBlob], 'recording.webm', { type: audioBlob.type || 'audio/webm' })
+      const formData = new FormData()
+      formData.set('audio', audioFile, audioFile.name)
+      formData.set('languageHint', 'auto')
+      formData.set('source', 'pending-app')
+      return transcribeCaptureAudio({ data: formData })
+    },
+    onSuccess: (result) => {
+      if (!result.ok) {
+        setCaptureTranscribeError(result.message)
+        return
+      }
+      setCaptureRawInput(result.transcript)
+      setCaptureTranscribeError(null)
+      setCaptureMode('input')
+    },
+    onError: (error) => {
+      setCaptureTranscribeError(error instanceof Error ? error.message : 'Transcription failed.')
+    },
+  })
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      audioChunksRef.current = []
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        stream.getTracks().forEach((t) => t.stop())
+        transcribeMutation.mutate(blob)
+      }
+      recorder.start()
+      mediaRecorderRef.current = recorder
+      setIsRecording(true)
+      setCaptureTranscribeError(null)
+    } catch {
+      setCaptureTranscribeError('Microphone access denied.')
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+    }
+  }
+
   function resetCapture() {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+    }
     setCaptureMode('closed')
     setCaptureRawInput('')
     setCaptureDraft(null)
@@ -316,6 +379,7 @@ function TasksPage() {
     setCaptureError(null)
     setCaptureNotes([])
     setCaptureShowAdvanced(false)
+    setCaptureTranscribeError(null)
   }
 
   function handleCaptureChange<K extends keyof TaskFormValues>(key: K, value: TaskFormValues[K]) {
@@ -854,7 +918,7 @@ function TasksPage() {
             {/* Sheet header */}
             <div className="mb-5 flex items-center justify-between gap-4">
               <h2 className="m-0 text-xl font-semibold text-[var(--ink-strong)]">
-                {captureMode === 'review' ? 'Review task' : 'Describe a task'}
+                {captureMode === 'recording' ? 'Record a task' : captureMode === 'review' ? 'Review task' : 'Describe a task'}
               </h2>
               <button
                 type="button"
@@ -867,7 +931,43 @@ function TasksPage() {
             </div>
 
             <div className="max-h-[70vh] overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
-              {captureMode === 'input' ? (
+              {captureMode === 'recording' ? (
+                <div className="flex flex-col items-center gap-6 py-6">
+                  <button
+                    type="button"
+                    onClick={isRecording ? stopRecording : startRecording}
+                    disabled={transcribeMutation.isPending}
+                    aria-label={isRecording ? 'Stop recording' : 'Start recording'}
+                    className={`flex size-20 cursor-pointer items-center justify-center rounded-full transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${
+                      isRecording
+                        ? 'animate-pulse bg-red-500 text-white shadow-lg'
+                        : 'bg-[var(--brand)] text-white shadow-lg hover:opacity-90'
+                    }`}
+                  >
+                    {isRecording ? <Square size={28} /> : <Mic size={28} />}
+                  </button>
+
+                  <p className="m-0 text-sm font-semibold text-[var(--ink-soft)]">
+                    {transcribeMutation.isPending
+                      ? 'Transcribing…'
+                      : isRecording
+                        ? 'Tap to stop'
+                        : 'Tap to start recording'}
+                  </p>
+
+                  {captureTranscribeError ? (
+                    <p className="m-0 text-sm font-medium text-red-500">{captureTranscribeError}</p>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    onClick={() => setCaptureMode('input')}
+                    className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                  >
+                    Type instead
+                  </button>
+                </div>
+              ) : captureMode === 'input' ? (
                 <form className="space-y-4" onSubmit={handleCaptureSubmitInterpret}>
                   <label className="block">
                     <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
@@ -1096,7 +1196,7 @@ function TasksPage() {
       <div className="fixed bottom-6 right-6 z-30 flex flex-col items-end gap-3">
         <button
           type="button"
-          onClick={() => setCaptureMode('input')}
+          onClick={() => setCaptureMode('recording')}
           aria-label="Capture task"
           className="flex size-11 cursor-pointer items-center justify-center rounded-full bg-[var(--surface-strong)] text-[var(--ink-strong)] shadow-md transition hover:opacity-90 active:scale-95 border border-[var(--line)]"
         >
