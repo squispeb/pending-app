@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { CalendarDays, ChevronDown, ExternalLink, Plus, X } from 'lucide-react'
+import { CalendarDays, ChevronDown, ExternalLink, X } from 'lucide-react'
 import {
   queryOptions,
   useMutation,
@@ -270,7 +270,7 @@ function TasksPage() {
   }
 
   return (
-    <main className="page-wrap px-4 pb-24 pt-10">
+    <main className="page-wrap px-4 pb-28 pt-10">
       <section className="hero-panel rounded-[2rem] px-6 py-6 sm:px-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <h1 className="display-title text-3xl font-bold text-[var(--ink-strong)]">Tasks</h1>
@@ -707,18 +707,6 @@ function TasksPage() {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Floating action button — structured task creation */}
-      <div className="fixed bottom-6 right-6 z-30">
-        <button
-          type="button"
-          onClick={() => setShowForm(true)}
-          aria-label="New task"
-          className="flex size-14 cursor-pointer items-center justify-center rounded-full bg-[var(--brand)] text-white shadow-lg transition hover:opacity-90 active:scale-95"
-        >
-          <Plus size={22} />
-        </button>
       </div>
     </main>
   )

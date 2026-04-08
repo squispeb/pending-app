@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { CalendarDays, ChevronDown, ExternalLink, Plus, X } from 'lucide-react'
+import { CalendarDays, ChevronDown, ExternalLink, X } from 'lucide-react'
 import {
   queryOptions,
   useMutation,
@@ -284,7 +284,7 @@ function HabitsPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <main className="page-wrap px-4 pb-24 pt-10">
+    <main className="page-wrap px-4 pb-28 pt-10">
       {/* Hero */}
       <section className="hero-panel rounded-[2rem] px-6 py-6 sm:px-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -650,16 +650,6 @@ function HabitsPage() {
           </div>
         </div>
       </div>
-
-      {/* FAB */}
-      <button
-        type="button"
-        onClick={() => setShowForm(true)}
-        aria-label="New habit"
-        className="fixed bottom-6 right-6 z-30 flex size-14 cursor-pointer items-center justify-center rounded-full bg-[var(--brand)] text-white shadow-lg transition hover:opacity-90 active:scale-95"
-      >
-        <Plus size={22} />
-      </button>
     </main>
   )
 }
