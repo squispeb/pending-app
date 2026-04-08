@@ -10,6 +10,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:transcription-live": "RUN_LIVE_TRANSCRIPTION_TEST=1 vitest run src/server/transcription.live.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push"
   },
