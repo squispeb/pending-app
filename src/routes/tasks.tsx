@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, Plus, X } from 'lucide-react'
+import { ChevronDown, MessageSquarePlus, Plus, X } from 'lucide-react'
 import {
   queryOptions,
   useMutation,
@@ -20,6 +20,7 @@ import {
   sortTasks,
   taskFormSchema,
   toTaskFormValues,
+  getTodayDateString,
   type TaskFilter,
   type TaskFormValues,
   type TaskSort,
@@ -33,6 +34,11 @@ import {
   reopenTask,
   updateTask,
 } from '../server/tasks'
+import {
+  interpretCaptureInput,
+  confirmCapturedTask as confirmCapturedTaskFn,
+} from '../server/capture'
+import type { TypedTaskDraft } from '../lib/capture'
 
 const tasksQueryOptions = () =>
   queryOptions({
@@ -65,6 +71,22 @@ const SORTS: Array<{ value: TaskSort; label: string }> = [
 
 const EMPTY_FORM = toTaskFormValues(null)
 
+type CaptureMode = 'closed' | 'input' | 'review'
+
+function draftToFormValues(draft: TypedTaskDraft): TaskFormValues {
+  return {
+    title: draft.title ?? '',
+    notes: draft.notes ?? '',
+    priority: draft.priority ?? 'medium',
+    dueDate: draft.dueDate ?? '',
+    dueTime: draft.dueTime ?? '',
+    reminderAt: '',
+    estimatedMinutes: draft.estimatedMinutes ?? undefined,
+    preferredStartTime: draft.preferredStartTime ?? '',
+    preferredEndTime: draft.preferredEndTime ?? '',
+  }
+}
+
 function TasksPage() {
   const queryClient = useQueryClient()
   const { data: tasks } = useSuspenseQuery(tasksQueryOptions())
@@ -76,6 +98,16 @@ function TasksPage() {
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof TaskFormValues, string>>>({})
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
   const [feedbackTone, setFeedbackTone] = useState<'success' | 'error' | null>(null)
+
+  // --- Capture flow state ---
+  const [captureMode, setCaptureMode] = useState<CaptureMode>('closed')
+  const [captureRawInput, setCaptureRawInput] = useState('')
+  const [captureDraft, setCaptureDraft] = useState<TypedTaskDraft | null>(null)
+  const [captureFormValues, setCaptureFormValues] = useState<TaskFormValues>(EMPTY_FORM)
+  const [captureFieldErrors, setCaptureFieldErrors] = useState<Partial<Record<keyof TaskFormValues, string>>>({})
+  const [captureError, setCaptureError] = useState<string | null>(null)
+  const [captureNotes, setCaptureNotes] = useState<string[]>([])
+  const [captureShowAdvanced, setCaptureShowAdvanced] = useState(false)
 
   useEffect(() => {
     if (!feedbackMessage) return
@@ -210,6 +242,102 @@ function TasksPage() {
       setActiveTaskId(null)
     },
   })
+
+  // --- Capture mutations ---
+  const interpretMutation = useMutation({
+    mutationFn: async (rawInput: string) => {
+      const currentDate = getTodayDateString()
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+      return interpretCaptureInput({ data: { rawInput, currentDate, timezone } })
+    },
+    onSuccess: (result) => {
+      if (!result.ok) {
+        setCaptureError(result.message)
+        return
+      }
+      const draft = result.draft
+      setCaptureDraft(draft)
+      setCaptureNotes(draft.interpretationNotes)
+      setCaptureFormValues(draftToFormValues(draft))
+      setCaptureFieldErrors({})
+      setCaptureError(null)
+      const hasAdvanced = !!(
+        draft.dueTime ||
+        draft.estimatedMinutes ||
+        draft.preferredStartTime
+      )
+      setCaptureShowAdvanced(hasAdvanced)
+      setCaptureMode('review')
+    },
+    onError: (error) => {
+      setCaptureError(error instanceof Error ? error.message : 'Interpretation failed.')
+    },
+  })
+
+  const confirmMutation = useMutation({
+    mutationFn: async () => {
+      const parsed = taskFormSchema.parse(captureFormValues)
+      const rawInput = captureDraft?.rawInput ?? captureRawInput
+      return confirmCapturedTaskFn({ data: { rawInput, task: parsed } })
+    },
+    onSuccess: async () => {
+      resetCapture()
+      setFeedbackTone('success')
+      setFeedbackMessage('Task created.')
+      await invalidateTasks()
+    },
+    onError: (error) => {
+      if (error instanceof z.ZodError) {
+        const flattened = error.flatten().fieldErrors
+        setCaptureFieldErrors({
+          title: flattened.title?.[0],
+          notes: flattened.notes?.[0],
+          priority: flattened.priority?.[0],
+          dueDate: flattened.dueDate?.[0],
+          dueTime: flattened.dueTime?.[0],
+          reminderAt: flattened.reminderAt?.[0],
+          estimatedMinutes: flattened.estimatedMinutes?.[0],
+          preferredStartTime: flattened.preferredStartTime?.[0],
+          preferredEndTime: flattened.preferredEndTime?.[0],
+        })
+        setCaptureError('Fix the highlighted fields and try again.')
+      } else {
+        setCaptureError(error instanceof Error ? error.message : 'Failed to save task.')
+      }
+    },
+  })
+
+  function resetCapture() {
+    setCaptureMode('closed')
+    setCaptureRawInput('')
+    setCaptureDraft(null)
+    setCaptureFormValues(EMPTY_FORM)
+    setCaptureFieldErrors({})
+    setCaptureError(null)
+    setCaptureNotes([])
+    setCaptureShowAdvanced(false)
+  }
+
+  function handleCaptureChange<K extends keyof TaskFormValues>(key: K, value: TaskFormValues[K]) {
+    setCaptureFieldErrors((current) => {
+      if (!current[key]) return current
+      return { ...current, [key]: undefined }
+    })
+    setCaptureFormValues((current) => ({ ...current, [key]: value }))
+  }
+
+  function handleCaptureSubmitInterpret(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!captureRawInput.trim()) return
+    setCaptureError(null)
+    interpretMutation.mutate(captureRawInput)
+  }
+
+  function handleCaptureConfirm(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setCaptureError(null)
+    confirmMutation.mutate()
+  }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -704,15 +832,285 @@ function TasksPage() {
         </div>
       </div>
 
-      {/* Floating action button */}
-      <button
-        type="button"
-        onClick={() => setShowForm(true)}
-        aria-label="New task"
-        className="fixed bottom-6 right-6 z-30 flex size-14 cursor-pointer items-center justify-center rounded-full bg-[var(--brand)] text-white shadow-lg transition hover:opacity-90 active:scale-95"
+      {/* Capture sheet backdrop */}
+      <div
+        onClick={resetCapture}
+        className={`fixed inset-0 z-40 bg-black/40 transition-opacity duration-300 ${captureMode !== 'closed' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+      />
+
+      {/* Capture sheet */}
+      <div
+        className={`fixed inset-x-0 bottom-0 z-50 duration-300 lg:inset-0 lg:flex lg:items-center lg:justify-center ${
+          captureMode !== 'closed'
+            ? 'translate-y-0 opacity-100 transition-[transform,opacity] lg:pointer-events-auto'
+            : 'translate-y-full opacity-0 transition-[transform,opacity] lg:translate-y-0 lg:pointer-events-none'
+        }`}
       >
-        <Plus size={22} />
-      </button>
+        <div className="mx-auto w-full max-w-2xl lg:px-4">
+          <div className="panel rounded-t-[2rem] px-6 pb-10 pt-3 lg:rounded-[2rem]">
+            {/* Drag handle — mobile only */}
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[var(--line)] lg:hidden" />
+
+            {/* Sheet header */}
+            <div className="mb-5 flex items-center justify-between gap-4">
+              <h2 className="m-0 text-xl font-semibold text-[var(--ink-strong)]">
+                {captureMode === 'review' ? 'Review task' : 'Describe a task'}
+              </h2>
+              <button
+                type="button"
+                onClick={resetCapture}
+                aria-label="Close"
+                className="flex size-8 cursor-pointer items-center justify-center rounded-full text-[var(--ink-soft)] transition hover:bg-[var(--surface-strong)] hover:text-[var(--ink-strong)]"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="max-h-[70vh] overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
+              {captureMode === 'input' ? (
+                <form className="space-y-4" onSubmit={handleCaptureSubmitInterpret}>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
+                      What do you need to do?
+                    </span>
+                    <textarea
+                      autoFocus
+                      value={captureRawInput}
+                      onChange={(e) => setCaptureRawInput(e.target.value)}
+                      rows={4}
+                      placeholder="Call the bank tomorrow morning, high priority"
+                      className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                    />
+                  </label>
+
+                  {captureError ? (
+                    <p className="m-0 text-sm font-medium text-red-500">{captureError}</p>
+                  ) : null}
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="submit"
+                      disabled={interpretMutation.isPending || !captureRawInput.trim()}
+                      className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {interpretMutation.isPending ? 'Interpreting…' : 'Interpret'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={resetCapture}
+                      className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : captureMode === 'review' ? (
+                <form className="space-y-4" onSubmit={handleCaptureConfirm}>
+                  {/* Raw input (AC2) */}
+                  <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
+                    <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                      Original input
+                    </span>
+                    <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureDraft?.rawInput}</p>
+                  </div>
+
+                  {/* Interpretation notes (AC6) */}
+                  {captureNotes.length > 0 ? (
+                    <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+                      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                        Interpretation notes
+                      </span>
+                      <ul className="m-0 space-y-1 pl-4">
+                        {captureNotes.map((note, i) => (
+                          <li key={i} className="text-xs leading-5 text-[var(--ink-soft)]">{note}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
+                      Title
+                    </span>
+                    <input
+                      autoFocus
+                      value={captureFormValues.title}
+                      onChange={(e) => handleCaptureChange('title', e.target.value)}
+                      placeholder="Task title"
+                      className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                    />
+                    {captureFieldErrors.title ? (
+                      <span className="mt-2 block text-sm font-medium text-red-500">{captureFieldErrors.title}</span>
+                    ) : null}
+                  </label>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
+                        Due date
+                      </span>
+                      <input
+                        type="date"
+                        value={captureFormValues.dueDate ?? ''}
+                        onChange={(e) => handleCaptureChange('dueDate', e.target.value)}
+                        className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                      />
+                      {captureFieldErrors.dueDate ? (
+                        <span className="mt-2 block text-sm font-medium text-red-500">{captureFieldErrors.dueDate}</span>
+                      ) : null}
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
+                        Priority
+                      </span>
+                      <select
+                        value={captureFormValues.priority}
+                        onChange={(e) => handleCaptureChange('priority', e.target.value as TaskFormValues['priority'])}
+                        className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setCaptureShowAdvanced((v) => !v)}
+                    className="flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                  >
+                    <ChevronDown
+                      size={16}
+                      className={`transition-transform duration-200 ${captureShowAdvanced ? 'rotate-180' : ''}`}
+                    />
+                    More options
+                  </button>
+
+                  {captureShowAdvanced ? (
+                    <div className="space-y-4">
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Notes</span>
+                        <textarea
+                          value={captureFormValues.notes ?? ''}
+                          onChange={(e) => handleCaptureChange('notes', e.target.value)}
+                          rows={3}
+                          placeholder="Add context or next steps"
+                          className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                        />
+                        {captureFieldErrors.notes ? (
+                          <span className="mt-2 block text-sm font-medium text-red-500">{captureFieldErrors.notes}</span>
+                        ) : null}
+                      </label>
+
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <label className="block">
+                          <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Due time</span>
+                          <input
+                            type="time"
+                            value={captureFormValues.dueTime ?? ''}
+                            onChange={(e) => handleCaptureChange('dueTime', e.target.value)}
+                            className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                          />
+                        </label>
+
+                        <label className="block">
+                          <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Est. min</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="1440"
+                            value={captureFormValues.estimatedMinutes ?? ''}
+                            onChange={(e) =>
+                              handleCaptureChange(
+                                'estimatedMinutes',
+                                e.target.value ? Number(e.target.value) : undefined,
+                              )
+                            }
+                            className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                          />
+                        </label>
+                      </div>
+
+                      <div>
+                        <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Preferred window</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="time"
+                            value={captureFormValues.preferredStartTime ?? ''}
+                            onChange={(e) => handleCaptureChange('preferredStartTime', e.target.value)}
+                            className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                          />
+                          <input
+                            type="time"
+                            value={captureFormValues.preferredEndTime ?? ''}
+                            onChange={(e) => handleCaptureChange('preferredEndTime', e.target.value)}
+                            className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                          />
+                        </div>
+                        {(captureFieldErrors.preferredStartTime ?? captureFieldErrors.preferredEndTime) ? (
+                          <span className="mt-2 block text-sm font-medium text-red-500">
+                            {captureFieldErrors.preferredStartTime ?? captureFieldErrors.preferredEndTime}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {captureError ? (
+                    <p className="m-0 text-sm font-medium text-red-500">{captureError}</p>
+                  ) : null}
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="submit"
+                      disabled={confirmMutation.isPending}
+                      className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {confirmMutation.isPending ? 'Saving…' : 'Create task'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCaptureMode('input')}
+                      className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={resetCapture}
+                      className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                    >
+                      Discard
+                    </button>
+                  </div>
+                </form>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Floating action buttons */}
+      <div className="fixed bottom-6 right-6 z-30 flex flex-col items-end gap-3">
+        <button
+          type="button"
+          onClick={() => setCaptureMode('input')}
+          aria-label="Capture task from text"
+          className="flex size-11 cursor-pointer items-center justify-center rounded-full bg-[var(--surface-strong)] text-[var(--ink-strong)] shadow-md transition hover:opacity-90 active:scale-95 border border-[var(--line)]"
+        >
+          <MessageSquarePlus size={18} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowForm(true)}
+          aria-label="New task"
+          className="flex size-14 cursor-pointer items-center justify-center rounded-full bg-[var(--brand)] text-white shadow-lg transition hover:opacity-90 active:scale-95"
+        >
+          <Plus size={22} />
+        </button>
+      </div>
     </main>
   )
 }
