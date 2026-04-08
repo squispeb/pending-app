@@ -47,6 +47,7 @@ describe('capture interpreter', () => {
       currentDate: '2026-04-08',
       timezone: 'America/Lima',
       languageHint: 'en',
+      calendarContext: [],
     })
 
     expect(result).toEqual({
@@ -74,6 +75,7 @@ describe('capture interpreter', () => {
     expect(body.messages[1].role).toBe('user')
     expect(body.messages[1].content).toContain('typed-task-capture')
     expect(body.messages[1].content).toContain('Need to deal with taxes tomorrow')
+    expect(body.messages[1].content).toContain('"calendarContext": []')
   })
 
   it('parses habit candidate output with cadence fields', async () => {
@@ -119,6 +121,7 @@ describe('capture interpreter', () => {
       currentDate: '2026-04-08',
       timezone: 'America/Lima',
       languageHint: 'es',
+      calendarContext: [],
     })
 
     expect(result).toEqual({
@@ -167,6 +170,7 @@ describe('capture interpreter', () => {
       currentDate: '2026-04-08',
       timezone: 'America/Lima',
       languageHint: 'es',
+      calendarContext: [],
     })
 
     expect(result).toEqual({
@@ -200,6 +204,7 @@ describe('capture interpreter', () => {
         currentDate: '2026-04-08',
         timezone: 'America/Lima',
         languageHint: 'en',
+        calendarContext: [],
       }),
     ).rejects.toMatchObject({
       name: 'CaptureInterpreterError',
@@ -245,6 +250,7 @@ describe('capture interpreter', () => {
         currentDate: '2026-04-08',
         timezone: 'America/Lima',
         languageHint: 'en',
+        calendarContext: [],
       }),
     ).rejects.toMatchObject({
       name: 'CaptureInterpreterError',
@@ -269,11 +275,156 @@ describe('capture interpreter', () => {
         currentDate: '2026-04-08',
         timezone: 'America/Lima',
         languageHint: 'en',
+        calendarContext: [],
       }),
     ).rejects.toMatchObject({
       name: 'CaptureInterpreterError',
       code: 'CONFIG',
       message: 'Capture interpretation model is missing.',
     } satisfies Partial<CaptureInterpreterError>)
+  })
+
+  it('passes ranked calendar context and parses matchedCalendarContext from the model output', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  candidateType: 'task',
+                  title: 'Entregar primera tarea de Cloud Computing',
+                  matchedCalendarContext: {
+                    calendarEventId: 'evt-cloud-1',
+                    summary: 'Cloud Computing',
+                    reason: 'Matched recurring event: Cloud Computing',
+                  },
+                  interpretationNotes: ['Matched recurring event: Cloud Computing'],
+                }),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        },
+      ),
+    )
+
+    const interpreter = createRemoteCaptureInterpreter(
+      {
+        url: 'https://openrouter.ai/api/v1/chat/completions',
+        apiKey: 'secret-key',
+        model: 'openrouter/lightweight-model',
+        timeoutMs: 1000,
+      },
+      fetchMock,
+    )
+
+    const result = await interpreter?.interpretTypedTask({
+      normalizedInput: 'Tengo que entregar la primera tarea de Cloud Computing',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+      languageHint: 'es',
+      calendarContext: [
+        {
+          calendarEventId: 'evt-cloud-1',
+          summary: 'Cloud Computing',
+          calendarName: 'Primary',
+          startsAt: '2026-04-09T15:00:00.000Z',
+          recurring: true,
+          reason: 'Matched recurring event: Cloud Computing',
+        },
+      ],
+    })
+
+    expect(result?.matchedCalendarContext).toEqual({
+      calendarEventId: 'evt-cloud-1',
+      summary: 'Cloud Computing',
+      reason: 'Matched recurring event: Cloud Computing',
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String(init?.body))
+    expect(body.messages[1].content).toContain('evt-cloud-1')
+    expect(body.messages[1].content).toContain('Cloud Computing')
+  })
+
+  it('coerces string interpretation notes and string matchedCalendarContext ids', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  candidateType: 'task',
+                  title: 'Entregar primera tarea del curso Cloud Computing',
+                  notes: 'Resolver lo antes posible.',
+                  dueDate: '2026-04-12',
+                  priority: 'high',
+                  matchedCalendarContext: 'evt-cloud-1',
+                  interpretationNotes:
+                    'El domingo que viene respecto al 2026-04-08 se interpreta como 2026-04-12.',
+                }),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        },
+      ),
+    )
+
+    const interpreter = createRemoteCaptureInterpreter(
+      {
+        url: 'https://openrouter.ai/api/v1/chat/completions',
+        apiKey: 'secret-key',
+        model: 'x-ai/grok-4.1-fast',
+        timeoutMs: 1000,
+      },
+      fetchMock,
+    )
+
+    const result = await interpreter?.interpretTypedTask({
+      normalizedInput:
+        'Tengo que entregar para el domingo que viene la primera tarea del curso Cloud Computing, en este tengo que resolverlo lo antes posible.',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+      languageHint: 'es',
+      calendarContext: [
+        {
+          calendarEventId: 'evt-cloud-1',
+          summary: 'Cloud Computing',
+          calendarName: 'Primary',
+          startsAt: '2026-04-10T15:00:00.000Z',
+          recurring: true,
+          reason: 'Matched recurring event: Cloud Computing',
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      candidateType: 'task',
+      title: 'Entregar primera tarea del curso Cloud Computing',
+      notes: 'Resolver lo antes posible.',
+      dueDate: '2026-04-12',
+      priority: 'high',
+      matchedCalendarContext: {
+        calendarEventId: 'evt-cloud-1',
+        summary: 'Cloud Computing',
+        reason: 'Matched recurring event: Cloud Computing',
+      },
+      interpretationNotes: [
+        'El domingo que viene respecto al 2026-04-08 se interpreta como 2026-04-12.',
+      ],
+    })
   })
 })

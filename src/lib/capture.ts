@@ -16,6 +16,12 @@ export const interpretCaptureInputSchema = z.object({
 
 export const candidateTypeSchema = z.enum(['task', 'habit'])
 
+export const matchedCalendarContextSchema = z.object({
+  calendarEventId: z.string().min(1),
+  summary: z.string().trim().min(1),
+  reason: z.string().trim().min(1),
+})
+
 export const typedTaskDraftSchema = z
   .object({
     rawInput: z.string().min(1),
@@ -30,6 +36,7 @@ export const typedTaskDraftSchema = z
     cadenceType: habitCadenceSchema.nullable(),
     cadenceDays: z.array(habitWeekdaySchema).default([]),
     targetCount: z.number().int().positive().max(20).nullable(),
+    matchedCalendarContext: matchedCalendarContextSchema.nullable().default(null),
     preferredStartTime: captureTimeSchema.nullable(),
     preferredEndTime: captureTimeSchema.nullable(),
     interpretationNotes: z.array(z.string().trim().min(1)).default([]),
@@ -71,6 +78,7 @@ export const typedTaskDraftProviderOutputSchema = z
     cadenceType: habitCadenceSchema.nullable().optional(),
     cadenceDays: z.array(habitWeekdaySchema).optional(),
     targetCount: z.number().int().positive().max(20).nullable().optional(),
+    matchedCalendarContext: matchedCalendarContextSchema.nullable().optional(),
     preferredStartTime: captureTimeSchema.nullable().optional(),
     preferredEndTime: captureTimeSchema.nullable().optional(),
     interpretationNotes: z.array(z.string().trim().min(1)).optional(),
@@ -137,6 +145,7 @@ export type InterpretCaptureSuccess = z.infer<typeof interpretCaptureSuccessSche
 export type InterpretCaptureFailure = z.infer<typeof interpretCaptureFailureSchema>
 export type ConfirmCapturedTaskInput = z.infer<typeof confirmCapturedTaskInputSchema>
 export type ConfirmCapturedHabitInput = z.infer<typeof confirmCapturedHabitInputSchema>
+export type MatchedCalendarContext = z.infer<typeof matchedCalendarContextSchema>
 
 const WEEKDAY_MATCHERS: Array<{ day: HabitWeekday; pattern: RegExp }> = [
   { day: 'mon', pattern: /\b(monday|mondays|lunes)\b/i },
@@ -354,6 +363,7 @@ export function buildHeuristicTaskDraft(
     cadenceType: cadence.cadenceType,
     cadenceDays: cadence.cadenceDays,
     targetCount: cadence.targetCount,
+    matchedCalendarContext: null,
     preferredStartTime: null,
     preferredEndTime: null,
     interpretationNotes,
@@ -377,6 +387,7 @@ export function mergeTypedTaskDrafts(
     cadenceType: providerDraft?.cadenceType ?? heuristicDraft.cadenceType,
     cadenceDays: providerDraft?.cadenceDays ?? heuristicDraft.cadenceDays,
     targetCount: providerDraft?.targetCount ?? heuristicDraft.targetCount,
+    matchedCalendarContext: providerDraft?.matchedCalendarContext ?? heuristicDraft.matchedCalendarContext,
     preferredStartTime: providerDraft?.preferredStartTime ?? heuristicDraft.preferredStartTime,
     preferredEndTime: providerDraft?.preferredEndTime ?? heuristicDraft.preferredEndTime,
     interpretationNotes: [

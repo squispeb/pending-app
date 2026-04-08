@@ -77,11 +77,21 @@ describe('capture helpers', () => {
       notes: 'Prepare and submit tax paperwork.',
       dueDate: '2026-04-09',
       candidateType: 'task',
+      matchedCalendarContext: {
+        calendarEventId: 'evt-1',
+        summary: 'Cloud Computing',
+        reason: 'Matched recurring event: Cloud Computing',
+      },
       interpretationNotes: ['Provider inferred a cleaner task title.'],
     })
 
     expect(merged.title).toBe('Deal with taxes')
     expect(merged.notes).toBe('Prepare and submit tax paperwork.')
+    expect(merged.matchedCalendarContext).toEqual({
+      calendarEventId: 'evt-1',
+      summary: 'Cloud Computing',
+      reason: 'Matched recurring event: Cloud Computing',
+    })
     expect(merged.interpretationNotes).toContain('Provider inferred a cleaner task title.')
     expect(() => typedTaskDraftSchema.parse(merged)).not.toThrow()
   })

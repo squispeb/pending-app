@@ -1,6 +1,7 @@
 import { env } from '../lib/env'
 import type {
   CaptureLanguageHint,
+  MatchedCalendarContext,
   TypedTaskDraftProviderOutput,
 } from '../lib/capture'
 import { typedTaskDraftProviderOutputSchema } from '../lib/capture'
@@ -10,6 +11,14 @@ export type CaptureInterpreterRequest = {
   currentDate: string
   timezone: string
   languageHint?: CaptureLanguageHint
+  calendarContext: Array<{
+    calendarEventId: string
+    summary: string
+    calendarName: string
+    startsAt: string
+    recurring: boolean
+    reason: string
+  }>
 }
 
 export interface CaptureInterpreter {
@@ -49,10 +58,13 @@ type OpenRouterChatResponse = {
 
 export const CAPTURE_INTERPRETATION_SYSTEM_PROMPT = [
   'You are a task-draft extraction engine for Pending App.',
-  'Return only a JSON object with these keys: candidateType, title, notes, dueDate, dueTime, priority, estimatedMinutes, cadenceType, cadenceDays, targetCount, preferredStartTime, preferredEndTime, interpretationNotes.',
+  'Return only a JSON object with these keys: candidateType, title, notes, dueDate, dueTime, priority, estimatedMinutes, cadenceType, cadenceDays, targetCount, matchedCalendarContext, preferredStartTime, preferredEndTime, interpretationNotes.',
   'candidateType must be either task or habit.',
   'Support Spanish and English input.',
   'Be conservative. Use null instead of guessing.',
+  'You may use the supplied calendarContext candidates to enrich the draft when they are clearly relevant.',
+  'If you use calendar context, matchedCalendarContext must be an object with calendarEventId, summary, and reason.',
+  'If no calendar context is clearly relevant, matchedCalendarContext must be null.',
   'Use habit when the input clearly describes a recurring routine or cadence.',
   'Use task when the input clearly describes a one-off obligation.',
   'If cadence is not explicit, keep cadenceType null and cadenceDays empty.',
@@ -60,6 +72,7 @@ export const CAPTURE_INTERPRETATION_SYSTEM_PROMPT = [
   'If a date is ambiguous, return null unless the user text clearly supports a date; add an ambiguity note.',
   'Only infer dueTime or preferred time window when clearly stated.',
   'Keep more detail in notes, not in title.',
+  'Calendar context must never override explicit user-provided details silently.',
   'For task outputs, return cadenceType null, cadenceDays empty, and targetCount null.',
   'For habit outputs, set targetCount only when a meaningful daily count is explicit; otherwise use 1.',
   'Do not include markdown, code fences, prose, or extra keys.',
@@ -87,6 +100,7 @@ function buildOpenRouterUserPrompt(input: CaptureInterpreterRequest) {
       currentDate: input.currentDate,
       timezone: input.timezone,
       languageHint: input.languageHint ?? 'mixed',
+      calendarContext: input.calendarContext,
     },
     null,
     2,
@@ -130,7 +144,72 @@ function stripJsonCodeFences(value: string) {
   return trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
 }
 
-function parseOpenRouterDraft(json: OpenRouterChatResponse) {
+function normalizeInterpretationNotes(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return [value.trim()]
+  }
+
+  return undefined
+}
+
+function normalizeMatchedCalendarContext(
+  value: unknown,
+  candidates: Array<CaptureInterpreterRequest['calendarContext'][number]>,
+): MatchedCalendarContext | null | undefined {
+  if (!value) {
+    return undefined
+  }
+
+  if (typeof value === 'string') {
+    const match = candidates.find((candidate) => candidate.calendarEventId === value)
+    return match
+      ? {
+          calendarEventId: match.calendarEventId,
+          summary: match.summary,
+          reason: match.reason,
+        }
+      : undefined
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    const objectValue = value as Partial<MatchedCalendarContext>
+
+    if (
+      typeof objectValue.calendarEventId === 'string' &&
+      typeof objectValue.summary === 'string' &&
+      typeof objectValue.reason === 'string'
+    ) {
+      return {
+        calendarEventId: objectValue.calendarEventId,
+        summary: objectValue.summary,
+        reason: objectValue.reason,
+      }
+    }
+
+    if (typeof objectValue.calendarEventId === 'string') {
+      const match = candidates.find((candidate) => candidate.calendarEventId === objectValue.calendarEventId)
+
+      if (match) {
+        return {
+          calendarEventId: match.calendarEventId,
+          summary: typeof objectValue.summary === 'string' ? objectValue.summary : match.summary,
+          reason: typeof objectValue.reason === 'string' ? objectValue.reason : match.reason,
+        }
+      }
+    }
+  }
+
+  return undefined
+}
+
+function parseOpenRouterDraft(
+  json: OpenRouterChatResponse,
+  input: CaptureInterpreterRequest,
+) {
   const rawContent = extractOpenRouterMessageText(json)
   const normalizedContent = stripJsonCodeFences(rawContent)
 
@@ -142,7 +221,21 @@ function parseOpenRouterDraft(json: OpenRouterChatResponse) {
     throw new CaptureInterpreterError('Capture interpretation returned invalid JSON.', 'INVALID_RESPONSE')
   }
 
-  const validated = typedTaskDraftProviderOutputSchema.safeParse(parsed)
+  const normalizedParsed =
+    typeof parsed === 'object' && parsed !== null
+      ? {
+          ...parsed,
+          interpretationNotes: normalizeInterpretationNotes(
+            (parsed as Record<string, unknown>).interpretationNotes,
+          ),
+          matchedCalendarContext: normalizeMatchedCalendarContext(
+            (parsed as Record<string, unknown>).matchedCalendarContext,
+            input.calendarContext,
+          ),
+        }
+      : parsed
+
+  const validated = typedTaskDraftProviderOutputSchema.safeParse(normalizedParsed)
 
   if (!validated.success) {
     throw new CaptureInterpreterError(
@@ -232,7 +325,7 @@ export function createRemoteCaptureInterpreter(
         )
       }
 
-      return parseOpenRouterDraft(json)
+      return parseOpenRouterDraft(json, input)
     },
   }
 }
