@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
+import { queryOptions, useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { Bell, CalendarDays, CheckSquare, Repeat, Settings2 } from 'lucide-react'
 import type { Habit, Task } from '../db/schema'
-import { getTaskTimingLabel, isTaskCompleted } from '../lib/tasks'
+import { getTaskTimingLabel, getTodayDateString, isTaskCompleted } from '../lib/tasks'
 import { getHabitCadenceLabel } from '../lib/habits'
 import type { ReminderItem } from '../lib/reminders'
 import { completeTask, reopenTask } from '../server/tasks'
 import { completeHabitForDate, uncompleteHabitForDate } from '../server/habits'
 import { getDashboardData } from '../server/dashboard'
+import { getCalendarEventsForDay } from '../server/calendar'
 import {
   deferReminder,
   dismissReminder,
@@ -20,6 +21,13 @@ const dashboardQueryOptions = () =>
   queryOptions({
     queryKey: ['dashboard'],
     queryFn: () => getDashboardData(),
+  })
+
+const calendarDayQueryOptions = (dateStr: string) =>
+  queryOptions({
+    queryKey: ['calendar-day', dateStr],
+    queryFn: () => getCalendarEventsForDay({ data: { dateStr } }),
+    staleTime: 60_000,
   })
 
 export const Route = createFileRoute('/')({
@@ -38,6 +46,10 @@ function formatTodayHeading() {
 function DashboardPage() {
   const queryClient = useQueryClient()
   const { data } = useSuspenseQuery(dashboardQueryOptions())
+
+  const todayStr = getTodayDateString()
+  const { data: calendarDayData } = useQuery(calendarDayQueryOptions(todayStr))
+  const todayMeetings = calendarDayData?.events ?? []
 
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [activeHabitId, setActiveHabitId] = useState<string | null>(null)
@@ -339,6 +351,25 @@ function DashboardPage() {
         </section>
       </div>
 
+      {todayMeetings.length > 0 ? (
+        <section className="panel mt-6 rounded-[1.75rem] p-6 sm:p-7">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="m-0 text-lg font-semibold text-[var(--ink-strong)]">Meetings today</h2>
+            <a
+              href="/calendar"
+              className="text-sm font-semibold text-[var(--brand)] no-underline transition hover:opacity-70"
+            >
+              Calendar →
+            </a>
+          </div>
+          <div className="space-y-2">
+            {todayMeetings.map((event) => (
+              <MeetingRow key={event.id} event={event} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="mt-6 grid grid-cols-2 gap-4 xl:grid-cols-4">
         {[
           { title: 'Tasks', icon: CheckSquare, href: '/tasks' },
@@ -488,4 +519,69 @@ function DashboardTaskRow({
       </button>
     </article>
   )
+}
+
+function MeetingRow({
+  event,
+}: {
+  event: {
+    id: string
+    summary: string | null
+    startsAt: Date
+    endsAt: Date
+    allDay: boolean
+    location: string | null
+    htmlLink: string | null
+    calendarName: string
+    primaryFlag: boolean
+  }
+}) {
+  const start = new Date(event.startsAt)
+  const end = new Date(event.endsAt)
+  const timeLabel = event.allDay
+    ? 'All day'
+    : `${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+
+  const now = new Date()
+  const isNow = !event.allDay && start <= now && now < end
+  const isPast = !event.allDay && end <= now
+
+  const inner = (
+    <article
+      className={`subpanel flex items-center gap-3 rounded-2xl px-4 py-3 transition-opacity ${isPast ? 'opacity-50' : ''}`}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          {isNow ? (
+            <span className="shrink-0 rounded-full bg-[var(--brand)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+              Now
+            </span>
+          ) : null}
+          <p className="m-0 truncate text-sm font-semibold text-[var(--ink-strong)]">
+            {event.summary ?? 'Untitled event'}
+          </p>
+        </div>
+        <p className="m-0 mt-0.5 truncate text-xs text-[var(--ink-soft)]">
+          {timeLabel}
+          {event.location ? ` · ${event.location}` : ''}
+        </p>
+      </div>
+    </article>
+  )
+
+  if (event.htmlLink) {
+    return (
+      <a
+        key={event.id}
+        href={event.htmlLink}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block no-underline"
+      >
+        {inner}
+      </a>
+    )
+  }
+
+  return inner
 }
