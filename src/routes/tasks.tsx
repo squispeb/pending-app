@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, MessageSquarePlus, Plus, X } from 'lucide-react'
+import { ChevronDown, Mic, Plus, X } from 'lucide-react'
 import {
   queryOptions,
   useMutation,
@@ -1097,10 +1097,10 @@ function TasksPage() {
         <button
           type="button"
           onClick={() => setCaptureMode('input')}
-          aria-label="Capture task from text"
+          aria-label="Capture task"
           className="flex size-11 cursor-pointer items-center justify-center rounded-full bg-[var(--surface-strong)] text-[var(--ink-strong)] shadow-md transition hover:opacity-90 active:scale-95 border border-[var(--line)]"
         >
-          <MessageSquarePlus size={18} />
+          <Mic size={18} />
         </button>
         <button
           type="button"
