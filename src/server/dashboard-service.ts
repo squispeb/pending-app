@@ -22,8 +22,8 @@ export function createDashboardService(database: Database) {
       const completionStartDate = getTodayDateString(completionStart)
 
       const [tasks, habits, completions] = await Promise.all([
-        tasksService.listTasks(),
-        habitsService.listHabits(),
+        tasksService.listTasksWithCalendarLinks(now),
+        habitsService.listHabitsWithCalendarLinks(now),
         habitsService.listHabitCompletions(completionStartDate, today),
       ])
 

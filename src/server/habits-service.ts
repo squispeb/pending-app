@@ -9,6 +9,7 @@ import {
   type UpdateHabitInput,
 } from '../lib/habits'
 import { ensureDefaultUser } from './default-user'
+import { listPlanningItemCalendarLinks } from './planning-item-calendar-links'
 
 export function createHabitsService(database: Database) {
   return {
@@ -20,6 +21,24 @@ export function createHabitsService(database: Database) {
         where: eq(habits.userId, user.id),
         orderBy: [asc(habits.archivedAt), asc(habits.title)],
       })
+    },
+    async listHabitsWithCalendarLinks(now = new Date()) {
+      const user = await ensureDefaultUser(database)
+      const rows = await database.query.habits.findMany({
+        where: eq(habits.userId, user.id),
+        orderBy: [asc(habits.archivedAt), asc(habits.title)],
+      })
+      const linksByHabitId = await listPlanningItemCalendarLinks(database, {
+        userId: user.id,
+        sourceType: 'habit',
+        sourceIds: rows.map((habit) => habit.id),
+        now,
+      })
+
+      return rows.map((habit) => ({
+        ...habit,
+        calendarLinks: linksByHabitId.get(habit.id) ?? [],
+      }))
     },
     async listHabitCompletions(startDate?: string, endDate?: string) {
       const user = await ensureDefaultUser(database)
@@ -49,9 +68,10 @@ export function createHabitsService(database: Database) {
       const data = habitCreateSchema.parse(input)
       const user = await ensureDefaultUser(database)
       const now = new Date()
+      const id = crypto.randomUUID()
 
       await database.insert(habits).values({
-        id: crypto.randomUUID(),
+        id,
         userId: user.id,
         title: data.title,
         cadenceType: data.cadenceType,
@@ -64,7 +84,7 @@ export function createHabitsService(database: Database) {
         updatedAt: now,
       })
 
-      return { ok: true as const }
+      return { ok: true as const, id }
     },
     async updateHabit(input: UpdateHabitInput) {
       const data = habitUpdateSchema.parse(input)

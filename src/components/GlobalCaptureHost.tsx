@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ChevronDown, Mic, Square, X } from 'lucide-react'
+import { CalendarDays, ChevronDown, Mic, Square, X } from 'lucide-react'
 import {
   useMutation,
   useQueryClient,
@@ -164,7 +164,13 @@ export default function GlobalCaptureHost() {
     mutationFn: async () => {
       const parsed = taskFormSchema.parse(taskForm)
       const rawInput = captureDraft?.rawInput ?? captureRawInput
-      return confirmCapturedTaskFn({ data: { rawInput, task: parsed } })
+      return confirmCapturedTaskFn({
+        data: {
+          rawInput,
+          matchedCalendarContext: captureDraft?.matchedCalendarContext ?? null,
+          task: parsed,
+        },
+      })
     },
     onSuccess: async () => {
       resetCapture()
@@ -180,7 +186,13 @@ export default function GlobalCaptureHost() {
     mutationFn: async () => {
       const parsed = habitFormSchema.parse(habitForm)
       const rawInput = captureDraft?.rawInput ?? captureRawInput
-      return confirmCapturedHabitFn({ data: { rawInput, habit: parsed } })
+      return confirmCapturedHabitFn({
+        data: {
+          rawInput,
+          matchedCalendarContext: captureDraft?.matchedCalendarContext ?? null,
+          habit: parsed,
+        },
+      })
     },
     onSuccess: async () => {
       resetCapture()
@@ -507,6 +519,23 @@ export default function GlobalCaptureHost() {
                     </span>
                     <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureDraft?.rawInput}</p>
                   </div>
+
+                  {captureDraft?.matchedCalendarContext ? (
+                    <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+                      <div className="mb-2 flex items-center gap-2">
+                        <CalendarDays size={15} className="text-[var(--ink-soft)]" />
+                        <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                          Linked calendar context
+                        </span>
+                      </div>
+                      <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">
+                        {captureDraft.matchedCalendarContext.summary}
+                      </p>
+                      <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
+                        {captureDraft.matchedCalendarContext.reason}
+                      </p>
+                    </div>
+                  ) : null}
 
                   {/* Interpretation notes */}
                   {captureNotes.length > 0 ? (

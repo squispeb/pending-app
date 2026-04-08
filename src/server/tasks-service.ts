@@ -9,6 +9,7 @@ import {
   type UpdateTaskInput,
 } from '../lib/tasks'
 import { ensureDefaultUser } from './default-user'
+import { listPlanningItemCalendarLinks } from './planning-item-calendar-links'
 
 export function createTasksService(database: Database) {
   return {
@@ -21,20 +22,39 @@ export function createTasksService(database: Database) {
         orderBy: [desc(tasks.completedAt), desc(tasks.createdAt)],
       })
     },
+    async listTasksWithCalendarLinks(now = new Date()) {
+      const user = await ensureDefaultUser(database)
+      const rows = await database.query.tasks.findMany({
+        where: and(eq(tasks.userId, user.id), isNull(tasks.archivedAt)),
+        orderBy: [desc(tasks.completedAt), desc(tasks.createdAt)],
+      })
+      const linksByTaskId = await listPlanningItemCalendarLinks(database, {
+        userId: user.id,
+        sourceType: 'task',
+        sourceIds: rows.map((task) => task.id),
+        now,
+      })
+
+      return rows.map((task) => ({
+        ...task,
+        calendarLinks: linksByTaskId.get(task.id) ?? [],
+      }))
+    },
     async createTask(input: CreateTaskInput) {
       const data = taskCreateSchema.parse(input)
       const user = await ensureDefaultUser(database)
       const now = new Date()
+      const id = crypto.randomUUID()
 
       await database.insert(tasks).values({
-        id: crypto.randomUUID(),
+        id,
         userId: user.id,
         ...normalizeTaskValuesForStorage(data),
         updatedAt: now,
         createdAt: now,
       })
 
-      return { ok: true as const }
+      return { ok: true as const, id }
     },
     async updateTask(input: UpdateTaskInput) {
       const data = taskUpdateSchema.parse(input)

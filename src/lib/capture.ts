@@ -128,11 +128,13 @@ export const interpretCaptureFailureSchema = z.object({
 
 export const confirmCapturedTaskInputSchema = z.object({
   rawInput: z.string().trim().min(1).max(4000),
+  matchedCalendarContext: matchedCalendarContextSchema.nullable().optional(),
   task: taskCreateSchema,
 })
 
 export const confirmCapturedHabitInputSchema = z.object({
   rawInput: z.string().trim().min(1).max(4000),
+  matchedCalendarContext: matchedCalendarContextSchema.nullable().optional(),
   habit: habitCreateSchema,
 })
 

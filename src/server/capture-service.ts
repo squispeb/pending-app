@@ -17,6 +17,7 @@ import type { CaptureInterpreter } from './capture-interpreter'
 import { CaptureInterpreterError, createRemoteCaptureInterpreter } from './capture-interpreter'
 import { ensureDefaultUser } from './default-user'
 import { createHabitsService } from './habits-service'
+import { replacePlanningItemCalendarLink } from './planning-item-calendar-links'
 import { createTasksService } from './tasks-service'
 
 type CaptureCalendarContextCandidate = {
@@ -238,11 +239,31 @@ export function createCaptureService(
     },
     async confirmCapturedTask(input: ConfirmCapturedTaskInput) {
       const parsed = confirmCapturedTaskInputSchema.parse(input)
-      return tasksService.createTask(parsed.task)
+      const user = await ensureDefaultUser(database)
+      const result = await tasksService.createTask(parsed.task)
+
+      await replacePlanningItemCalendarLink(database, {
+        userId: user.id,
+        sourceType: 'task',
+        sourceId: result.id,
+        matchedCalendarContext: parsed.matchedCalendarContext ?? null,
+      })
+
+      return result
     },
     async confirmCapturedHabit(input: ConfirmCapturedHabitInput) {
       const parsed = confirmCapturedHabitInputSchema.parse(input)
-      return habitsService.createHabit(parsed.habit)
+      const user = await ensureDefaultUser(database)
+      const result = await habitsService.createHabit(parsed.habit)
+
+      await replacePlanningItemCalendarLink(database, {
+        userId: user.id,
+        sourceType: 'habit',
+        sourceId: result.id,
+        matchedCalendarContext: parsed.matchedCalendarContext ?? null,
+      })
+
+      return result
     },
   }
 }

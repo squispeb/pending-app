@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Plus, X } from 'lucide-react'
+import { CalendarDays, ChevronDown, ExternalLink, Plus, X } from 'lucide-react'
 import {
   queryOptions,
   useMutation,
@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
+import type { PlanningItemCalendarLinkView } from '../server/planning-item-calendar-links'
 import type { Habit, HabitCompletion } from '../db/schema'
 import {
   applyHabitFilter,
@@ -90,6 +91,10 @@ const WEEKDAYS: Array<{ value: HabitWeekday; label: string }> = [
 ]
 
 const EMPTY_FORM = toHabitFormValues(null)
+
+type HabitWithCalendarLinks = Habit & {
+  calendarLinks?: Array<PlanningItemCalendarLinkView>
+}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -670,7 +675,7 @@ function HabitCard({
   onArchive,
   isMutating,
 }: {
-  habit: Habit
+  habit: HabitWithCalendarLinks
   completions: Array<HabitCompletion>
   today: string
   onEdit: () => void
@@ -720,6 +725,41 @@ function HabitCard({
             ) : null}
             {habit.reminderAt ? <span>Reminder set</span> : null}
           </div>
+
+          {habit.calendarLinks?.length ? (
+            <div className="ml-4 mt-3 flex flex-wrap gap-2">
+              {habit.calendarLinks.map((link) => {
+                const content = (
+                  <>
+                    <CalendarDays size={12} className="shrink-0" />
+                    <span>Linked to {link.matchedSummary}</span>
+                    {link.resolvedEvent?.htmlLink ? <ExternalLink size={11} className="shrink-0 opacity-70" /> : null}
+                  </>
+                )
+
+                return link.resolvedEvent?.htmlLink ? (
+                  <a
+                    key={link.id}
+                    href={link.resolvedEvent.htmlLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="secondary-pill inline-flex items-center gap-1.5 border-0 !px-3 !py-1 text-xs font-semibold no-underline"
+                    title={link.matchReason}
+                  >
+                    {content}
+                  </a>
+                ) : (
+                  <span
+                    key={link.id}
+                    className="secondary-pill inline-flex items-center gap-1.5 border-0 !px-3 !py-1 text-xs font-semibold"
+                    title={link.matchReason}
+                  >
+                    {content}
+                  </span>
+                )
+              })}
+            </div>
+          ) : null}
 
           {/* 7-day dot strip */}
           <div className="ml-4 mt-2 flex items-center gap-1.5">

@@ -6,7 +6,7 @@ import { createHabitsService } from './habits-service'
 const habitsService = createHabitsService(db)
 
 export const listHabits = createServerFn({ method: 'GET' }).handler(async () => {
-  return habitsService.listHabits()
+  return habitsService.listHabitsWithCalendarLinks()
 })
 
 export const listHabitCompletions = createServerFn({ method: 'GET' })

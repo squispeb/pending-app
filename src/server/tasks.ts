@@ -6,7 +6,7 @@ import { createTasksService } from './tasks-service'
 const tasksService = createTasksService(db)
 
 export const listTasks = createServerFn({ method: 'GET' }).handler(async () => {
-  return tasksService.listTasks()
+  return tasksService.listTasksWithCalendarLinks()
 })
 
 export const createTask = createServerFn({ method: 'POST' })

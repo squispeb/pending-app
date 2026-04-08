@@ -59,6 +59,69 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
   await db.run(sql`
     CREATE UNIQUE INDEX habit_completion_unique ON habit_completions (habit_id, completion_date);
   `)
+
+  await db.run(sql`
+    CREATE TABLE planning_item_calendar_links (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL,
+      source_type text NOT NULL,
+      source_id text NOT NULL,
+      calendar_id text NOT NULL,
+      google_event_id text NOT NULL,
+      google_recurring_event_id text,
+      matched_summary text NOT NULL,
+      match_reason text NOT NULL,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
+    CREATE UNIQUE INDEX planning_item_calendar_link_source_unique
+    ON planning_item_calendar_links (source_type, source_id);
+  `)
+
+  await db.run(sql`
+    CREATE TABLE calendar_connections (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL,
+      google_account_id text NOT NULL,
+      calendar_id text NOT NULL,
+      calendar_name text NOT NULL,
+      is_selected integer DEFAULT false NOT NULL,
+      primary_flag integer DEFAULT false NOT NULL,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
+    CREATE TABLE calendar_events (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL,
+      calendar_id text NOT NULL,
+      google_event_id text NOT NULL,
+      google_recurring_event_id text,
+      status text DEFAULT 'confirmed' NOT NULL,
+      summary text,
+      description text,
+      location text,
+      starts_at integer NOT NULL,
+      ends_at integer NOT NULL,
+      all_day integer DEFAULT false NOT NULL,
+      event_timezone text,
+      html_link text,
+      organizer_email text,
+      attendee_count integer,
+      synced_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at_remote integer,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+    );
+  `)
 }
 
 describe('habits service', () => {
@@ -79,7 +142,7 @@ describe('habits service', () => {
   })
 
   it('creates and lists a habit', async () => {
-    await service.createHabit({
+    const created = await service.createHabit({
       title: 'Read 10 pages',
       cadenceType: 'daily',
       cadenceDays: [],
@@ -92,8 +155,60 @@ describe('habits service', () => {
     const habits = await service.listHabits()
 
     expect(habits).toHaveLength(1)
+    expect(created.id).toBe(habits[0]?.id)
     expect(habits[0]?.title).toBe('Read 10 pages')
     expect(habits[0]?.cadenceType).toBe('daily')
+  })
+
+  it('lists habit calendar links when present', async () => {
+    const created = await service.createHabit({
+      title: 'Read 10 pages',
+      cadenceType: 'daily',
+      cadenceDays: [],
+      targetCount: 1,
+      preferredStartTime: '',
+      preferredEndTime: '',
+      reminderAt: '',
+    })
+
+    await db.run(sql`
+      INSERT INTO calendar_connections (
+        id, user_id, google_account_id, calendar_id, calendar_name, is_selected, primary_flag, created_at, updated_at
+      ) VALUES (
+        'conn-1', 'local-user', 'google-1', 'calendar-1', 'Primary', 1, 1, (unixepoch() * 1000), (unixepoch() * 1000)
+      );
+    `)
+    await db.run(sql`
+      INSERT INTO calendar_events (
+        id, user_id, calendar_id, google_event_id, google_recurring_event_id, status, summary,
+        starts_at, ends_at, all_day, html_link, synced_at, created_at, updated_at
+      ) VALUES (
+        'evt-1', 'local-user', 'calendar-1', 'google-evt-1', 'series-1', 'confirmed', 'Cloud Computing',
+        strftime('%s', '2026-04-10 15:00:00') * 1000,
+        strftime('%s', '2026-04-10 16:00:00') * 1000,
+        0,
+        'https://calendar.google.com/event?eid=1',
+        (unixepoch() * 1000), (unixepoch() * 1000), (unixepoch() * 1000)
+      );
+    `)
+    await db.run(sql`
+      INSERT INTO planning_item_calendar_links (
+        id, user_id, source_type, source_id, calendar_id, google_event_id, google_recurring_event_id,
+        matched_summary, match_reason, created_at, updated_at
+      ) VALUES (
+        'link-1', 'local-user', 'habit', ${created.id}, 'calendar-1', 'google-evt-1', 'series-1',
+        'Cloud Computing', 'Matched recurring event: Cloud Computing',
+        (unixepoch() * 1000), (unixepoch() * 1000)
+      );
+    `)
+
+    const habitsWithLinks = await service.listHabitsWithCalendarLinks(new Date('2026-04-09T12:00:00Z'))
+
+    expect(habitsWithLinks[0]?.calendarLinks).toHaveLength(1)
+    expect(habitsWithLinks[0]?.calendarLinks[0]?.matchedSummary).toBe('Cloud Computing')
+    expect(habitsWithLinks[0]?.calendarLinks[0]?.resolvedEvent?.htmlLink).toBe(
+      'https://calendar.google.com/event?eid=1',
+    )
   })
 
   it('updates and archives a habit', async () => {

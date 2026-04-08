@@ -160,6 +160,35 @@ export const calendarEvents = sqliteTable('calendar_events', {
     .default(sql`(unixepoch() * 1000)`),
 })
 
+export const planningItemCalendarLinks = sqliteTable(
+  'planning_item_calendar_links',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    sourceType: text('source_type').notNull(),
+    sourceId: text('source_id').notNull(),
+    calendarId: text('calendar_id').notNull(),
+    googleEventId: text('google_event_id').notNull(),
+    googleRecurringEventId: text('google_recurring_event_id'),
+    matchedSummary: text('matched_summary').notNull(),
+    matchReason: text('match_reason').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    sourceUniqueIdx: uniqueIndex('planning_item_calendar_link_source_unique').on(
+      table.sourceType,
+      table.sourceId,
+    ),
+  }),
+)
+
 export const syncStates = sqliteTable('sync_states', {
   id: text('id').primaryKey(),
   userId: text('user_id')
@@ -211,5 +240,6 @@ export type HabitCompletion = typeof habitCompletions.$inferSelect
 export type GoogleAccount = typeof googleAccounts.$inferSelect
 export type CalendarConnection = typeof calendarConnections.$inferSelect
 export type CalendarEvent = typeof calendarEvents.$inferSelect
+export type PlanningItemCalendarLink = typeof planningItemCalendarLinks.$inferSelect
 export type SyncState = typeof syncStates.$inferSelect
 export type ReminderEvent = typeof reminderEvents.$inferSelect

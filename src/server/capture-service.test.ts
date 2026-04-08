@@ -105,6 +105,28 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
     );
   `)
+
+  await db.run(sql`
+    CREATE TABLE planning_item_calendar_links (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL,
+      source_type text NOT NULL,
+      source_id text NOT NULL,
+      calendar_id text NOT NULL,
+      google_event_id text NOT NULL,
+      google_recurring_event_id text,
+      matched_summary text NOT NULL,
+      match_reason text NOT NULL,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
+    CREATE UNIQUE INDEX planning_item_calendar_link_source_unique
+    ON planning_item_calendar_links (source_type, source_id);
+  `)
 }
 
 async function seedSelectedCalendar(db: ReturnType<typeof drizzle<typeof schema>>) {
@@ -361,9 +383,28 @@ describe('capture service', () => {
 
   it('creates a task through the existing task service on confirmation', async () => {
     const service = createCaptureService(db, null)
+    await seedSelectedCalendar(db)
+    await db.run(sql`
+      INSERT INTO calendar_events (
+        id, user_id, calendar_id, google_event_id, google_recurring_event_id, status, summary,
+        starts_at, ends_at, all_day, html_link, synced_at, created_at, updated_at
+      ) VALUES (
+        'evt-cloud-1', 'local-user', 'calendar-1', 'google-evt-1', 'series-1', 'confirmed', 'Cloud Computing',
+        strftime('%s', '2026-04-10 15:00:00') * 1000,
+        strftime('%s', '2026-04-10 16:00:00') * 1000,
+        0,
+        'https://calendar.google.com/event?eid=1',
+        (unixepoch() * 1000), (unixepoch() * 1000), (unixepoch() * 1000)
+      );
+    `)
 
     const result = await service.confirmCapturedTask({
       rawInput: 'Submit the design review notes by Friday at 3pm.',
+      matchedCalendarContext: {
+        calendarEventId: 'evt-cloud-1',
+        summary: 'Cloud Computing',
+        reason: 'Matched recurring event: Cloud Computing',
+      },
       task: {
         title: 'Submit design review notes',
         notes: 'Share notes with the team.',
@@ -383,13 +424,37 @@ describe('capture service', () => {
     expect(tasks).toHaveLength(1)
     expect(tasks[0]?.title).toBe('Submit design review notes')
     expect(tasks[0]?.dueTime).toBe('15:00')
+
+    const links = await db.query.planningItemCalendarLinks.findMany()
+    expect(links).toHaveLength(1)
+    expect(links[0]?.sourceType).toBe('task')
+    expect(links[0]?.matchedSummary).toBe('Cloud Computing')
   })
 
   it('creates a habit through the existing habit service on confirmation', async () => {
     const service = createCaptureService(db, null)
+    await seedSelectedCalendar(db)
+    await db.run(sql`
+      INSERT INTO calendar_events (
+        id, user_id, calendar_id, google_event_id, google_recurring_event_id, status, summary,
+        starts_at, ends_at, all_day, html_link, synced_at, created_at, updated_at
+      ) VALUES (
+        'evt-cloud-1', 'local-user', 'calendar-1', 'google-evt-1', 'series-1', 'confirmed', 'Cloud Computing',
+        strftime('%s', '2026-04-10 15:00:00') * 1000,
+        strftime('%s', '2026-04-10 16:00:00') * 1000,
+        0,
+        'https://calendar.google.com/event?eid=1',
+        (unixepoch() * 1000), (unixepoch() * 1000), (unixepoch() * 1000)
+      );
+    `)
 
     const result = await service.confirmCapturedHabit({
       rawInput: 'Meditar cada lunes y jueves',
+      matchedCalendarContext: {
+        calendarEventId: 'evt-cloud-1',
+        summary: 'Cloud Computing',
+        reason: 'Matched recurring event: Cloud Computing',
+      },
       habit: {
         title: 'Meditar',
         cadenceType: 'selected_days',
@@ -408,5 +473,9 @@ describe('capture service', () => {
     expect(habits[0]?.title).toBe('Meditar')
     expect(habits[0]?.cadenceType).toBe('selected_days')
     expect(habits[0]?.cadenceDays).toBe('["mon","thu"]')
+
+    const links = await db.query.planningItemCalendarLinks.findMany()
+    expect(links).toHaveLength(1)
+    expect(links[0]?.sourceType).toBe('habit')
   })
 })
