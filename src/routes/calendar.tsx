@@ -121,6 +121,7 @@ function CalendarPage() {
 
   const stripRef = useRef<HTMLDivElement>(null)
   const todayBtnRef = useRef<HTMLButtonElement>(null)
+  const autoSyncAttemptedRef = useRef(false)
 
   useEffect(() => {
     // Correct stale SSR-rendered time immediately on mount, then tick every 60s
@@ -147,6 +148,26 @@ function CalendarPage() {
       ])
     },
   })
+
+  useEffect(() => {
+    if (autoSyncAttemptedRef.current) {
+      return
+    }
+
+    if (data.account?.status !== 'connected' || data.selectedCalendars.length === 0) {
+      return
+    }
+
+    const lastSyncedAt = data.syncStatus?.lastSyncedAt ? new Date(data.syncStatus.lastSyncedAt) : null
+    const shouldAutoSync = !lastSyncedAt || Date.now() - lastSyncedAt.getTime() > 15 * 60_000
+
+    if (!shouldAutoSync || syncMutation.isPending) {
+      return
+    }
+
+    autoSyncAttemptedRef.current = true
+    syncMutation.mutate()
+  }, [data, syncMutation])
 
   const todayStr = getTodayDateString(now)
 

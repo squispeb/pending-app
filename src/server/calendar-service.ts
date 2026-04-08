@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
-import type { CalendarConnection, SyncState } from '../db/schema'
+import type { SyncState } from '../db/schema'
 import type { Database } from '../db/client'
 import { calendarConnections, calendarEvents, googleAccounts, syncStates } from '../db/schema'
 import type {
@@ -7,7 +7,7 @@ import type {
   GoogleIntegrationApi,
   GoogleTokenExchange,
 } from './google-client'
-import { googleIntegrationApi } from './google-client'
+import { GoogleApiError, googleIntegrationApi } from './google-client'
 import { getGoogleConfigStatus } from './google-auth'
 import {
   GOOGLE_CALENDAR_PROVIDER,
@@ -167,29 +167,194 @@ export function createCalendarService(
     }
 
     await database.insert(calendarEvents).values(
-      events.map((event) => ({
-        id: crypto.randomUUID(),
+      events
+        .filter((event) => event.status !== 'cancelled' && event.startsAt && event.endsAt)
+        .map((event) => ({
+          id: crypto.randomUUID(),
+          userId,
+          calendarId,
+          googleEventId: event.googleEventId,
+          googleRecurringEventId: event.googleRecurringEventId,
+          status: event.status,
+          summary: event.summary,
+          description: event.description,
+          location: event.location,
+          startsAt: event.startsAt!,
+          endsAt: event.endsAt!,
+          allDay: event.allDay,
+          eventTimezone: event.eventTimezone,
+          htmlLink: event.htmlLink,
+          organizerEmail: event.organizerEmail,
+          attendeeCount: event.attendeeCount,
+          syncedAt: now,
+          updatedAtRemote: event.updatedAtRemote,
+          createdAt: now,
+          updatedAt: now,
+        })),
+    )
+  }
+
+  async function deleteCalendarSnapshots(userId: string, calendarId: string) {
+    await database
+      .delete(calendarEvents)
+      .where(and(eq(calendarEvents.userId, userId), eq(calendarEvents.calendarId, calendarId)))
+  }
+
+  async function deleteCalendarEventSnapshot(userId: string, calendarId: string, googleEventId: string) {
+    await database
+      .delete(calendarEvents)
+      .where(
+        and(
+          eq(calendarEvents.userId, userId),
+          eq(calendarEvents.calendarId, calendarId),
+          eq(calendarEvents.googleEventId, googleEventId),
+        ),
+      )
+  }
+
+  async function upsertCalendarEventSnapshot(
+    userId: string,
+    calendarId: string,
+    event: GoogleCalendarEventInstance,
+    now: Date,
+  ) {
+    await deleteCalendarEventSnapshot(userId, calendarId, event.googleEventId)
+
+    if (event.status === 'cancelled' || !event.startsAt || !event.endsAt) {
+      return
+    }
+
+    await database.insert(calendarEvents).values({
+      id: crypto.randomUUID(),
+      userId,
+      calendarId,
+      googleEventId: event.googleEventId,
+      googleRecurringEventId: event.googleRecurringEventId,
+      status: event.status,
+      summary: event.summary,
+      description: event.description,
+      location: event.location,
+      startsAt: event.startsAt,
+      endsAt: event.endsAt,
+      allDay: event.allDay,
+      eventTimezone: event.eventTimezone,
+      htmlLink: event.htmlLink,
+      organizerEmail: event.organizerEmail,
+      attendeeCount: event.attendeeCount,
+      syncedAt: now,
+      updatedAtRemote: event.updatedAtRemote,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  async function applyIncrementalCalendarChanges(
+    userId: string,
+    calendarId: string,
+    events: Array<GoogleCalendarEventInstance>,
+    now: Date,
+  ) {
+    for (const event of events) {
+      await upsertCalendarEventSnapshot(userId, calendarId, event, now)
+    }
+  }
+
+  function isExpiredSyncTokenError(error: unknown) {
+    return error instanceof GoogleApiError && error.status === 410
+  }
+
+  async function runFullCalendarSync(
+    userId: string,
+    calendarId: string,
+    accessToken: string,
+    now: Date,
+  ) {
+    const planningWindow = getGoogleSyncWindow(now)
+    const result = await googleApi.fetchCalendarEvents(accessToken, calendarId, {
+      timeMin: planningWindow.start,
+      timeMax: planningWindow.end,
+    })
+
+    await replaceCalendarEvents(userId, calendarId, result.events, now)
+    await upsertSyncState(
+      userId,
+      calendarId,
+      {
+        lastSyncedAt: now,
+        nextSyncToken: result.nextSyncToken,
+        syncWindowStart: planningWindow.start,
+        syncWindowEnd: planningWindow.end,
+        lastStatus: 'success',
+        lastError: null,
+      },
+      now,
+    )
+
+    return {
+      eventCount: result.events.filter((event) => event.status !== 'cancelled').length,
+      recoveredExpiredToken: false,
+    }
+  }
+
+  async function runIncrementalCalendarSync(
+    userId: string,
+    calendarId: string,
+    accessToken: string,
+    existingState: SyncState,
+    now: Date,
+  ) {
+    try {
+      const result = await googleApi.fetchCalendarEvents(accessToken, calendarId, {
+        syncToken: existingState.nextSyncToken ?? undefined,
+      })
+
+      await applyIncrementalCalendarChanges(userId, calendarId, result.events, now)
+      await upsertSyncState(
         userId,
         calendarId,
-        googleEventId: event.googleEventId,
-        googleRecurringEventId: event.googleRecurringEventId,
-        status: event.status,
-        summary: event.summary,
-        description: event.description,
-        location: event.location,
-        startsAt: event.startsAt,
-        endsAt: event.endsAt,
-        allDay: event.allDay,
-        eventTimezone: event.eventTimezone,
-        htmlLink: event.htmlLink,
-        organizerEmail: event.organizerEmail,
-        attendeeCount: event.attendeeCount,
-        syncedAt: now,
-        updatedAtRemote: event.updatedAtRemote,
-        createdAt: now,
-        updatedAt: now,
-      })),
-    )
+        {
+          lastSyncedAt: now,
+          nextSyncToken: result.nextSyncToken ?? existingState.nextSyncToken,
+          syncWindowStart: existingState.syncWindowStart,
+          syncWindowEnd: existingState.syncWindowEnd,
+          lastStatus: 'success',
+          lastError: null,
+        },
+        now,
+      )
+
+      return {
+        eventCount: result.events.filter((event) => event.status !== 'cancelled').length,
+        recoveredExpiredToken: false,
+      }
+    } catch (error) {
+      if (!isExpiredSyncTokenError(error)) {
+        throw error
+      }
+
+      await deleteCalendarSnapshots(userId, calendarId)
+      const result = await runFullCalendarSync(userId, calendarId, accessToken, now)
+
+      return {
+        ...result,
+        recoveredExpiredToken: true,
+      }
+    }
+  }
+
+  async function syncCalendarConnection(
+    userId: string,
+    calendarId: string,
+    accessToken: string,
+    now: Date,
+  ) {
+    const existingState = await findSyncState(userId, calendarId)
+
+    if (existingState?.nextSyncToken) {
+      return runIncrementalCalendarSync(userId, calendarId, accessToken, existingState, now)
+    }
+
+    return runFullCalendarSync(userId, calendarId, accessToken, now)
   }
 
   async function getAccountAndConnections(userId: string) {
@@ -512,34 +677,17 @@ export function createCalendarService(
     }
 
     const accessToken = await getFreshAccessToken(account.id)
-    const planningWindow = getGoogleSyncWindow(now)
     let eventCount = 0
+    let recoveredExpiredToken = false
 
     for (const connection of selectedConnections) {
       try {
-        const events = await googleApi.fetchCalendarEvents(accessToken, connection.calendarId, {
-          timeMin: planningWindow.start,
-          timeMax: planningWindow.end,
-        })
-
-        await replaceCalendarEvents(user.id, connection.calendarId, events, now)
-        await upsertSyncState(
-          user.id,
-          connection.calendarId,
-          {
-            lastSyncedAt: now,
-            nextSyncToken: null,
-            syncWindowStart: planningWindow.start,
-            syncWindowEnd: planningWindow.end,
-            lastStatus: 'success',
-            lastError: null,
-          },
-          now,
-        )
-
-        eventCount += events.length
+        const result = await syncCalendarConnection(user.id, connection.calendarId, accessToken, now)
+        eventCount += result.eventCount
+        recoveredExpiredToken = recoveredExpiredToken || result.recoveredExpiredToken
       } catch (error) {
         const existingState = await findSyncState(user.id, connection.calendarId)
+        const planningWindow = getGoogleSyncWindow(now)
 
         await upsertSyncState(
           user.id,
@@ -564,6 +712,7 @@ export function createCalendarService(
       syncedAt: now,
       calendarCount: selectedConnections.length,
       eventCount,
+      recoveredExpiredToken,
     }
   }
 
@@ -588,11 +737,19 @@ export function createCalendarService(
       const googleAccountId = await persistGoogleAccount(user.id, userInfo, tokens, now)
       const calendars = await googleApi.fetchCalendarList(tokens.accessToken)
       const connections = await upsertCalendarConnections(user.id, googleAccountId, calendars, now)
+      const selectedConnections = connections.filter((calendar) => calendar.isSelected)
+      let syncedEventCount = 0
+
+      for (const connection of selectedConnections) {
+        const result = await runFullCalendarSync(user.id, connection.calendarId, tokens.accessToken, now)
+        syncedEventCount += result.eventCount
+      }
 
       return {
         ok: true as const,
         email: userInfo.email,
         selectedCalendarCount: connections.filter((calendar) => calendar.isSelected).length,
+        syncedEventCount,
       }
     },
     async refreshCalendarConnections() {

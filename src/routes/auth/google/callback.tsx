@@ -37,7 +37,7 @@ export const Route = createFileRoute('/auth/google/callback')({
 
       return {
         ok: true as const,
-        message: `Connected ${result.email} and selected ${result.selectedCalendarCount} calendars.`,
+        message: `Connected ${result.email}, selected ${result.selectedCalendarCount} calendars, and synced ${result.syncedEventCount} events.`,
       }
     } catch (error) {
       return {

@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/libsql'
 import { sql } from 'drizzle-orm'
 import * as schema from '../db/schema'
 import { createCalendarService } from './calendar-service'
-import type { GoogleIntegrationApi } from './google-client'
+import { GoogleApiError, type GoogleIntegrationApi } from './google-client'
 
 function makeDatabase() {
   const client = createClient({ url: ':memory:' })
@@ -107,6 +107,7 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
 type GoogleApiControls = {
   calendarListVersion: number
   eventVersion: number
+  expireSyncTokenOnNextRequest: boolean
 }
 
 function makeGoogleApi(controls: GoogleApiControls): GoogleIntegrationApi {
@@ -189,71 +190,143 @@ function makeGoogleApi(controls: GoogleApiControls): GoogleIntegrationApi {
         },
       ]
     },
-    async fetchCalendarEvents(_accessToken, calendarId) {
+    async fetchCalendarEvents(_accessToken, calendarId, options) {
+      if (options.syncToken) {
+        if (controls.expireSyncTokenOnNextRequest) {
+          controls.expireSyncTokenOnNextRequest = false
+          throw new GoogleApiError('Google request failed (410): Sync token expired.', 410)
+        }
+
+        if (controls.eventVersion === 2) {
+          if (calendarId === 'primary') {
+            return {
+              events: [
+                {
+                  googleEventId: 'primary-meeting-1',
+                  googleRecurringEventId: null,
+                  status: 'confirmed',
+                  summary: 'Updated planning review',
+                  description: null,
+                  location: 'Room B',
+                  startsAt: new Date('2026-04-09T15:00:00.000Z'),
+                  endsAt: new Date('2026-04-09T15:30:00.000Z'),
+                  allDay: false,
+                  eventTimezone: 'UTC',
+                  htmlLink: null,
+                  organizerEmail: 'owner@example.com',
+                  attendeeCount: 3,
+                  updatedAtRemote: new Date('2026-04-08T08:00:00.000Z'),
+                },
+              ],
+              nextSyncToken: 'primary-sync-v2',
+            }
+          }
+
+          return {
+            events: [
+              {
+                googleEventId: 'team-offsite',
+                googleRecurringEventId: null,
+                status: 'cancelled',
+                summary: null,
+                description: null,
+                location: null,
+                startsAt: null,
+                endsAt: null,
+                allDay: false,
+                eventTimezone: null,
+                htmlLink: null,
+                organizerEmail: null,
+                attendeeCount: null,
+                updatedAtRemote: new Date('2026-04-08T08:05:00.000Z'),
+              },
+            ],
+            nextSyncToken: 'team-sync-v2',
+          }
+        }
+
+        return {
+          events: [],
+          nextSyncToken: calendarId === 'primary' ? 'primary-sync-v1' : 'team-sync-v1',
+        }
+      }
+
       if (controls.eventVersion === 1) {
         if (calendarId === 'primary') {
-          return [
+          return {
+            events: [
+              {
+                googleEventId: 'primary-meeting-1',
+                googleRecurringEventId: null,
+                status: 'confirmed',
+                summary: 'Primary kickoff',
+                description: null,
+                location: 'Room A',
+                startsAt: new Date('2026-04-07T16:00:00.000Z'),
+                endsAt: new Date('2026-04-07T17:00:00.000Z'),
+                allDay: false,
+                eventTimezone: 'UTC',
+                htmlLink: 'https://calendar.google.com/event?eid=primary-meeting-1',
+                organizerEmail: 'owner@example.com',
+                attendeeCount: 2,
+                updatedAtRemote: new Date('2026-04-06T10:00:00.000Z'),
+              },
+            ],
+            nextSyncToken: 'primary-sync-v1',
+          }
+        }
+
+        return {
+          events: [
+            {
+              googleEventId: 'team-offsite',
+              googleRecurringEventId: null,
+              status: 'confirmed',
+              summary: 'Team offsite',
+              description: null,
+              location: null,
+              startsAt: new Date('2026-04-08T12:00:00.000Z'),
+              endsAt: new Date('2026-04-09T12:00:00.000Z'),
+              allDay: true,
+              eventTimezone: 'UTC',
+              htmlLink: null,
+              organizerEmail: 'team@example.com',
+              attendeeCount: 6,
+              updatedAtRemote: new Date('2026-04-06T12:00:00.000Z'),
+            },
+          ],
+          nextSyncToken: 'team-sync-v1',
+        }
+      }
+
+      if (calendarId === 'primary') {
+        return {
+          events: [
             {
               googleEventId: 'primary-meeting-1',
               googleRecurringEventId: null,
               status: 'confirmed',
-              summary: 'Primary kickoff',
+              summary: 'Updated planning review',
               description: null,
-              location: 'Room A',
-              startsAt: new Date('2026-04-07T16:00:00.000Z'),
-              endsAt: new Date('2026-04-07T17:00:00.000Z'),
+              location: 'Room B',
+              startsAt: new Date('2026-04-09T15:00:00.000Z'),
+              endsAt: new Date('2026-04-09T15:30:00.000Z'),
               allDay: false,
               eventTimezone: 'UTC',
-              htmlLink: 'https://calendar.google.com/event?eid=primary-meeting-1',
+              htmlLink: null,
               organizerEmail: 'owner@example.com',
-              attendeeCount: 2,
-              updatedAtRemote: new Date('2026-04-06T10:00:00.000Z'),
+              attendeeCount: 3,
+              updatedAtRemote: new Date('2026-04-08T08:00:00.000Z'),
             },
-          ]
+          ],
+          nextSyncToken: 'primary-sync-v2',
         }
-
-        return [
-          {
-            googleEventId: 'team-offsite',
-            googleRecurringEventId: null,
-            status: 'confirmed',
-            summary: 'Team offsite',
-            description: null,
-            location: null,
-            startsAt: new Date('2026-04-08T12:00:00.000Z'),
-            endsAt: new Date('2026-04-09T12:00:00.000Z'),
-            allDay: true,
-            eventTimezone: 'UTC',
-            htmlLink: null,
-            organizerEmail: 'team@example.com',
-            attendeeCount: 6,
-            updatedAtRemote: new Date('2026-04-06T12:00:00.000Z'),
-          },
-        ]
       }
 
-      if (calendarId === 'primary') {
-        return [
-          {
-            googleEventId: 'primary-meeting-2',
-            googleRecurringEventId: null,
-            status: 'confirmed',
-            summary: 'Updated planning review',
-            description: null,
-            location: 'Room B',
-            startsAt: new Date('2026-04-09T15:00:00.000Z'),
-            endsAt: new Date('2026-04-09T15:30:00.000Z'),
-            allDay: false,
-            eventTimezone: 'UTC',
-            htmlLink: null,
-            organizerEmail: 'owner@example.com',
-            attendeeCount: 3,
-            updatedAtRemote: new Date('2026-04-08T08:00:00.000Z'),
-          },
-        ]
+      return {
+        events: [],
+        nextSyncToken: 'team-sync-v2',
       }
-
-      return []
     },
   }
 }
@@ -272,6 +345,7 @@ describe('calendar service', () => {
     controls = {
       calendarListVersion: 1,
       eventVersion: 1,
+      expireSyncTokenOnNextRequest: false,
     }
     service = createCalendarService(db, makeGoogleApi(controls))
   })
@@ -289,11 +363,15 @@ describe('calendar service', () => {
     expect(result.ok).toBe(true)
     expect(result.email).toBe('person@example.com')
     expect(result.selectedCalendarCount).toBe(2)
+    expect(result.syncedEventCount).toBe(2)
 
     const settings = await service.getSettingsData()
+    const connectedDay = await service.getCalendarEventsForDay('2026-04-07')
 
     expect(settings.account?.status).toBe('connected')
     expect(settings.calendars).toHaveLength(3)
+    expect(settings.syncStatus?.lastStatus).toBe('success')
+    expect(connectedDay.events.map((event) => event.summary)).toEqual(['Primary kickoff'])
     expect(settings.calendars.map((item) => [item.calendarId, item.isSelected])).toEqual([
       ['primary', true],
       ['team', true],
@@ -342,28 +420,51 @@ describe('calendar service', () => {
 
     expect(result.ok).toBe(true)
     expect(result.calendarCount).toBe(2)
-    expect(result.eventCount).toBe(2)
+    expect(result.eventCount).toBe(0)
 
     const page = await service.getCalendarViewData(new Date('2026-04-07T09:00:00.000Z'))
+    const primaryDay = await service.getCalendarEventsForDay('2026-04-07')
+    const offsiteDay = await service.getCalendarEventsForDay('2026-04-08')
 
-    expect(page.events.map((event) => [event.calendarId, event.summary])).toEqual([
-      ['primary', 'Primary kickoff'],
-      ['team', 'Team offsite'],
+    expect(page.daysWithEvents).toEqual(['2026-04-07', '2026-04-08'])
+    expect(primaryDay.events.map((event) => [event.calendarName, event.summary])).toEqual([
+      ['Primary', 'Primary kickoff'],
+    ])
+    expect(offsiteDay.events.map((event) => [event.calendarName, event.summary])).toEqual([
+      ['Team', 'Team offsite'],
     ])
     expect(page.syncStatus?.lastStatus).toBe('success')
     expect(page.syncStatus?.lastSyncedAt).toBeInstanceOf(Date)
   })
 
-  it('replaces cached events on a later full sync instead of appending duplicates', async () => {
+  it('applies incremental sync updates and removes cancelled events', async () => {
     await service.completeGoogleConnect('code', 'state')
-    await service.syncSelectedCalendarEvents(new Date('2026-04-07T09:00:00.000Z'))
 
     controls.eventVersion = 2
-    await service.syncSelectedCalendarEvents(new Date('2026-04-09T09:00:00.000Z'))
+    const result = await service.syncSelectedCalendarEvents(new Date('2026-04-09T09:00:00.000Z'))
 
-    const page = await service.getCalendarViewData(new Date('2026-04-09T09:00:00.000Z'))
+    const updatedDay = await service.getCalendarEventsForDay('2026-04-09')
+    const removedDay = await service.getCalendarEventsForDay('2026-04-08')
 
-    expect(page.events.map((event) => event.summary)).toEqual(['Updated planning review'])
-    expect(page.events).toHaveLength(1)
+    expect(result.eventCount).toBe(1)
+    expect(result.recoveredExpiredToken).toBe(false)
+    expect(updatedDay.events.map((event) => event.summary)).toEqual(['Updated planning review'])
+    expect(removedDay.events).toHaveLength(0)
+  })
+
+  it('recovers from an expired sync token by clearing state and running a full resync', async () => {
+    await service.completeGoogleConnect('code', 'state')
+
+    controls.eventVersion = 2
+    controls.expireSyncTokenOnNextRequest = true
+
+    const result = await service.syncSelectedCalendarEvents(new Date('2026-04-09T09:00:00.000Z'))
+    const updatedDay = await service.getCalendarEventsForDay('2026-04-09')
+    const removedDay = await service.getCalendarEventsForDay('2026-04-08')
+
+    expect(result.ok).toBe(true)
+    expect(result.recoveredExpiredToken).toBe(true)
+    expect(updatedDay.events.map((event) => event.summary)).toEqual(['Updated planning review'])
+    expect(removedDay.events).toHaveLength(0)
   })
 })

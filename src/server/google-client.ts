@@ -40,6 +40,7 @@ const googleEventDateSchema = z.object({
 
 const googleCalendarEventsResponseSchema = z.object({
   nextPageToken: z.string().optional(),
+  nextSyncToken: z.string().optional(),
   items: z
     .array(
       z.object({
@@ -63,8 +64,8 @@ const googleCalendarEventsResponseSchema = z.object({
             }),
           )
           .optional(),
-        start: googleEventDateSchema,
-        end: googleEventDateSchema,
+        start: googleEventDateSchema.optional(),
+        end: googleEventDateSchema.optional(),
       }),
     )
     .default([]),
@@ -96,14 +97,29 @@ export type GoogleCalendarEventInstance = {
   summary: string | null
   description: string | null
   location: string | null
-  startsAt: Date
-  endsAt: Date
+  startsAt: Date | null
+  endsAt: Date | null
   allDay: boolean
   eventTimezone: string | null
   htmlLink: string | null
   organizerEmail: string | null
   attendeeCount: number | null
   updatedAtRemote: Date | null
+}
+
+export type GoogleCalendarSyncResult = {
+  events: Array<GoogleCalendarEventInstance>
+  nextSyncToken: string | null
+}
+
+export class GoogleApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'GoogleApiError'
+    this.status = status
+  }
 }
 
 export interface GoogleIntegrationApi {
@@ -116,8 +132,8 @@ export interface GoogleIntegrationApi {
   fetchCalendarEvents(
     accessToken: string,
     calendarId: string,
-    options: { timeMin: Date; timeMax: Date },
-  ): Promise<Array<GoogleCalendarEventInstance>>
+    options: { timeMin?: Date; timeMax?: Date; syncToken?: string },
+  ): Promise<GoogleCalendarSyncResult>
 }
 
 async function fetchGoogleJson<T>(input: RequestInfo | URL, init: RequestInit, schema: z.ZodSchema<T>) {
@@ -151,7 +167,7 @@ async function fetchGoogleJson<T>(input: RequestInfo | URL, init: RequestInit, s
       }
     }
 
-    throw new Error(`Google request failed (${response.status}): ${errorMessage}`)
+    throw new GoogleApiError(`Google request failed (${response.status}): ${errorMessage}`, response.status)
   }
 
   const json = await response.json()
@@ -310,6 +326,7 @@ export const googleIntegrationApi: GoogleIntegrationApi = {
   async fetchCalendarEvents(accessToken, calendarId, options) {
     const events: Array<GoogleCalendarEventInstance> = []
     let nextPageToken: string | undefined
+    let nextSyncToken: string | null = null
 
     do {
       const url = new URL(
@@ -317,9 +334,19 @@ export const googleIntegrationApi: GoogleIntegrationApi = {
       )
       url.searchParams.set('maxResults', '2500')
       url.searchParams.set('singleEvents', 'true')
-      url.searchParams.set('orderBy', 'startTime')
-      url.searchParams.set('timeMin', options.timeMin.toISOString())
-      url.searchParams.set('timeMax', options.timeMax.toISOString())
+
+      if (options.syncToken) {
+        url.searchParams.set('showDeleted', 'true')
+        url.searchParams.set('syncToken', options.syncToken)
+      } else {
+        if (!options.timeMin || !options.timeMax) {
+          throw new Error('Full Google Calendar sync requires both timeMin and timeMax.')
+        }
+
+        url.searchParams.set('orderBy', 'startTime')
+        url.searchParams.set('timeMin', options.timeMin.toISOString())
+        url.searchParams.set('timeMax', options.timeMax.toISOString())
+      }
 
       if (nextPageToken) {
         url.searchParams.set('pageToken', nextPageToken)
@@ -336,8 +363,8 @@ export const googleIntegrationApi: GoogleIntegrationApi = {
       )
 
       for (const item of response.items) {
-        const start = parseGoogleEventBoundary(item.start)
-        const end = parseGoogleEventBoundary(item.end)
+        const start = item.start ? parseGoogleEventBoundary(item.start) : null
+        const end = item.end ? parseGoogleEventBoundary(item.end) : null
 
         events.push({
           googleEventId: item.id,
@@ -346,10 +373,10 @@ export const googleIntegrationApi: GoogleIntegrationApi = {
           summary: item.summary ?? null,
           description: item.description ?? null,
           location: item.location ?? null,
-          startsAt: start.at,
-          endsAt: end.at,
-          allDay: start.allDay,
-          eventTimezone: start.timeZone ?? end.timeZone,
+          startsAt: start?.at ?? null,
+          endsAt: end?.at ?? null,
+          allDay: start?.allDay ?? false,
+          eventTimezone: start?.timeZone ?? end?.timeZone ?? null,
           htmlLink: item.htmlLink ?? null,
           organizerEmail: item.organizer?.email ?? null,
           attendeeCount: item.attendees?.length ?? null,
@@ -358,8 +385,12 @@ export const googleIntegrationApi: GoogleIntegrationApi = {
       }
 
       nextPageToken = response.nextPageToken
+      nextSyncToken = response.nextSyncToken ?? nextSyncToken
     } while (nextPageToken)
 
-    return events
+    return {
+      events,
+      nextSyncToken,
+    }
   },
 }

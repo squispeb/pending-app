@@ -9,7 +9,7 @@ import type { ReminderItem } from '../lib/reminders'
 import { completeTask, reopenTask } from '../server/tasks'
 import { completeHabitForDate, uncompleteHabitForDate } from '../server/habits'
 import { getDashboardData } from '../server/dashboard'
-import { getCalendarEventsForDay } from '../server/calendar'
+import { getCalendarEventsForDay, getCalendarView, syncGoogleCalendar } from '../server/calendar'
 import {
   deferReminder,
   dismissReminder,
@@ -27,6 +27,13 @@ const calendarDayQueryOptions = (dateStr: string) =>
   queryOptions({
     queryKey: ['calendar-day', dateStr],
     queryFn: () => getCalendarEventsForDay({ data: { dateStr } }),
+    staleTime: 60_000,
+  })
+
+const calendarViewQueryOptions = () =>
+  queryOptions({
+    queryKey: ['calendar-view'],
+    queryFn: () => getCalendarView(),
     staleTime: 60_000,
   })
 
@@ -48,6 +55,7 @@ function DashboardPage() {
   const { data } = useSuspenseQuery(dashboardQueryOptions())
 
   const todayStr = getTodayDateString()
+  const { data: calendarViewData } = useQuery(calendarViewQueryOptions())
   const { data: calendarDayData } = useQuery(calendarDayQueryOptions(todayStr))
   const todayMeetings = calendarDayData?.events ?? []
 
@@ -86,8 +94,21 @@ function DashboardPage() {
   visibleRemindersRef.current = visibleReminders
   const dueRemindersRef = useRef(dueReminders)
   dueRemindersRef.current = dueReminders
+  const autoSyncAttemptedRef = useRef(false)
 
   const invalidateDashboard = () => queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+
+  const syncCalendarMutation = useMutation({
+    mutationFn: async () => syncGoogleCalendar(),
+    onSuccess: async () => {
+      await Promise.all([
+        invalidateDashboard(),
+        queryClient.invalidateQueries({ queryKey: ['calendar-day', todayStr] }),
+        queryClient.invalidateQueries({ queryKey: ['calendar-view'] }),
+        queryClient.invalidateQueries({ queryKey: ['calendar-settings'] }),
+      ])
+    },
+  })
 
   const toggleTaskMutation = useMutation({
     mutationFn: async (task: Task) => {
@@ -151,6 +172,33 @@ function DashboardPage() {
       await invalidateDashboard()
     },
   })
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (autoSyncAttemptedRef.current) {
+      return
+    }
+
+    if (!calendarViewData || calendarViewData.account?.status !== 'connected') {
+      return
+    }
+
+    if (calendarViewData.selectedCalendars.length === 0) {
+      return
+    }
+
+    const lastSyncedAt = calendarViewData.syncStatus?.lastSyncedAt
+      ? new Date(calendarViewData.syncStatus.lastSyncedAt)
+      : null
+    const shouldAutoSync = !lastSyncedAt || Date.now() - lastSyncedAt.getTime() > 15 * 60_000
+
+    if (!shouldAutoSync || syncCalendarMutation.isPending) {
+      return
+    }
+
+    autoSyncAttemptedRef.current = true
+    syncCalendarMutation.mutate()
+  }, [calendarViewData, syncCalendarMutation])
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
