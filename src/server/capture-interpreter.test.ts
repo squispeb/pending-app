@@ -68,6 +68,9 @@ describe('capture interpreter', () => {
     const body = JSON.parse(String(init?.body))
     expect(body.model).toBe('openrouter/lightweight-model')
     expect(body.temperature).toBe(0)
+    expect(body.response_format).toMatchObject({
+      type: 'json_schema',
+    })
     expect(body.messages[0]).toEqual({
       role: 'system',
       content: CAPTURE_INTERPRETATION_SYSTEM_PROMPT,
@@ -426,5 +429,62 @@ describe('capture interpreter', () => {
         'El domingo que viene respecto al 2026-04-08 se interpreta como 2026-04-12.',
       ],
     })
+  })
+
+  it('coerces provider priority urgent to high', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  candidateType: 'task',
+                  title: 'Tarea Cloud Computing',
+                  notes: 'Tarea para el curso Cloud Computing.',
+                  dueDate: '2026-04-12',
+                  dueTime: null,
+                  priority: 'urgent',
+                  estimatedMinutes: null,
+                  cadenceType: null,
+                  cadenceDays: [],
+                  targetCount: null,
+                  matchedCalendarContext: null,
+                  preferredStartTime: null,
+                  preferredEndTime: null,
+                  interpretationNotes: [],
+                }),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        },
+      ),
+    )
+
+    const interpreter = createRemoteCaptureInterpreter(
+      {
+        url: 'https://openrouter.ai/api/v1/chat/completions',
+        apiKey: 'secret-key',
+        model: 'openai/gpt-5-mini',
+        timeoutMs: 1000,
+      },
+      fetchMock,
+    )
+
+    const result = await interpreter?.interpretTypedTask({
+      normalizedInput: 'Tarea para el curso de Cloud Computing con fecha del día domingo Prioridad Urente.',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+      languageHint: 'es',
+      calendarContext: [],
+    })
+
+    expect(result?.priority).toBe('high')
   })
 })

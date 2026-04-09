@@ -5,6 +5,7 @@ import type {
   TypedTaskDraftProviderOutput,
 } from '../lib/capture'
 import { typedTaskDraftProviderOutputSchema } from '../lib/capture'
+import { logProviderCall, logProviderError } from './provider-logging'
 
 export type CaptureInterpreterRequest = {
   normalizedInput: string
@@ -55,6 +56,102 @@ type OpenRouterChatResponse = {
     message?: string
   }
 }
+
+const CAPTURE_DRAFT_JSON_SCHEMA = {
+  name: 'typed_task_draft',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      candidateType: {
+        type: 'string',
+        enum: ['task', 'habit'],
+      },
+      title: {
+        type: ['string', 'null'],
+      },
+      notes: {
+        type: ['string', 'null'],
+      },
+      dueDate: {
+        type: ['string', 'null'],
+      },
+      dueTime: {
+        type: ['string', 'null'],
+      },
+      priority: {
+        type: ['string', 'null'],
+        enum: ['low', 'medium', 'high', null],
+      },
+      estimatedMinutes: {
+        type: ['integer', 'null'],
+      },
+      cadenceType: {
+        type: ['string', 'null'],
+        enum: ['daily', 'selected_days', null],
+      },
+      cadenceDays: {
+        type: 'array',
+        items: {
+          type: 'string',
+          enum: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
+        },
+      },
+      targetCount: {
+        type: ['integer', 'null'],
+      },
+      matchedCalendarContext: {
+        anyOf: [
+          {
+            type: 'null',
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              calendarEventId: { type: 'string' },
+              summary: { type: 'string' },
+              reason: { type: 'string' },
+            },
+            required: ['calendarEventId', 'summary', 'reason'],
+          },
+        ],
+      },
+      preferredStartTime: {
+        type: ['string', 'null'],
+      },
+      preferredEndTime: {
+        type: ['string', 'null'],
+      },
+      interpretationNotes: {
+        anyOf: [
+          {
+            type: 'array',
+            items: { type: 'string' },
+          },
+          { type: 'string' },
+        ],
+      },
+    },
+    required: [
+      'candidateType',
+      'title',
+      'notes',
+      'dueDate',
+      'dueTime',
+      'priority',
+      'estimatedMinutes',
+      'cadenceType',
+      'cadenceDays',
+      'targetCount',
+      'matchedCalendarContext',
+      'preferredStartTime',
+      'preferredEndTime',
+      'interpretationNotes',
+    ],
+  },
+} as const
 
 export const CAPTURE_INTERPRETATION_SYSTEM_PROMPT = [
   'You are a task-draft extraction engine for Pending App.',
@@ -157,6 +254,14 @@ function normalizeInterpretationNotes(value: unknown) {
   return undefined
 }
 
+function normalizePriority(value: unknown) {
+  if (value === 'urgent') {
+    return 'high'
+  }
+
+  return value
+}
+
 function normalizeMatchedCalendarContext(
   value: unknown,
   candidates: Array<CaptureInterpreterRequest['calendarContext'][number]>,
@@ -226,6 +331,7 @@ function parseOpenRouterDraft(
     typeof parsed === 'object' && parsed !== null
       ? {
           ...parsed,
+          priority: normalizePriority((parsed as Record<string, unknown>).priority),
           interpretationNotes: normalizeInterpretationNotes(
             (parsed as Record<string, unknown>).interpretationNotes,
           ),
@@ -269,9 +375,20 @@ export function createRemoteCaptureInterpreter(
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), config.timeoutMs)
       let response: Response
+      const url = config.url
+      const requestMetadata = {
+        model: config.model,
+        timeoutMs: config.timeoutMs,
+        url,
+        normalizedInput: input.normalizedInput.slice(0, 200),
+        languageHint: input.languageHint ?? 'mixed',
+        calendarContextCount: input.calendarContext.length,
+      }
+
+      logProviderCall('openrouter', 'request_started', requestMetadata)
 
       try {
-        response = await fetchImpl(config.url, {
+        response = await fetchImpl(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -291,6 +408,10 @@ export function createRemoteCaptureInterpreter(
               },
             ],
             temperature: 0,
+            response_format: {
+              type: 'json_schema',
+              json_schema: CAPTURE_DRAFT_JSON_SCHEMA,
+            },
           }),
           signal: controller.signal,
         })
@@ -299,34 +420,94 @@ export function createRemoteCaptureInterpreter(
           controller.signal.aborted ||
           (error instanceof DOMException && error.name === 'AbortError')
         ) {
+          logProviderError(
+            'openrouter',
+            'request_timeout',
+            requestMetadata,
+            error,
+          )
           throw new CaptureInterpreterError(
             `Capture interpretation timed out after ${config.timeoutMs}ms.`,
             'REQUEST',
           )
         }
 
+        logProviderError(
+          'openrouter',
+          'request_failed',
+          requestMetadata,
+          error,
+        )
         throw new CaptureInterpreterError('Capture interpretation request failed.', 'REQUEST')
       } finally {
         clearTimeout(timeout)
       }
 
       let json: OpenRouterChatResponse
+      const responseText = await response.text()
 
       try {
-        json = (await response.json()) as OpenRouterChatResponse
-      } catch {
+        json = JSON.parse(responseText) as OpenRouterChatResponse
+      } catch (error) {
+        logProviderError(
+          'openrouter',
+          'invalid_json',
+          {
+            ...requestMetadata,
+            status: response.status,
+            bodySnippet: responseText.slice(0, 600),
+          },
+          error,
+        )
         throw new CaptureInterpreterError('Capture interpretation returned invalid JSON.', 'INVALID_RESPONSE')
       }
 
       if (!response.ok) {
         const message = json.error?.message || `Capture interpretation failed (${response.status}).`
+        logProviderCall('openrouter', 'http_response', {
+          ...requestMetadata,
+          status: response.status,
+          ok: false,
+        })
+        logProviderError('openrouter', 'http_error', {
+          ...requestMetadata,
+          status: response.status,
+          providerMessage: message,
+        })
         throw new CaptureInterpreterError(
           message,
           'REQUEST',
         )
       }
 
-      return parseOpenRouterDraft(json, input)
+      logProviderCall('openrouter', 'http_response', {
+        ...requestMetadata,
+        status: response.status,
+        ok: true,
+      })
+
+      try {
+        const draft = parseOpenRouterDraft(json, input)
+        logProviderCall('openrouter', 'draft_parsed', {
+          ...requestMetadata,
+          candidateType: draft.candidateType,
+          matchedCalendarContext: draft.matchedCalendarContext?.summary ?? null,
+          interpretationNotesCount: draft.interpretationNotes?.length ?? 0,
+        })
+        return draft
+      } catch (error) {
+        logProviderError(
+          'openrouter',
+          'invalid_draft',
+          {
+            ...requestMetadata,
+            status: response.status,
+            bodySnippet: responseText.slice(0, 600),
+          },
+          error,
+        )
+        throw error
+      }
     },
   }
 }

@@ -5,6 +5,7 @@ import {
   type TranscribeAudioResponse,
   type TranscribeAudioUploadInput,
 } from '../lib/transcription'
+import { logProviderCall, logProviderError } from './provider-logging'
 
 export interface TranscriptionClient {
   transcribeAudio(input: TranscribeAudioUploadInput): Promise<TranscribeAudioResponse>
@@ -59,24 +60,54 @@ export function createRemoteTranscriptionClient(
       }
 
       let response: Response
+      const endpointUrl = getTranscriptionEndpointUrl(config.url).toString()
+      const requestMetadata = {
+        url: endpointUrl,
+        mimeType: input.audio.type || 'unknown',
+        sizeBytes:
+          typeof (input.audio as { size?: unknown }).size === 'number'
+            ? (input.audio as { size: number }).size
+            : undefined,
+        languageHint: input.languageHint ?? 'auto',
+        source: input.source ?? 'pending-app',
+      }
+
+      logProviderCall('transcription-service', 'request_started', requestMetadata)
 
       try {
-        response = await fetchImplementation(getTranscriptionEndpointUrl(config.url), {
+        response = await fetchImplementation(endpointUrl, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${config.token}`,
           },
           body: buildTranscriptionServiceFormData(input),
         })
-      } catch {
+      } catch (error) {
+        logProviderError(
+          'transcription-service',
+          'request_failed',
+          requestMetadata,
+          error,
+        )
         throw new TranscriptionClientError('Transcription request failed.', 'REQUEST')
       }
 
+      const responseText = await response.text()
       let json: unknown
 
       try {
-        json = await response.json()
-      } catch {
+        json = JSON.parse(responseText)
+      } catch (error) {
+        logProviderError(
+          'transcription-service',
+          'invalid_json',
+          {
+            ...requestMetadata,
+            status: response.status,
+            bodySnippet: responseText.slice(0, 600),
+          },
+          error,
+        )
         throw new TranscriptionClientError(
           'Transcription service returned invalid JSON.',
           'INVALID_RESPONSE',
@@ -85,12 +116,29 @@ export function createRemoteTranscriptionClient(
 
       const parsed = transcribeAudioResponseSchema.safeParse(json)
 
+      logProviderCall('transcription-service', 'http_response', {
+        ...requestMetadata,
+        status: response.status,
+        ok: parsed.success,
+      })
+
       if (!parsed.success) {
+        logProviderError('transcription-service', 'invalid_response_body', {
+          ...requestMetadata,
+          status: response.status,
+          bodySnippet: responseText.slice(0, 600),
+        })
         throw new TranscriptionClientError(
           'Transcription service returned an invalid response body.',
           'INVALID_RESPONSE',
         )
       }
+
+      logProviderCall('transcription-service', 'transcript_parsed', {
+        ...requestMetadata,
+        language: parsed.data.ok ? parsed.data.language : undefined,
+        transcriptLength: parsed.data.ok ? parsed.data.transcript.length : undefined,
+      })
 
       return parsed.data
     },
