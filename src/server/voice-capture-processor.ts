@@ -56,6 +56,8 @@ export function createVoiceCaptureProcessor(
       )
 
       if (confidence === 'high') {
+        const draftTitle = interpretation.draft.title ?? transcription.transcript
+
         if (interpretation.draft.candidateType === 'habit') {
           const created = await dependencies.captureService.confirmCapturedHabit({
             rawInput: transcription.transcript,
@@ -68,6 +70,7 @@ export function createVoiceCaptureProcessor(
             outcome: 'auto_saved',
             candidateType: 'habit',
             createdId: created.id,
+            title: draftTitle,
             transcript: transcription.transcript,
             language: transcription.language,
             matchedCalendarContext: interpretation.draft.matchedCalendarContext,
@@ -85,6 +88,7 @@ export function createVoiceCaptureProcessor(
           outcome: 'auto_saved',
           candidateType: 'task',
           createdId: created.id,
+          title: draftTitle,
           transcript: transcription.transcript,
           language: transcription.language,
           matchedCalendarContext: interpretation.draft.matchedCalendarContext,

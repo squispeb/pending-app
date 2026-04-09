@@ -352,3 +352,8 @@ a {
     opacity: 0.35;
   }
 }
+
+@keyframes auto-dismiss-bar {
+  from { width: 100%; }
+  to   { width: 0%; }
+}

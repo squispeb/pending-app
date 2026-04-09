@@ -154,6 +154,7 @@ export const processVoiceCaptureAutoSavedSchema = z.object({
   language: transcriptionDetectedLanguageSchema,
   candidateType: candidateTypeSchema,
   createdId: z.string().min(1),
+  title: z.string().trim().min(1),
   matchedCalendarContext: matchedCalendarContextSchema.nullable(),
 })
 

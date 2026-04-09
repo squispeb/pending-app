@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { CalendarDays, CheckCircle, ChevronDown, Mic, Square, X } from 'lucide-react'
+import { CalendarDays, CheckCircle, ChevronDown, Mic, RotateCcw, SendHorizonal, Square, X } from 'lucide-react'
 import {
   useMutation,
   useQueryClient,
@@ -118,6 +118,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   const [captureError, setCaptureError] = useState<string | null>(null)
   const [captureClarifyMessage, setCaptureClarifyMessage] = useState<string | null>(null)
   const [captureClarifyQuestions, setCaptureClarifyQuestions] = useState<string[]>([])
+  const [captureClarifyReply, setCaptureClarifyReply] = useState('')
   const [captureShowAdvanced, setCaptureShowAdvanced] = useState(false)
 
   // Voice
@@ -132,6 +133,13 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   const analyserRef = useRef<AnalyserNode | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const rafRef = useRef<number | null>(null)
+
+  // Sheet panel ref for focus-trap
+  const sheetRef = useRef<HTMLDivElement | null>(null)
+
+  // Refs for imperative teardown (no useEffect needed)
+  const escapeHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null)
+  const autoDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const stopVisualizer = useCallback(() => {
     if (rafRef.current !== null) {
@@ -266,6 +274,8 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
         void queryClient.invalidateQueries({ queryKey: ['habits'] })
         void queryClient.invalidateQueries({ queryKey: ['habit-completions'] })
         void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+        // Auto-dismiss after 4 s — wired here in the event handler, not a useEffect
+        autoDismissTimerRef.current = setTimeout(() => resetCapture(), 4000)
         return
       }
 
@@ -337,6 +347,19 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
       setIsRecording(false)
     }
     stopVisualizer()
+
+    // Tear down the Escape listener registered by openCapture / openCaptureWithText
+    if (escapeHandlerRef.current) {
+      window.removeEventListener('keydown', escapeHandlerRef.current)
+      escapeHandlerRef.current = null
+    }
+
+    // Cancel any pending auto-dismiss timer
+    if (autoDismissTimerRef.current !== null) {
+      clearTimeout(autoDismissTimerRef.current)
+      autoDismissTimerRef.current = null
+    }
+
     setCaptureMode('closed')
     setCaptureRawInput('')
     setCaptureDraft(null)
@@ -349,17 +372,36 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureError(null)
     setCaptureClarifyMessage(null)
     setCaptureClarifyQuestions([])
+    setCaptureClarifyReply('')
     setCaptureNotes([])
     setCaptureShowAdvanced(false)
     setTranscribeError(null)
+  }
+
+  function registerEscapeHandler() {
+    if (escapeHandlerRef.current) return // already registered
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') resetCapture()
+    }
+    escapeHandlerRef.current = onKeyDown
+    window.addEventListener('keydown', onKeyDown)
   }
 
   function openCapture() {
     const resolved: CandidateType = ctx.defaultType === 'auto' ? 'task' : ctx.defaultType
     setCaptureType(resolved)
     setCaptureMode('recording')
+    registerEscapeHandler()
     // Auto-start recording when the sheet opens — no extra tap required
     void startRecording()
+  }
+
+  function openCaptureWithText(text: string) {
+    const resolved: CandidateType = ctx.defaultType === 'auto' ? 'task' : ctx.defaultType
+    setCaptureType(resolved)
+    setCaptureRawInput(text)
+    setCaptureMode('input')
+    registerEscapeHandler()
   }
 
   // ---------------------------------------------------------------------------
@@ -422,8 +464,19 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureNotes(draft?.interpretationNotes ?? [])
     setCaptureClarifyMessage(message)
     setCaptureClarifyQuestions(questions)
+    setCaptureClarifyReply('')
     setCaptureError(null)
     setCaptureMode('clarify')
+  }
+
+  function handleClarifyReplySubmit(event: React.FormEvent) {
+    event.preventDefault()
+    const reply = captureClarifyReply.trim()
+    if (!reply) return
+    // Combine original transcript + reply so the interpreter has full context
+    const combined = `${captureRawInput}\n\n${reply}`
+    setCaptureError(null)
+    interpretMutation.mutate(combined)
   }
 
   function applyDraftForReview(draft: TypedTaskDraft, rawInput: string, backTo: CaptureMode = 'input') {
@@ -509,7 +562,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   // Render
   // ---------------------------------------------------------------------------
   return (
-    <CaptureContext.Provider value={{ openCapture }}>
+    <CaptureContext.Provider value={{ openCapture, openCaptureWithText }}>
       {/* Backdrop */}
       <div
         onClick={resetCapture}
@@ -518,6 +571,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
 
       {/* Bottom sheet */}
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={sheetTitle}
         className={`fixed inset-x-0 bottom-0 z-50 duration-300 lg:inset-0 lg:flex lg:items-center lg:justify-center ${
           isOpen
             ? 'translate-y-0 opacity-100 transition-[transform,opacity] lg:pointer-events-auto'
@@ -525,7 +581,11 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
         }`}
       >
         <div className="mx-auto w-full max-w-2xl lg:px-4">
-          <div className={`panel w-full ${isVoiceStep ? 'rounded-t-[2rem] pb-0 pt-0 lg:rounded-[2rem]' : 'rounded-t-[2rem] px-6 pb-10 pt-3 lg:rounded-[2rem]'}`}>
+          <div
+            ref={sheetRef}
+            className={`panel w-full ${isVoiceStep ? 'rounded-t-[2rem] pb-0 pt-0 lg:rounded-[2rem]' : 'rounded-t-[2rem] px-6 pb-10 pt-3 lg:rounded-[2rem]'}`}
+            style={{ paddingBottom: isVoiceStep ? undefined : 'max(2.5rem, env(safe-area-inset-bottom))' }}
+          >
 
             {/* ── Voice step UI (recording / transcribing / interpreting) ── */}
             {isVoiceStep ? (
@@ -654,7 +714,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                   </button>
                 </div>
 
-                <div className="max-h-[70vh] overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
+                <div className="max-h-[70vh] overflow-y-auto overscroll-contain" style={{ scrollbarWidth: 'none' }}>
                   {/* ── Input step ── */}
                   {captureMode === 'input' ? (
                     <form className="space-y-4" onSubmit={handleInterpret}>
@@ -1050,38 +1110,69 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                         </div>
                       ) : null}
 
-                      <div className="flex flex-wrap items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setCaptureMode('input')}
-                          className="primary-pill cursor-pointer border-0 text-sm font-semibold"
-                        >
-                          Type instead
-                        </button>
-                        {captureDraft ? (
+                      {/* Inline reply input */}
+                      <form onSubmit={handleClarifyReplySubmit} className="space-y-3">
+                        <label className="block">
+                          <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Your reply</span>
+                          <textarea
+                            autoFocus
+                            value={captureClarifyReply}
+                            onChange={(e) => setCaptureClarifyReply(e.target.value)}
+                            rows={3}
+                            placeholder="Answer the questions above…"
+                            className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                                e.preventDefault()
+                                handleClarifyReplySubmit(e as unknown as React.FormEvent)
+                              }
+                            }}
+                          />
+                        </label>
+
+                        {captureError ? (
+                          <p className="m-0 text-sm font-medium text-red-500">{captureError}</p>
+                        ) : null}
+
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button
+                            type="submit"
+                            disabled={interpretMutation.isPending || !captureClarifyReply.trim()}
+                            className="primary-pill inline-flex cursor-pointer items-center gap-1.5 border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <SendHorizonal size={14} />
+                            {interpretMutation.isPending ? 'Interpreting…' : 'Send reply'}
+                          </button>
+                          {captureDraft ? (
+                            <button
+                              type="button"
+                              onClick={() => applyDraftForReview(captureDraft, captureRawInput)}
+                              className="secondary-pill cursor-pointer border-0 text-sm font-semibold"
+                            >
+                              Review draft anyway
+                            </button>
+                          ) : null}
                           <button
                             type="button"
-                            onClick={() => applyDraftForReview(captureDraft, captureRawInput)}
-                            className="secondary-pill cursor-pointer border-0 text-sm font-semibold"
+                            onClick={() => {
+                              setCaptureClarifyReply('')
+                              setCaptureRawInput(captureRawInput)
+                              setCaptureMode('input')
+                            }}
+                            className="inline-flex cursor-pointer items-center gap-1 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
                           >
-                            Review draft anyway
+                            <RotateCcw size={13} />
+                            Edit from scratch
                           </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          onClick={() => { setCaptureMode('recording'); void startRecording() }}
-                          className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
-                        >
-                          Try again
-                        </button>
-                        <button
-                          type="button"
-                          onClick={resetCapture}
-                          className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
-                        >
-                          Cancel
-                        </button>
-                      </div>
+                          <button
+                            type="button"
+                            onClick={resetCapture}
+                            className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
                     </div>
                   ) : null}
 
@@ -1094,6 +1185,16 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                         <p className="m-0 text-center text-base font-semibold text-[var(--ink-strong)]">
                           {captureAutoSaved.candidateType === 'habit' ? 'Habit saved' : 'Task saved'}
                         </p>
+                        <p className="m-0 text-center text-sm text-[var(--ink-soft)]">
+                          {captureAutoSaved.title}
+                        </p>
+                        {/* Auto-dismiss progress bar */}
+                        <div className="h-1 w-32 overflow-hidden rounded-full bg-[var(--line)]">
+                          <span
+                            className="block h-full rounded-full bg-green-500"
+                            style={{ animation: 'auto-dismiss-bar 4s linear forwards' }}
+                          />
+                        </div>
                       </div>
 
                       <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">

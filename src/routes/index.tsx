@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { queryOptions, useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { Bell, CalendarDays, CheckSquare, Repeat, Settings2 } from 'lucide-react'
+import { Bell, CalendarDays, CheckSquare, Mic, Repeat, Settings2 } from 'lucide-react'
 import type { Habit, Task } from '../db/schema'
 import { getTaskTimingLabel, getTodayDateString, isTaskCompleted } from '../lib/tasks'
 import { getHabitCadenceLabel } from '../lib/habits'
@@ -16,6 +16,7 @@ import {
   markReminderDelivered,
   snoozeReminder,
 } from '../server/reminders'
+import { useCaptureContext } from '../contexts/CaptureContext'
 
 const dashboardQueryOptions = () =>
   queryOptions({
@@ -53,11 +54,22 @@ function formatTodayHeading() {
 function DashboardPage() {
   const queryClient = useQueryClient()
   const { data } = useSuspenseQuery(dashboardQueryOptions())
+  const { openCapture, openCaptureWithText } = useCaptureContext()
 
   const todayStr = getTodayDateString()
   const { data: calendarViewData } = useQuery(calendarViewQueryOptions())
   const { data: calendarDayData } = useQuery(calendarDayQueryOptions(todayStr))
   const todayMeetings = calendarDayData?.events ?? []
+
+  const [quickEntryText, setQuickEntryText] = useState('')
+
+  function handleQuickEntrySubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const text = quickEntryText.trim()
+    if (!text) return
+    setQuickEntryText('')
+    openCaptureWithText(text)
+  }
 
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [activeHabitId, setActiveHabitId] = useState<string | null>(null)
@@ -281,6 +293,38 @@ function DashboardPage() {
             </div>
           ))}
         </div>
+
+        {/* Quick entry */}
+        <form
+          onSubmit={handleQuickEntrySubmit}
+          className="relative mt-6 flex items-center gap-2"
+        >
+          <input
+            type="text"
+            value={quickEntryText}
+            onChange={(e) => setQuickEntryText(e.target.value)}
+            placeholder="Add a task or habit…"
+            aria-label="Quick capture"
+            className="flex-1 rounded-2xl border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.07)] px-4 py-3 text-sm text-[var(--ink-strong)] placeholder:text-[var(--ink-soft)] outline-none transition focus:border-[var(--brand)] focus:bg-[rgba(255,255,255,0.10)]"
+          />
+          <button
+            type="button"
+            onClick={openCapture}
+            aria-label="Voice capture"
+            className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full transition active:scale-95"
+            style={{ background: 'linear-gradient(135deg, #2563eb, #10b981)' }}
+          >
+            <Mic size={18} className="text-white" />
+          </button>
+          {quickEntryText.trim() ? (
+            <button
+              type="submit"
+              className="primary-pill cursor-pointer border-0 text-sm font-semibold shrink-0"
+            >
+              Add
+            </button>
+          ) : null}
+        </form>
       </section>
 
       <div className="mt-4">

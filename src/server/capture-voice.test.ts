@@ -63,6 +63,7 @@ describe('voice capture processor', () => {
       outcome: 'auto_saved',
       candidateType: 'task',
       createdId: 'task-1',
+      title: 'Comprar focos para la sala',
       transcript: 'Comprar focos para la sala mañana.',
       language: 'es',
       matchedCalendarContext: null,
