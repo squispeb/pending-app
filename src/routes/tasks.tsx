@@ -270,7 +270,7 @@ function TasksPage() {
   }
 
   return (
-    <main className="page-wrap px-4 pb-28 pt-10">
+    <main className="page-wrap px-4 pb-28 pt-10 lg:pb-10">
       <section className="hero-panel rounded-[2rem] px-6 py-6 sm:px-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <h1 className="display-title text-3xl font-bold text-[var(--ink-strong)]">Tasks</h1>
