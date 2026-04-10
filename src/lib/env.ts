@@ -15,6 +15,7 @@ export const env = createEnv({
     CAPTURE_INTERPRETATION_TIMEOUT_MS: z.coerce.number().int().positive().max(60000).default(10000),
     TRANSCRIPTION_SERVICE_URL: z.string().url().optional(),
     TRANSCRIPTION_SERVICE_TOKEN: z.string().optional(),
+    ASSISTANT_SERVICE_URL: z.string().url().optional(),
   },
   clientPrefix: 'VITE_',
   client: {
@@ -33,6 +34,7 @@ export const env = createEnv({
     CAPTURE_INTERPRETATION_TIMEOUT_MS: process.env.CAPTURE_INTERPRETATION_TIMEOUT_MS,
     TRANSCRIPTION_SERVICE_URL: process.env.TRANSCRIPTION_SERVICE_URL,
     TRANSCRIPTION_SERVICE_TOKEN: process.env.TRANSCRIPTION_SERVICE_TOKEN,
+    ASSISTANT_SERVICE_URL: process.env.ASSISTANT_SERVICE_URL,
     VITE_APP_NAME: import.meta.env.VITE_APP_NAME,
   },
   emptyStringAsUndefined: true,

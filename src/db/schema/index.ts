@@ -60,6 +60,29 @@ export const habits = sqliteTable('habits', {
     .default(sql`(unixepoch() * 1000)`),
 })
 
+export const ideas = sqliteTable('ideas', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  body: text('body').notNull().default(''),
+  sourceType: text('source_type').notNull().default('manual'),
+  sourceInput: text('source_input'),
+  threadSummary: text('thread_summary'),
+  classificationConfidence: text('classification_confidence'),
+  captureLanguage: text('capture_language'),
+  status: text('status').notNull().default('active'),
+  starredAt: integer('starred_at', { mode: 'timestamp_ms' }),
+  archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+})
+
 export const habitCompletions = sqliteTable(
   'habit_completions',
   {
@@ -236,6 +259,7 @@ export const reminderEvents = sqliteTable('reminder_events', {
 export type User = typeof users.$inferSelect
 export type Task = typeof tasks.$inferSelect
 export type Habit = typeof habits.$inferSelect
+export type Idea = typeof ideas.$inferSelect
 export type HabitCompletion = typeof habitCompletions.$inferSelect
 export type GoogleAccount = typeof googleAccounts.$inferSelect
 export type CalendarConnection = typeof calendarConnections.$inferSelect

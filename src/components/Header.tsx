@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { Settings } from 'lucide-react'
+import { Lightbulb, Settings } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 
 export default function Header() {
@@ -19,6 +19,15 @@ export default function Header() {
         </h2>
 
         <div className="ml-auto flex items-center gap-2">
+          <Link
+            to="/ideas"
+            aria-label="Ideas"
+            className="inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-2 text-sm font-semibold text-[var(--ink-soft)] no-underline transition hover:text-[var(--ink-strong)] lg:hidden"
+            activeProps={{ className: 'inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-2 text-sm font-semibold text-[var(--brand)] no-underline lg:hidden' }}
+          >
+            <Lightbulb size={16} />
+            Ideas
+          </Link>
           {/* Settings gear — mobile only (bottom tab bar handles nav, but Settings has no tab slot) */}
           <Link
             to="/settings"
@@ -56,6 +65,13 @@ export default function Header() {
             Habits
           </Link>
           <Link
+            to="/ideas"
+            className="nav-link"
+            activeProps={{ className: 'nav-link is-active' }}
+          >
+            Ideas
+          </Link>
+          <Link
             to="/calendar"
             className="nav-link"
             activeProps={{ className: 'nav-link is-active' }}
@@ -74,4 +90,3 @@ export default function Header() {
     </header>
   )
 }
-

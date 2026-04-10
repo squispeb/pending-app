@@ -11,9 +11,11 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as IdeasRouteImport } from './routes/ideas'
 import { Route as HabitsRouteImport } from './routes/habits'
 import { Route as CalendarRouteImport } from './routes/calendar'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as IdeasIdeaIdRouteImport } from './routes/ideas.$ideaId'
 import { Route as AuthGoogleCallbackRouteImport } from './routes/auth/google/callback'
 
 const TasksRoute = TasksRouteImport.update({
@@ -24,6 +26,11 @@ const TasksRoute = TasksRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IdeasRoute = IdeasRouteImport.update({
+  id: '/ideas',
+  path: '/ideas',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HabitsRoute = HabitsRouteImport.update({
@@ -41,6 +48,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const IdeasIdeaIdRoute = IdeasIdeaIdRouteImport.update({
+  id: '/$ideaId',
+  path: '/$ideaId',
+  getParentRoute: () => IdeasRoute,
+} as any)
 const AuthGoogleCallbackRoute = AuthGoogleCallbackRouteImport.update({
   id: '/auth/google/callback',
   path: '/auth/google/callback',
@@ -51,16 +63,20 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/calendar': typeof CalendarRoute
   '/habits': typeof HabitsRoute
+  '/ideas': typeof IdeasRouteWithChildren
   '/settings': typeof SettingsRoute
   '/tasks': typeof TasksRoute
+  '/ideas/$ideaId': typeof IdeasIdeaIdRoute
   '/auth/google/callback': typeof AuthGoogleCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/calendar': typeof CalendarRoute
   '/habits': typeof HabitsRoute
+  '/ideas': typeof IdeasRouteWithChildren
   '/settings': typeof SettingsRoute
   '/tasks': typeof TasksRoute
+  '/ideas/$ideaId': typeof IdeasIdeaIdRoute
   '/auth/google/callback': typeof AuthGoogleCallbackRoute
 }
 export interface FileRoutesById {
@@ -68,8 +84,10 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/calendar': typeof CalendarRoute
   '/habits': typeof HabitsRoute
+  '/ideas': typeof IdeasRouteWithChildren
   '/settings': typeof SettingsRoute
   '/tasks': typeof TasksRoute
+  '/ideas/$ideaId': typeof IdeasIdeaIdRoute
   '/auth/google/callback': typeof AuthGoogleCallbackRoute
 }
 export interface FileRouteTypes {
@@ -78,24 +96,30 @@ export interface FileRouteTypes {
     | '/'
     | '/calendar'
     | '/habits'
+    | '/ideas'
     | '/settings'
     | '/tasks'
+    | '/ideas/$ideaId'
     | '/auth/google/callback'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/calendar'
     | '/habits'
+    | '/ideas'
     | '/settings'
     | '/tasks'
+    | '/ideas/$ideaId'
     | '/auth/google/callback'
   id:
     | '__root__'
     | '/'
     | '/calendar'
     | '/habits'
+    | '/ideas'
     | '/settings'
     | '/tasks'
+    | '/ideas/$ideaId'
     | '/auth/google/callback'
   fileRoutesById: FileRoutesById
 }
@@ -103,6 +127,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CalendarRoute: typeof CalendarRoute
   HabitsRoute: typeof HabitsRoute
+  IdeasRoute: typeof IdeasRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   TasksRoute: typeof TasksRoute
   AuthGoogleCallbackRoute: typeof AuthGoogleCallbackRoute
@@ -122,6 +147,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ideas': {
+      id: '/ideas'
+      path: '/ideas'
+      fullPath: '/ideas'
+      preLoaderRoute: typeof IdeasRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/habits': {
@@ -145,6 +177,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/ideas/$ideaId': {
+      id: '/ideas/$ideaId'
+      path: '/$ideaId'
+      fullPath: '/ideas/$ideaId'
+      preLoaderRoute: typeof IdeasIdeaIdRouteImport
+      parentRoute: typeof IdeasRoute
+    }
     '/auth/google/callback': {
       id: '/auth/google/callback'
       path: '/auth/google/callback'
@@ -155,10 +194,21 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface IdeasRouteChildren {
+  IdeasIdeaIdRoute: typeof IdeasIdeaIdRoute
+}
+
+const IdeasRouteChildren: IdeasRouteChildren = {
+  IdeasIdeaIdRoute: IdeasIdeaIdRoute,
+}
+
+const IdeasRouteWithChildren = IdeasRoute._addFileChildren(IdeasRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CalendarRoute: CalendarRoute,
   HabitsRoute: HabitsRoute,
+  IdeasRoute: IdeasRouteWithChildren,
   SettingsRoute: SettingsRoute,
   TasksRoute: TasksRoute,
   AuthGoogleCallbackRoute: AuthGoogleCallbackRoute,

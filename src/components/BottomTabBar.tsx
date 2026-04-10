@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { CalendarDays, CheckSquare, Mic, Repeat, Sun } from 'lucide-react'
+import { CalendarDays, CheckSquare, Lightbulb, Mic, Repeat, Sun } from 'lucide-react'
 import { useCaptureContext } from '../contexts/CaptureContext'
 
 const NAV_ITEMS_LEFT = [
@@ -8,6 +8,7 @@ const NAV_ITEMS_LEFT = [
 ]
 
 const NAV_ITEMS_RIGHT = [
+  { to: '/ideas' as const, icon: Lightbulb, label: 'Ideas', exact: false },
   { to: '/habits' as const, icon: Repeat, label: 'Habits', exact: false },
   { to: '/calendar' as const, icon: CalendarDays, label: 'Calendar', exact: false },
 ]
