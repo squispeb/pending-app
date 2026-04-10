@@ -17,6 +17,11 @@ export function getRouter() {
     scrollRestoration: true,
     defaultPreload: 'intent',
     defaultPreloadStaleTime: 0,
+    defaultNotFoundComponent: () => (
+      <div className="flex min-h-screen items-center justify-center">
+        <p>404 — Page not found</p>
+      </div>
+    ),
   })
 
   setupRouterSsrQueryIntegration({ router, queryClient: context.queryClient })
