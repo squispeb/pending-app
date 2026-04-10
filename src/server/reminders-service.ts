@@ -1,7 +1,6 @@
 import { and, eq } from 'drizzle-orm'
 import type { Database } from '../db/client'
 import { habitCompletions, habits, reminderEvents, tasks } from '../db/schema'
-import { ensureDefaultUser } from './default-user'
 import {
   getHabitReminderEventPayload,
   getReminderEventId,
@@ -18,21 +17,19 @@ export function createRemindersService(database: Database) {
   const tasksService = createTasksService(database)
 
   return {
-    ensureDefaultUser: () => ensureDefaultUser(database),
-    async syncReminderEvents(now = new Date()) {
-      const user = await ensureDefaultUser(database)
+    async syncReminderEvents(userId: string, now = new Date()) {
       const today = getTodayDateString(now)
 
       const [userTasks, userHabits, completions, existingEvents] = await Promise.all([
-        database.query.tasks.findMany({ where: eq(tasks.userId, user.id) }),
-        database.query.habits.findMany({ where: eq(habits.userId, user.id) }),
+        database.query.tasks.findMany({ where: eq(tasks.userId, userId) }),
+        database.query.habits.findMany({ where: eq(habits.userId, userId) }),
         database.query.habitCompletions.findMany({
           where: and(
-            eq(habitCompletions.userId, user.id),
+            eq(habitCompletions.userId, userId),
             eq(habitCompletions.completionDate, today),
           ),
         }),
-        database.query.reminderEvents.findMany({ where: eq(reminderEvents.userId, user.id) }),
+        database.query.reminderEvents.findMany({ where: eq(reminderEvents.userId, userId) }),
       ])
 
       const existingMap = new Map(
@@ -60,7 +57,7 @@ export function createRemindersService(database: Database) {
           const nowStamp = new Date()
           await database.insert(reminderEvents).values({
             id: key,
-            userId: user.id,
+            userId,
             sourceType: payload.sourceType,
             sourceId: payload.sourceId,
             scheduledFor: payload.scheduledFor,
@@ -70,17 +67,16 @@ export function createRemindersService(database: Database) {
         }
       }
 
-      return this.listDueReminders(now)
+      return this.listDueReminders(userId, now)
     },
-    async listDueReminders(now = new Date()) {
-      const user = await ensureDefaultUser(database)
+    async listDueReminders(userId: string, now = new Date()) {
       const events = await database.query.reminderEvents.findMany({
-        where: eq(reminderEvents.userId, user.id),
+        where: eq(reminderEvents.userId, userId),
       })
 
       const [userTasks, userHabits] = await Promise.all([
-        database.query.tasks.findMany({ where: eq(tasks.userId, user.id) }),
-        database.query.habits.findMany({ where: eq(habits.userId, user.id) }),
+        database.query.tasks.findMany({ where: eq(tasks.userId, userId) }),
+        database.query.habits.findMany({ where: eq(habits.userId, userId) }),
       ])
 
       const tasksById = new Map(userTasks.map((task) => [task.id, task]))
@@ -102,7 +98,7 @@ export function createRemindersService(database: Database) {
 
         const completionRows = await database.query.habitCompletions.findMany({
           where: and(
-            eq(habitCompletions.userId, user.id),
+            eq(habitCompletions.userId, userId),
             eq(habitCompletions.habitId, habit.id),
             eq(habitCompletions.completionDate, getTodayDateString(now)),
           ),
@@ -116,27 +112,26 @@ export function createRemindersService(database: Database) {
         .filter((item) => isReminderVisible(item, now))
         .sort((left, right) => left.scheduledFor.getTime() - right.scheduledFor.getTime())
     },
-    async snoozeReminder(id: string, minutes = 15) {
+    async snoozeReminder(id: string, userId: string, minutes = 15) {
       const nextTime = new Date(Date.now() + minutes * 60_000)
       await database
         .update(reminderEvents)
         .set({ snoozedUntil: nextTime, updatedAt: new Date() })
-        .where(eq(reminderEvents.id, id))
+        .where(and(eq(reminderEvents.id, id), eq(reminderEvents.userId, userId)))
 
       return { ok: true as const }
     },
-    async dismissReminder(id: string) {
+    async dismissReminder(id: string, userId: string) {
       await database
         .update(reminderEvents)
         .set({ dismissedAt: new Date(), updatedAt: new Date() })
-        .where(eq(reminderEvents.id, id))
+        .where(and(eq(reminderEvents.id, id), eq(reminderEvents.userId, userId)))
 
       return { ok: true as const }
     },
-    async deferReminder(id: string, minutes = 30) {
-      const user = await ensureDefaultUser(database)
+    async deferReminder(id: string, userId: string, minutes = 30) {
       const event = await database.query.reminderEvents.findFirst({
-        where: and(eq(reminderEvents.id, id), eq(reminderEvents.userId, user.id)),
+        where: and(eq(reminderEvents.id, id), eq(reminderEvents.userId, userId)),
       })
 
       if (!event) {
@@ -147,16 +142,16 @@ export function createRemindersService(database: Database) {
         throw new Error('Only task reminders can be deferred')
       }
 
-      await tasksService.deferTaskReminder(event.sourceId, minutes)
+      await tasksService.deferTaskReminder(event.sourceId, userId, minutes)
 
       await database
         .update(reminderEvents)
         .set({ completedViaReminderAt: new Date(), updatedAt: new Date() })
-        .where(eq(reminderEvents.id, id))
+        .where(and(eq(reminderEvents.id, id), eq(reminderEvents.userId, userId)))
 
       return { ok: true as const }
     },
-    async markReminderDelivered(id: string, channel: 'in-app' | 'browser') {
+    async markReminderDelivered(id: string, userId: string, channel: 'in-app' | 'browser') {
       await database
         .update(reminderEvents)
         .set(
@@ -164,15 +159,15 @@ export function createRemindersService(database: Database) {
             ? { deliveredBrowserAt: new Date(), updatedAt: new Date() }
             : { deliveredInAppAt: new Date(), updatedAt: new Date() },
         )
-        .where(eq(reminderEvents.id, id))
+        .where(and(eq(reminderEvents.id, id), eq(reminderEvents.userId, userId)))
 
       return { ok: true as const }
     },
-    async completeReminder(id: string) {
+    async completeReminder(id: string, userId: string) {
       await database
         .update(reminderEvents)
         .set({ completedViaReminderAt: new Date(), updatedAt: new Date() })
-        .where(eq(reminderEvents.id, id))
+        .where(and(eq(reminderEvents.id, id), eq(reminderEvents.userId, userId)))
 
       return { ok: true as const }
     },

@@ -8,28 +8,23 @@ import {
   type CreateTaskInput,
   type UpdateTaskInput,
 } from '../lib/tasks'
-import { ensureDefaultUser } from './default-user'
 import { listPlanningItemCalendarLinks } from './planning-item-calendar-links'
 
 export function createTasksService(database: Database) {
   return {
-    ensureDefaultUser: () => ensureDefaultUser(database),
-    async listTasks() {
-      const user = await ensureDefaultUser(database)
-
+    async listTasks(userId: string) {
       return database.query.tasks.findMany({
-        where: and(eq(tasks.userId, user.id), isNull(tasks.archivedAt)),
+        where: and(eq(tasks.userId, userId), isNull(tasks.archivedAt)),
         orderBy: [desc(tasks.completedAt), desc(tasks.createdAt)],
       })
     },
-    async listTasksWithCalendarLinks(now = new Date()) {
-      const user = await ensureDefaultUser(database)
+    async listTasksWithCalendarLinks(userId: string, now = new Date()) {
       const rows = await database.query.tasks.findMany({
-        where: and(eq(tasks.userId, user.id), isNull(tasks.archivedAt)),
+        where: and(eq(tasks.userId, userId), isNull(tasks.archivedAt)),
         orderBy: [desc(tasks.completedAt), desc(tasks.createdAt)],
       })
       const linksByTaskId = await listPlanningItemCalendarLinks(database, {
-        userId: user.id,
+        userId,
         sourceType: 'task',
         sourceIds: rows.map((task) => task.id),
         now,
@@ -40,15 +35,14 @@ export function createTasksService(database: Database) {
         calendarLinks: linksByTaskId.get(task.id) ?? [],
       }))
     },
-    async createTask(input: CreateTaskInput) {
+    async createTask(userId: string, input: CreateTaskInput) {
       const data = taskCreateSchema.parse(input)
-      const user = await ensureDefaultUser(database)
       const now = new Date()
       const id = crypto.randomUUID()
 
       await database.insert(tasks).values({
         id,
-        userId: user.id,
+        userId,
         ...normalizeTaskValuesForStorage(data),
         updatedAt: now,
         createdAt: now,
@@ -56,9 +50,8 @@ export function createTasksService(database: Database) {
 
       return { ok: true as const, id }
     },
-    async updateTask(input: UpdateTaskInput) {
+    async updateTask(userId: string, input: UpdateTaskInput) {
       const data = taskUpdateSchema.parse(input)
-      const user = await ensureDefaultUser(database)
 
       await database
         .update(tasks)
@@ -69,16 +62,14 @@ export function createTasksService(database: Database) {
         .where(
           and(
             eq(tasks.id, data.id),
-            eq(tasks.userId, user.id),
+            eq(tasks.userId, userId),
             isNull(tasks.archivedAt),
           ),
         )
 
       return { ok: true as const }
     },
-    async completeTask(id: string) {
-      const user = await ensureDefaultUser(database)
-
+    async completeTask(id: string, userId: string) {
       await database
         .update(tasks)
         .set({
@@ -86,13 +77,11 @@ export function createTasksService(database: Database) {
           completedAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(and(eq(tasks.id, id), eq(tasks.userId, user.id), isNull(tasks.archivedAt)))
+        .where(and(eq(tasks.id, id), eq(tasks.userId, userId), isNull(tasks.archivedAt)))
 
       return { ok: true as const }
     },
-    async reopenTask(id: string) {
-      const user = await ensureDefaultUser(database)
-
+    async reopenTask(id: string, userId: string) {
       await database
         .update(tasks)
         .set({
@@ -100,13 +89,11 @@ export function createTasksService(database: Database) {
           completedAt: null,
           updatedAt: new Date(),
         })
-        .where(and(eq(tasks.id, id), eq(tasks.userId, user.id), isNull(tasks.archivedAt)))
+        .where(and(eq(tasks.id, id), eq(tasks.userId, userId), isNull(tasks.archivedAt)))
 
       return { ok: true as const }
     },
-    async archiveTask(id: string) {
-      const user = await ensureDefaultUser(database)
-
+    async archiveTask(id: string, userId: string) {
       await database
         .update(tasks)
         .set({
@@ -114,14 +101,13 @@ export function createTasksService(database: Database) {
           archivedAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(and(eq(tasks.id, id), eq(tasks.userId, user.id), isNull(tasks.archivedAt)))
+        .where(and(eq(tasks.id, id), eq(tasks.userId, userId), isNull(tasks.archivedAt)))
 
       return { ok: true as const }
     },
-    async deferTaskReminder(id: string, minutes = 30, now = new Date()) {
-      const user = await ensureDefaultUser(database)
+    async deferTaskReminder(id: string, userId: string, minutes = 30, now = new Date()) {
       const task = await database.query.tasks.findFirst({
-        where: and(eq(tasks.id, id), eq(tasks.userId, user.id), isNull(tasks.archivedAt)),
+        where: and(eq(tasks.id, id), eq(tasks.userId, userId), isNull(tasks.archivedAt)),
       })
 
       if (!task) {
@@ -137,7 +123,7 @@ export function createTasksService(database: Database) {
           reminderAt: nextReminder,
           updatedAt: new Date(),
         })
-        .where(and(eq(tasks.id, id), eq(tasks.userId, user.id), isNull(tasks.archivedAt)))
+        .where(and(eq(tasks.id, id), eq(tasks.userId, userId), isNull(tasks.archivedAt)))
 
       return { ok: true as const, reminderAt: nextReminder }
     },

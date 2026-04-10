@@ -3,6 +3,7 @@ import { z } from 'zod'
 
 export const env = createEnv({
   server: {
+    APP_URL: z.string().url().optional(),
     DATABASE_URL: z.string().min(1).default('file:local.db'),
     DATABASE_AUTH_TOKEN: z.string().optional(),
     GOOGLE_CLIENT_ID: z.string().optional(),
@@ -22,6 +23,7 @@ export const env = createEnv({
     VITE_APP_NAME: z.string().min(1).default('Pending App'),
   },
   runtimeEnv: {
+    APP_URL: process.env.APP_URL,
     DATABASE_URL: process.env.DATABASE_URL,
     DATABASE_AUTH_TOKEN: process.env.DATABASE_AUTH_TOKEN,
     GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,

@@ -171,11 +171,18 @@ describe('dashboard service', () => {
   let habitsService: ReturnType<typeof createHabitsService>
   let dashboardService: ReturnType<typeof createDashboardService>
   let remindersService: ReturnType<typeof createRemindersService>
+  const userId = 'user-1'
 
   beforeEach(async () => {
     const database = makeDatabase()
     db = database.db
     await createSchema(db)
+    await db.insert(schema.users).values({
+      id: userId,
+      email: 'user-1@example.com',
+      displayName: 'User One',
+      timezone: 'UTC',
+    })
     tasksService = createTasksService(db)
     habitsService = createHabitsService(db)
     dashboardService = createDashboardService(db)
@@ -183,7 +190,7 @@ describe('dashboard service', () => {
   })
 
   it('aggregates tasks, habits, and due reminders for today', async () => {
-    await tasksService.createTask({
+    await tasksService.createTask(userId, {
       title: 'Review roadmap',
       notes: '',
       priority: 'high',
@@ -195,7 +202,7 @@ describe('dashboard service', () => {
       preferredEndTime: '',
     })
 
-    await habitsService.createHabit({
+    await habitsService.createHabit(userId, {
       title: 'Read',
       cadenceType: 'daily',
       cadenceDays: [],
@@ -205,7 +212,7 @@ describe('dashboard service', () => {
       reminderAt: '2026-04-01T07:30',
     })
 
-    const result = await dashboardService.getDashboardData(new Date('2026-04-01T10:30:00'))
+    const result = await dashboardService.getDashboardData(userId, new Date('2026-04-01T10:30:00'))
 
     expect(result.taskSummary.dueToday).toBe(1)
     expect(result.habitSummary.dueToday).toBe(1)
@@ -215,7 +222,7 @@ describe('dashboard service', () => {
   })
 
   it('removes a reminder from due-now after defer until the new time arrives', async () => {
-    await tasksService.createTask({
+    await tasksService.createTask(userId, {
       title: 'Review roadmap',
       notes: '',
       priority: 'high',
@@ -227,20 +234,21 @@ describe('dashboard service', () => {
       preferredEndTime: '',
     })
 
-    let result = await dashboardService.getDashboardData(new Date('2026-04-01T09:20:00'))
+    let result = await dashboardService.getDashboardData(userId, new Date('2026-04-01T09:20:00'))
     const reminder = result.dueReminders.find((item) => item.sourceType === 'task')
 
     expect(reminder).toBeDefined()
 
-    await remindersService.deferReminder(reminder!.id, 30)
-    const [updatedTask] = await tasksService.listTasks()
+    await remindersService.deferReminder(reminder!.id, userId, 30)
+    const [updatedTask] = await tasksService.listTasks(userId)
 
     expect(updatedTask?.reminderAt).toBeInstanceOf(Date)
 
-    result = await dashboardService.getDashboardData(new Date('2026-04-01T09:20:00'))
+    result = await dashboardService.getDashboardData(userId, new Date('2026-04-01T09:20:00'))
     expect(result.dueReminders.find((item) => item.sourceType === 'task')).toBeUndefined()
 
     result = await dashboardService.getDashboardData(
+      userId,
       new Date((updatedTask?.reminderAt ?? new Date()).getTime() + 5 * 60_000),
     )
     expect(result.dueReminders.find((item) => item.sourceType === 'task')).toBeDefined()

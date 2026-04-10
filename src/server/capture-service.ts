@@ -15,7 +15,6 @@ import {
 } from '../lib/capture'
 import type { CaptureInterpreter } from './capture-interpreter'
 import { CaptureInterpreterError, createRemoteCaptureInterpreter } from './capture-interpreter'
-import { ensureDefaultUser } from './default-user'
 import { createHabitsService } from './habits-service'
 import { replacePlanningItemCalendarLink } from './planning-item-calendar-links'
 import { createTasksService } from './tasks-service'
@@ -164,13 +163,13 @@ export function createCaptureService(
 
   return {
     async interpretTypedTaskInput(
+      userId: string,
       input: InterpretCaptureInput,
     ): Promise<InterpretCaptureSuccess | InterpretCaptureFailure> {
       const parsed = interpretCaptureInputSchema.parse(input)
-      const user = await ensureDefaultUser(database)
       const heuristicDraft = buildHeuristicTaskDraft(parsed)
       const calendarContext = await findRelevantCalendarContext(
-        user.id,
+        userId,
         heuristicDraft.normalizedInput,
         parsed.currentDate,
       )
@@ -237,13 +236,12 @@ export function createCaptureService(
         }
       }
     },
-    async confirmCapturedTask(input: ConfirmCapturedTaskInput) {
+    async confirmCapturedTask(userId: string, input: ConfirmCapturedTaskInput) {
       const parsed = confirmCapturedTaskInputSchema.parse(input)
-      const user = await ensureDefaultUser(database)
-      const result = await tasksService.createTask(parsed.task)
+      const result = await tasksService.createTask(userId, parsed.task)
 
       await replacePlanningItemCalendarLink(database, {
-        userId: user.id,
+        userId,
         sourceType: 'task',
         sourceId: result.id,
         matchedCalendarContext: parsed.matchedCalendarContext ?? null,
@@ -251,13 +249,12 @@ export function createCaptureService(
 
       return result
     },
-    async confirmCapturedHabit(input: ConfirmCapturedHabitInput) {
+    async confirmCapturedHabit(userId: string, input: ConfirmCapturedHabitInput) {
       const parsed = confirmCapturedHabitInputSchema.parse(input)
-      const user = await ensureDefaultUser(database)
-      const result = await habitsService.createHabit(parsed.habit)
+      const result = await habitsService.createHabit(userId, parsed.habit)
 
       await replacePlanningItemCalendarLink(database, {
-        userId: user.id,
+        userId,
         sourceType: 'habit',
         sourceId: result.id,
         matchedCalendarContext: parsed.matchedCalendarContext ?? null,

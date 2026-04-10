@@ -4,7 +4,6 @@ import { drizzle } from 'drizzle-orm/libsql'
 import { sql } from 'drizzle-orm'
 import * as schema from '../db/schema'
 import { createTasksService } from './tasks-service'
-import { DEFAULT_USER } from './default-user'
 
 function makeDatabase() {
   const client = createClient({ url: ':memory:' })
@@ -115,24 +114,33 @@ describe('tasks service', () => {
   let client: ReturnType<typeof createClient>
   let db: ReturnType<typeof drizzle<typeof schema>>
   let service: ReturnType<typeof createTasksService>
+  const primaryUserId = 'user-1'
+  const secondaryUserId = 'user-2'
 
   beforeEach(async () => {
     const database = makeDatabase()
     client = database.client
     db = database.db
     await createSchema(db)
+    await db.insert(schema.users).values([
+      {
+        id: primaryUserId,
+        email: 'user-1@example.com',
+        displayName: 'User One',
+        timezone: 'UTC',
+      },
+      {
+        id: secondaryUserId,
+        email: 'user-2@example.com',
+        displayName: 'User Two',
+        timezone: 'UTC',
+      },
+    ])
     service = createTasksService(db)
   })
 
-  it('creates the default user lazily', async () => {
-    const user = await service.ensureDefaultUser()
-
-    expect(user.id).toBe(DEFAULT_USER.id)
-    expect(user.email).toBe(DEFAULT_USER.email)
-  })
-
   it('creates and lists a task with reminder support', async () => {
-    const created = await service.createTask({
+    const created = await service.createTask(primaryUserId, {
       title: 'Plan sprint',
       notes: 'Bring roadmap draft',
       priority: 'high',
@@ -144,7 +152,7 @@ describe('tasks service', () => {
       preferredEndTime: '09:30',
     })
 
-    const tasks = await service.listTasks()
+    const tasks = await service.listTasks(primaryUserId)
 
     expect(tasks).toHaveLength(1)
     expect(created.id).toBe(tasks[0]?.id)
@@ -154,7 +162,7 @@ describe('tasks service', () => {
   })
 
   it('lists task calendar links when present', async () => {
-    const created = await service.createTask({
+    const created = await service.createTask(primaryUserId, {
       title: 'Plan sprint',
       notes: '',
       priority: 'high',
@@ -170,7 +178,7 @@ describe('tasks service', () => {
       INSERT INTO calendar_connections (
         id, user_id, google_account_id, calendar_id, calendar_name, is_selected, primary_flag, created_at, updated_at
       ) VALUES (
-        'conn-1', 'local-user', 'google-1', 'calendar-1', 'Primary', 1, 1, (unixepoch() * 1000), (unixepoch() * 1000)
+        'conn-1', ${primaryUserId}, 'google-1', 'calendar-1', 'Primary', 1, 1, (unixepoch() * 1000), (unixepoch() * 1000)
       );
     `)
     await db.run(sql`
@@ -178,7 +186,7 @@ describe('tasks service', () => {
         id, user_id, calendar_id, google_event_id, google_recurring_event_id, status, summary,
         starts_at, ends_at, all_day, html_link, synced_at, created_at, updated_at
       ) VALUES (
-        'evt-1', 'local-user', 'calendar-1', 'google-evt-1', 'series-1', 'confirmed', 'Cloud Computing',
+        'evt-1', ${primaryUserId}, 'calendar-1', 'google-evt-1', 'series-1', 'confirmed', 'Cloud Computing',
         strftime('%s', '2026-04-10 15:00:00') * 1000,
         strftime('%s', '2026-04-10 16:00:00') * 1000,
         0,
@@ -191,13 +199,13 @@ describe('tasks service', () => {
         id, user_id, source_type, source_id, calendar_id, google_event_id, google_recurring_event_id,
         matched_summary, match_reason, created_at, updated_at
       ) VALUES (
-        'link-1', 'local-user', 'task', ${created.id}, 'calendar-1', 'google-evt-1', 'series-1',
+        'link-1', ${primaryUserId}, 'task', ${created.id}, 'calendar-1', 'google-evt-1', 'series-1',
         'Cloud Computing', 'Matched recurring event: Cloud Computing',
         (unixepoch() * 1000), (unixepoch() * 1000)
       );
     `)
 
-    const tasksWithLinks = await service.listTasksWithCalendarLinks(new Date('2026-04-09T12:00:00Z'))
+    const tasksWithLinks = await service.listTasksWithCalendarLinks(primaryUserId, new Date('2026-04-09T12:00:00Z'))
 
     expect(tasksWithLinks[0]?.calendarLinks).toHaveLength(1)
     expect(tasksWithLinks[0]?.calendarLinks[0]?.matchedSummary).toBe('Cloud Computing')
@@ -207,7 +215,7 @@ describe('tasks service', () => {
   })
 
   it('updates a task and keeps it active', async () => {
-    await service.createTask({
+    await service.createTask(primaryUserId, {
       title: 'Draft agenda',
       notes: '',
       priority: 'medium',
@@ -219,9 +227,9 @@ describe('tasks service', () => {
       preferredEndTime: '',
     })
 
-    const [task] = await service.listTasks()
+    const [task] = await service.listTasks(primaryUserId)
 
-    await service.updateTask({
+    await service.updateTask(primaryUserId, {
       id: task!.id,
       title: 'Draft team agenda',
       notes: 'Include roadmap review',
@@ -234,7 +242,7 @@ describe('tasks service', () => {
       preferredEndTime: '13:30',
     })
 
-    const [updated] = await service.listTasks()
+    const [updated] = await service.listTasks(primaryUserId)
 
     expect(updated?.title).toBe('Draft team agenda')
     expect(updated?.notes).toBe('Include roadmap review')
@@ -243,7 +251,7 @@ describe('tasks service', () => {
   })
 
   it('completes, reopens, and archives a task', async () => {
-    await service.createTask({
+    await service.createTask(primaryUserId, {
       title: 'Review invoices',
       notes: '',
       priority: 'medium',
@@ -255,28 +263,28 @@ describe('tasks service', () => {
       preferredEndTime: '',
     })
 
-    const [task] = await service.listTasks()
+    const [task] = await service.listTasks(primaryUserId)
 
-    await service.completeTask(task!.id)
+    await service.completeTask(task!.id, primaryUserId)
 
-    let [updated] = await service.listTasks()
+    let [updated] = await service.listTasks(primaryUserId)
     expect(updated?.status).toBe('completed')
     expect(updated?.completedAt).toBeInstanceOf(Date)
 
-    await service.reopenTask(task!.id)
+    await service.reopenTask(task!.id, primaryUserId)
 
-    ;[updated] = await service.listTasks()
+    ;[updated] = await service.listTasks(primaryUserId)
     expect(updated?.status).toBe('active')
     expect(updated?.completedAt).toBeNull()
 
-    await service.archiveTask(task!.id)
+    await service.archiveTask(task!.id, primaryUserId)
 
-    const remaining = await service.listTasks()
+    const remaining = await service.listTasks(primaryUserId)
     expect(remaining).toHaveLength(0)
   })
 
   it('defers a task reminder forward', async () => {
-    await service.createTask({
+    await service.createTask(primaryUserId, {
       title: 'Review invoices',
       notes: '',
       priority: 'medium',
@@ -288,15 +296,40 @@ describe('tasks service', () => {
       preferredEndTime: '',
     })
 
-    const [task] = await service.listTasks()
+    const [task] = await service.listTasks(primaryUserId)
 
     const result = await service.deferTaskReminder(
       task!.id,
+      primaryUserId,
       30,
       new Date('2026-04-04T09:15:00'),
     )
 
     expect(result.ok).toBe(true)
     expect(result.reminderAt.getTime()).toBe(new Date('2026-04-04T09:15:00').getTime() + 30 * 60_000)
+  })
+
+  it('blocks cross-user task access', async () => {
+    const created = await service.createTask(primaryUserId, {
+      title: 'Private task',
+      notes: '',
+      priority: 'medium',
+      dueDate: '2026-04-10',
+      dueTime: '',
+      reminderAt: '',
+      estimatedMinutes: undefined,
+      preferredStartTime: '',
+      preferredEndTime: '',
+    })
+
+    await expect(service.listTasks(secondaryUserId)).resolves.toEqual([])
+    await expect(
+      service.deferTaskReminder(created.id, secondaryUserId, 30, new Date('2026-04-10T10:00:00Z')),
+    ).rejects.toThrow('Task not found')
+
+    await service.completeTask(created.id, secondaryUserId)
+
+    const [task] = await service.listTasks(primaryUserId)
+    expect(task?.status).toBe('active')
   })
 })

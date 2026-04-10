@@ -8,28 +8,23 @@ import {
   type CreateHabitInput,
   type UpdateHabitInput,
 } from '../lib/habits'
-import { ensureDefaultUser } from './default-user'
 import { listPlanningItemCalendarLinks } from './planning-item-calendar-links'
 
 export function createHabitsService(database: Database) {
   return {
-    ensureDefaultUser: () => ensureDefaultUser(database),
-    async listHabits() {
-      const user = await ensureDefaultUser(database)
-
+    async listHabits(userId: string) {
       return database.query.habits.findMany({
-        where: eq(habits.userId, user.id),
+        where: eq(habits.userId, userId),
         orderBy: [asc(habits.archivedAt), asc(habits.title)],
       })
     },
-    async listHabitsWithCalendarLinks(now = new Date()) {
-      const user = await ensureDefaultUser(database)
+    async listHabitsWithCalendarLinks(userId: string, now = new Date()) {
       const rows = await database.query.habits.findMany({
-        where: eq(habits.userId, user.id),
+        where: eq(habits.userId, userId),
         orderBy: [asc(habits.archivedAt), asc(habits.title)],
       })
       const linksByHabitId = await listPlanningItemCalendarLinks(database, {
-        userId: user.id,
+        userId,
         sourceType: 'habit',
         sourceIds: rows.map((habit) => habit.id),
         now,
@@ -40,11 +35,9 @@ export function createHabitsService(database: Database) {
         calendarLinks: linksByHabitId.get(habit.id) ?? [],
       }))
     },
-    async listHabitCompletions(startDate?: string, endDate?: string) {
-      const user = await ensureDefaultUser(database)
-
+    async listHabitCompletions(userId: string, startDate?: string, endDate?: string) {
       const all = await database.query.habitCompletions.findMany({
-        where: eq(habitCompletions.userId, user.id),
+        where: eq(habitCompletions.userId, userId),
         orderBy: [desc(habitCompletions.completionDate)],
       })
 
@@ -64,15 +57,14 @@ export function createHabitsService(database: Database) {
         return true
       })
     },
-    async createHabit(input: CreateHabitInput) {
+    async createHabit(userId: string, input: CreateHabitInput) {
       const data = habitCreateSchema.parse(input)
-      const user = await ensureDefaultUser(database)
       const now = new Date()
       const id = crypto.randomUUID()
 
       await database.insert(habits).values({
         id,
-        userId: user.id,
+        userId,
         title: data.title,
         cadenceType: data.cadenceType,
         cadenceDays: data.cadenceDays.length > 0 ? JSON.stringify(data.cadenceDays) : null,
@@ -86,9 +78,8 @@ export function createHabitsService(database: Database) {
 
       return { ok: true as const, id }
     },
-    async updateHabit(input: UpdateHabitInput) {
+    async updateHabit(userId: string, input: UpdateHabitInput) {
       const data = habitUpdateSchema.parse(input)
-      const user = await ensureDefaultUser(database)
 
       await database
         .update(habits)
@@ -102,29 +93,34 @@ export function createHabitsService(database: Database) {
           reminderAt: data.reminderAt ? new Date(data.reminderAt) : null,
           updatedAt: new Date(),
         })
-        .where(and(eq(habits.id, data.id), eq(habits.userId, user.id), isNull(habits.archivedAt)))
+        .where(and(eq(habits.id, data.id), eq(habits.userId, userId), isNull(habits.archivedAt)))
 
       return { ok: true as const }
     },
-    async archiveHabit(id: string) {
-      const user = await ensureDefaultUser(database)
-
+    async archiveHabit(id: string, userId: string) {
       await database
         .update(habits)
         .set({
           archivedAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(and(eq(habits.id, id), eq(habits.userId, user.id), isNull(habits.archivedAt)))
+        .where(and(eq(habits.id, id), eq(habits.userId, userId), isNull(habits.archivedAt)))
 
       return { ok: true as const }
     },
-    async completeHabitForDate(input: { habitId: string; date?: string }) {
+    async completeHabitForDate(userId: string, input: { habitId: string; date?: string }) {
       const data = habitCompletionSchema.parse(input)
-      const user = await ensureDefaultUser(database)
+      const habit = await database.query.habits.findFirst({
+        where: and(eq(habits.id, data.habitId), eq(habits.userId, userId), isNull(habits.archivedAt)),
+      })
+
+      if (!habit) {
+        throw new Error('Habit not found')
+      }
+
       const existing = await database.query.habitCompletions.findFirst({
         where: and(
-          eq(habitCompletions.userId, user.id),
+          eq(habitCompletions.userId, userId),
           eq(habitCompletions.habitId, data.habitId),
           eq(habitCompletions.completionDate, data.date),
         ),
@@ -139,7 +135,7 @@ export function createHabitsService(database: Database) {
       await database.insert(habitCompletions).values({
         id: crypto.randomUUID(),
         habitId: data.habitId,
-        userId: user.id,
+        userId,
         completionDate: data.date,
         completedAt: now,
         createdAt: now,
@@ -147,15 +143,21 @@ export function createHabitsService(database: Database) {
 
       return { ok: true as const }
     },
-    async uncompleteHabitForDate(input: { habitId: string; date?: string }) {
+    async uncompleteHabitForDate(userId: string, input: { habitId: string; date?: string }) {
       const data = habitCompletionSchema.parse(input)
-      const user = await ensureDefaultUser(database)
+      const habit = await database.query.habits.findFirst({
+        where: and(eq(habits.id, data.habitId), eq(habits.userId, userId), isNull(habits.archivedAt)),
+      })
+
+      if (!habit) {
+        throw new Error('Habit not found')
+      }
 
       await database
         .delete(habitCompletions)
         .where(
           and(
-            eq(habitCompletions.userId, user.id),
+            eq(habitCompletions.userId, userId),
             eq(habitCompletions.habitId, data.habitId),
             eq(habitCompletions.completionDate, data.date),
           ),

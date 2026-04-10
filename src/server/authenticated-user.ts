@@ -63,6 +63,48 @@ function getForwardedAuthHeaders(input?: HeadersInit) {
     headers.set('cookie', cookie)
   }
 
+  const origin = source.get('origin')
+  if (origin) {
+    headers.set('origin', origin)
+  }
+
+  const referer = source.get('referer')
+  if (referer) {
+    headers.set('referer', referer)
+  }
+
+  return headers
+}
+
+function ensureOriginHeaders(headers: Headers, requestHeaders?: HeadersInit) {
+  if (headers.get('origin')) {
+    return headers
+  }
+
+  const source = new Headers(requestHeaders)
+  const referer = source.get('referer')
+
+  if (referer) {
+    try {
+      headers.set('origin', new URL(referer).origin)
+      headers.set('referer', referer)
+      return headers
+    } catch {
+      // Ignore malformed referer and fall back to explicit app URL configuration.
+    }
+  }
+
+  const appUrl = env.APP_URL
+  if (appUrl) {
+    try {
+      const origin = new URL(appUrl).origin
+      headers.set('origin', origin)
+      headers.set('referer', appUrl)
+    } catch {
+      // Ignore invalid app URL and let Better Auth return a clearer error.
+    }
+  }
+
   return headers
 }
 
@@ -139,7 +181,7 @@ export async function resolveAuthenticatedPlannerUser(
   options?: ResolveAuthenticatedPlannerUserOptions,
 ) {
   const requestHeaders = options?.requestHeaders ?? getRequestHeaders()
-  let authHeaders = getForwardedAuthHeaders(requestHeaders)
+  let authHeaders = ensureOriginHeaders(getForwardedAuthHeaders(requestHeaders), requestHeaders)
 
   const sessionResult = await fetchAssistantAuthJson(
     '/api/auth/get-session',
@@ -154,11 +196,15 @@ export async function resolveAuthenticatedPlannerUser(
   let session = sessionResult.payload
 
   if (!session) {
+    authHeaders = new Headers(authHeaders)
+    authHeaders.set('content-type', 'application/json')
+
     const anonymousSignInResult = await fetchAssistantAuthJson(
       '/api/auth/sign-in/anonymous',
       {
         method: 'POST',
         headers: authHeaders,
+        body: JSON.stringify({}),
       },
       anonymousSignInResponseSchema,
       options,

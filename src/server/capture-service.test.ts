@@ -138,7 +138,7 @@ async function seedSelectedCalendar(db: ReturnType<typeof drizzle<typeof schema>
       created_at,
       updated_at
     ) VALUES (
-      'local-user',
+      'user-1',
       'me@example.com',
       'UTC',
       (unixepoch() * 1000),
@@ -159,7 +159,7 @@ async function seedSelectedCalendar(db: ReturnType<typeof drizzle<typeof schema>
       updated_at
     ) VALUES (
       'conn-1',
-      'local-user',
+      'user-1',
       'google-1',
       'calendar-1',
       'Primary',
@@ -174,6 +174,7 @@ async function seedSelectedCalendar(db: ReturnType<typeof drizzle<typeof schema>
 describe('capture service', () => {
   let client: ReturnType<typeof createClient>
   let db: ReturnType<typeof drizzle<typeof schema>>
+  const userId = 'user-1'
 
   beforeEach(async () => {
     const database = makeDatabase()
@@ -201,7 +202,7 @@ describe('capture service', () => {
         updated_at
       ) VALUES (
         'evt-cloud-1',
-        'local-user',
+        ${userId},
         'calendar-1',
         'google-event-1',
         'series-cloud',
@@ -241,7 +242,7 @@ describe('capture service', () => {
     }
     const service = createCaptureService(db, interpreter)
 
-    const result = await service.interpretTypedTaskInput({
+    const result = await service.interpretTypedTaskInput(userId, {
       rawInput:
         'Tengo que entregar para el domingo que viene la primera tarea del curso Cloud Computing, en este tengo que resolverlo lo antes posible.',
       currentDate: '2026-04-08',
@@ -282,7 +283,7 @@ describe('capture service', () => {
     }
     const service = createCaptureService(db, interpreter)
 
-    const result = await service.interpretTypedTaskInput({
+    const result = await service.interpretTypedTaskInput(userId, {
       rawInput: 'Need to deal with taxes tomorrow.',
       currentDate: '2026-04-08',
       timezone: 'America/Lima',
@@ -313,7 +314,7 @@ describe('capture service', () => {
     }
     const service = createCaptureService(db, interpreter)
 
-    const result = await service.interpretTypedTaskInput({
+    const result = await service.interpretTypedTaskInput(userId, {
       rawInput: 'Meditar cada lunes y jueves',
       currentDate: '2026-04-08',
       timezone: 'America/Lima',
@@ -340,7 +341,7 @@ describe('capture service', () => {
     }
     const service = createCaptureService(db, interpreter)
 
-    const result = await service.interpretTypedTaskInput({
+    const result = await service.interpretTypedTaskInput(userId, {
       rawInput: 'Comprar focos para la sala mañana.',
       currentDate: '2026-04-08',
       timezone: 'America/Lima',
@@ -366,7 +367,7 @@ describe('capture service', () => {
     }
     const service = createCaptureService(db, interpreter)
 
-    const result = await service.interpretTypedTaskInput({
+    const result = await service.interpretTypedTaskInput(userId, {
       rawInput: 'Need to deal with taxes tomorrow.',
       currentDate: '2026-04-08',
       timezone: 'America/Lima',
@@ -389,7 +390,7 @@ describe('capture service', () => {
         id, user_id, calendar_id, google_event_id, google_recurring_event_id, status, summary,
         starts_at, ends_at, all_day, html_link, synced_at, created_at, updated_at
       ) VALUES (
-        'evt-cloud-1', 'local-user', 'calendar-1', 'google-evt-1', 'series-1', 'confirmed', 'Cloud Computing',
+        'evt-cloud-1', ${userId}, 'calendar-1', 'google-evt-1', 'series-1', 'confirmed', 'Cloud Computing',
         strftime('%s', '2026-04-10 15:00:00') * 1000,
         strftime('%s', '2026-04-10 16:00:00') * 1000,
         0,
@@ -398,7 +399,7 @@ describe('capture service', () => {
       );
     `)
 
-    const result = await service.confirmCapturedTask({
+    const result = await service.confirmCapturedTask(userId, {
       rawInput: 'Submit the design review notes by Friday at 3pm.',
       matchedCalendarContext: {
         calendarEventId: 'evt-cloud-1',
@@ -439,7 +440,7 @@ describe('capture service', () => {
         id, user_id, calendar_id, google_event_id, google_recurring_event_id, status, summary,
         starts_at, ends_at, all_day, html_link, synced_at, created_at, updated_at
       ) VALUES (
-        'evt-cloud-1', 'local-user', 'calendar-1', 'google-evt-1', 'series-1', 'confirmed', 'Cloud Computing',
+        'evt-cloud-1', ${userId}, 'calendar-1', 'google-evt-1', 'series-1', 'confirmed', 'Cloud Computing',
         strftime('%s', '2026-04-10 15:00:00') * 1000,
         strftime('%s', '2026-04-10 16:00:00') * 1000,
         0,
@@ -448,7 +449,7 @@ describe('capture service', () => {
       );
     `)
 
-    const result = await service.confirmCapturedHabit({
+    const result = await service.confirmCapturedHabit(userId, {
       rawInput: 'Meditar cada lunes y jueves',
       matchedCalendarContext: {
         calendarEventId: 'evt-cloud-1',

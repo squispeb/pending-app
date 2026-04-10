@@ -6,6 +6,7 @@ import {
   interpretCaptureInputSchema,
   parseProcessVoiceCaptureFormData,
 } from '../lib/capture'
+import { resolveAuthenticatedPlannerUser } from './authenticated-user'
 import { createCaptureService } from './capture-service'
 
 const captureService = createCaptureService(db)
@@ -13,7 +14,8 @@ const captureService = createCaptureService(db)
 export const interpretCaptureInput = createServerFn({ method: 'POST' })
   .inputValidator((input) => interpretCaptureInputSchema.parse(input))
   .handler(async ({ data }) => {
-    return captureService.interpretTypedTaskInput(data)
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    return captureService.interpretTypedTaskInput(user.id, data)
   })
 
 export const processVoiceCapture = createServerFn({ method: 'POST' })
@@ -27,11 +29,13 @@ export const processVoiceCapture = createServerFn({ method: 'POST' })
 export const confirmCapturedTask = createServerFn({ method: 'POST' })
   .inputValidator((input) => confirmCapturedTaskInputSchema.parse(input))
   .handler(async ({ data }) => {
-    return captureService.confirmCapturedTask(data)
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    return captureService.confirmCapturedTask(user.id, data)
   })
 
 export const confirmCapturedHabit = createServerFn({ method: 'POST' })
   .inputValidator((input) => confirmCapturedHabitInputSchema.parse(input))
   .handler(async ({ data }) => {
-    return captureService.confirmCapturedHabit(data)
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    return captureService.confirmCapturedHabit(user.id, data)
   })

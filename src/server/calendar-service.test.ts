@@ -110,14 +110,14 @@ type GoogleApiControls = {
   expireSyncTokenOnNextRequest: boolean
 }
 
-function makeGoogleApi(controls: GoogleApiControls): GoogleIntegrationApi {
+function makeGoogleApi(controls: GoogleApiControls, userId: string): GoogleIntegrationApi {
   return {
     buildAuthUrl(userId) {
       return `https://accounts.example.test/connect?user=${userId}`
     },
     verifyState() {
       return {
-        userId: 'local-user',
+        userId,
         nonce: 'nonce',
         exp: Date.now() + 60_000,
       }
@@ -336,37 +336,44 @@ describe('calendar service', () => {
   let db: ReturnType<typeof drizzle<typeof schema>>
   let service: ReturnType<typeof createCalendarService>
   let controls: GoogleApiControls
+  const userId = 'user-1'
 
   beforeEach(async () => {
     const database = makeDatabase()
     client = database.client
     db = database.db
     await createSchema(db)
+    await db.insert(schema.users).values({
+      id: userId,
+      email: 'user-1@example.com',
+      displayName: 'User One',
+      timezone: 'UTC',
+    })
     controls = {
       calendarListVersion: 1,
       eventVersion: 1,
       expireSyncTokenOnNextRequest: false,
     }
-    service = createCalendarService(db, makeGoogleApi(controls))
+    service = createCalendarService(db, makeGoogleApi(controls, userId))
   })
 
-  it('starts the connect flow for the default user', async () => {
-    const result = await service.startGoogleConnect()
+  it('starts the connect flow for the authenticated user', async () => {
+    const result = await service.startGoogleConnect(userId)
 
     expect(result.url).toContain('https://accounts.example.test/connect')
-    expect(result.url).toContain('local-user')
+    expect(result.url).toContain(userId)
   })
 
   it('persists the google account and selects visible calendars by default', async () => {
-    const result = await service.completeGoogleConnect('code', 'state')
+    const result = await service.completeGoogleConnect(userId, 'code', 'state')
 
     expect(result.ok).toBe(true)
     expect(result.email).toBe('person@example.com')
     expect(result.selectedCalendarCount).toBe(2)
     expect(result.syncedEventCount).toBe(2)
 
-    const settings = await service.getSettingsData()
-    const connectedDay = await service.getCalendarEventsForDay('2026-04-07')
+    const settings = await service.getSettingsData(userId)
+    const connectedDay = await service.getCalendarEventsForDay(userId, '2026-04-07')
 
     expect(settings.account?.status).toBe('connected')
     expect(settings.calendars).toHaveLength(3)
@@ -380,13 +387,13 @@ describe('calendar service', () => {
   })
 
   it('preserves saved selections and auto-selects newly discovered visible calendars', async () => {
-    await service.completeGoogleConnect('code', 'state')
+    await service.completeGoogleConnect(userId, 'code', 'state')
 
-    await service.updateCalendarSelections({
+    await service.updateCalendarSelections(userId, {
       calendarIds: ['primary'],
     })
 
-    const refreshed = await service.refreshCalendarConnections()
+    const refreshed = await service.refreshCalendarConnections(userId)
 
     expect(refreshed.ok).toBe(true)
     expect(refreshed.calendars.map((item) => [item.calendarId, item.isSelected])).toEqual([
@@ -398,11 +405,11 @@ describe('calendar service', () => {
   })
 
   it('disconnects google while keeping cached calendar selection records', async () => {
-    await service.completeGoogleConnect('code', 'state')
+    await service.completeGoogleConnect(userId, 'code', 'state')
 
-    await service.disconnectGoogleCalendar()
+    await service.disconnectGoogleCalendar(userId)
 
-    const settings = await service.getSettingsData()
+    const settings = await service.getSettingsData(userId)
 
     expect(settings.account?.status).toBe('disconnected')
     expect(settings.calendars.map((item) => item.calendarId)).toEqual(['primary', 'team', 'hidden'])
@@ -414,17 +421,17 @@ describe('calendar service', () => {
   })
 
   it('syncs selected calendars into local read-only event snapshots', async () => {
-    await service.completeGoogleConnect('code', 'state')
+    await service.completeGoogleConnect(userId, 'code', 'state')
 
-    const result = await service.syncSelectedCalendarEvents(new Date('2026-04-07T09:00:00.000Z'))
+    const result = await service.syncSelectedCalendarEvents(userId, new Date('2026-04-07T09:00:00.000Z'))
 
     expect(result.ok).toBe(true)
     expect(result.calendarCount).toBe(2)
     expect(result.eventCount).toBe(0)
 
-    const page = await service.getCalendarViewData(new Date('2026-04-07T09:00:00.000Z'))
-    const primaryDay = await service.getCalendarEventsForDay('2026-04-07')
-    const offsiteDay = await service.getCalendarEventsForDay('2026-04-08')
+    const page = await service.getCalendarViewData(userId, new Date('2026-04-07T09:00:00.000Z'))
+    const primaryDay = await service.getCalendarEventsForDay(userId, '2026-04-07')
+    const offsiteDay = await service.getCalendarEventsForDay(userId, '2026-04-08')
 
     expect(page.daysWithEvents).toEqual(['2026-04-07', '2026-04-08'])
     expect(primaryDay.events.map((event) => [event.calendarName, event.summary])).toEqual([
@@ -438,13 +445,13 @@ describe('calendar service', () => {
   })
 
   it('applies incremental sync updates and removes cancelled events', async () => {
-    await service.completeGoogleConnect('code', 'state')
+    await service.completeGoogleConnect(userId, 'code', 'state')
 
     controls.eventVersion = 2
-    const result = await service.syncSelectedCalendarEvents(new Date('2026-04-09T09:00:00.000Z'))
+    const result = await service.syncSelectedCalendarEvents(userId, new Date('2026-04-09T09:00:00.000Z'))
 
-    const updatedDay = await service.getCalendarEventsForDay('2026-04-09')
-    const removedDay = await service.getCalendarEventsForDay('2026-04-08')
+    const updatedDay = await service.getCalendarEventsForDay(userId, '2026-04-09')
+    const removedDay = await service.getCalendarEventsForDay(userId, '2026-04-08')
 
     expect(result.eventCount).toBe(1)
     expect(result.recoveredExpiredToken).toBe(false)
@@ -453,14 +460,14 @@ describe('calendar service', () => {
   })
 
   it('recovers from an expired sync token by clearing state and running a full resync', async () => {
-    await service.completeGoogleConnect('code', 'state')
+    await service.completeGoogleConnect(userId, 'code', 'state')
 
     controls.eventVersion = 2
     controls.expireSyncTokenOnNextRequest = true
 
-    const result = await service.syncSelectedCalendarEvents(new Date('2026-04-09T09:00:00.000Z'))
-    const updatedDay = await service.getCalendarEventsForDay('2026-04-09')
-    const removedDay = await service.getCalendarEventsForDay('2026-04-08')
+    const result = await service.syncSelectedCalendarEvents(userId, new Date('2026-04-09T09:00:00.000Z'))
+    const updatedDay = await service.getCalendarEventsForDay(userId, '2026-04-09')
+    const removedDay = await service.getCalendarEventsForDay(userId, '2026-04-08')
 
     expect(result.ok).toBe(true)
     expect(result.recoveredExpiredToken).toBe(true)

@@ -14,7 +14,6 @@ import {
   getGoogleSyncWindow,
   type GoogleCalendarSelectionInput,
 } from '../lib/google'
-import { ensureDefaultUser } from './default-user'
 
 function sortCalendarConnections<T extends { primaryFlag: boolean; isSelected: boolean; calendarName: string }>(
   connections: Array<T>,
@@ -364,16 +363,15 @@ export function createCalendarService(
     return { account, connections }
   }
 
-  async function getSettingsData() {
-    const user = await ensureDefaultUser(database)
+  async function getSettingsData(userId: string) {
     const config = getGoogleConfigStatus()
-    const { account, connections } = await getAccountAndConnections(user.id)
-    const states = await listSyncStates(user.id)
+    const { account, connections } = await getAccountAndConnections(userId)
+    const states = await listSyncStates(userId)
     const syncSummary = getSyncSummary(states, { disconnected: !!account?.disconnectedAt })
     const [{ count: cachedEventCount }] = await database
       .select({ count: sql<number>`count(*)` })
       .from(calendarEvents)
-      .where(eq(calendarEvents.userId, user.id))
+      .where(eq(calendarEvents.userId, userId))
 
     return {
       configuration: config,
@@ -392,11 +390,9 @@ export function createCalendarService(
     }
   }
 
-  async function startGoogleConnect() {
-    const user = await ensureDefaultUser(database)
-
+  async function startGoogleConnect(userId: string) {
     return {
-      url: googleApi.buildAuthUrl(user.id),
+      url: googleApi.buildAuthUrl(userId),
     }
   }
 
@@ -555,12 +551,11 @@ export function createCalendarService(
     return refreshed.accessToken
   }
 
-  async function getCalendarViewData(now = new Date()) {
-    const user = await ensureDefaultUser(database)
-    const { account, connections } = await getAccountAndConnections(user.id)
+  async function getCalendarViewData(userId: string, now = new Date()) {
+    const { account, connections } = await getAccountAndConnections(userId)
     const selectedConnections = connections.filter((connection) => connection.isSelected)
     const selectedCalendarIds = selectedConnections.map((connection) => connection.calendarId)
-    const states = await listSyncStates(user.id)
+    const states = await listSyncStates(userId)
     const syncSummary = getSyncSummary(
       states.filter((state) => selectedCalendarIds.includes(state.scopeKey)),
       { disconnected: !!account?.disconnectedAt },
@@ -582,7 +577,7 @@ export function createCalendarService(
           .from(calendarEvents)
           .where(
             and(
-              eq(calendarEvents.userId, user.id),
+              eq(calendarEvents.userId, userId),
               inArray(calendarEvents.calendarId, selectedCalendarIds),
               gte(calendarEvents.endsAt, viewStart),
               lte(calendarEvents.startsAt, viewEnd),
@@ -616,9 +611,8 @@ export function createCalendarService(
     }
   }
 
-  async function getCalendarEventsForDay(dateStr: string) {
-    const user = await ensureDefaultUser(database)
-    const { account, connections } = await getAccountAndConnections(user.id)
+  async function getCalendarEventsForDay(userId: string, dateStr: string) {
+    const { account, connections } = await getAccountAndConnections(userId)
     const selectedConnections = connections.filter((connection) => connection.isSelected)
     const selectedCalendarIds = selectedConnections.map((connection) => connection.calendarId)
 
@@ -632,7 +626,7 @@ export function createCalendarService(
 
     const events = await database.query.calendarEvents.findMany({
       where: and(
-        eq(calendarEvents.userId, user.id),
+        eq(calendarEvents.userId, userId),
         inArray(calendarEvents.calendarId, selectedCalendarIds),
         gte(calendarEvents.endsAt, dayStart),
         lte(calendarEvents.startsAt, dayEnd),
@@ -662,15 +656,14 @@ export function createCalendarService(
     }
   }
 
-  async function syncSelectedCalendarEvents(now = new Date()) {
-    const user = await ensureDefaultUser(database)
-    const { account } = await getAccountAndConnections(user.id)
+  async function syncSelectedCalendarEvents(userId: string, now = new Date()) {
+    const { account } = await getAccountAndConnections(userId)
 
     if (!account || account.disconnectedAt) {
       throw new Error('Reconnect Google Calendar before syncing events.')
     }
 
-    const selectedConnections = await listSelectedConnections(user.id, account.id)
+    const selectedConnections = await listSelectedConnections(userId, account.id)
 
     if (!selectedConnections.length) {
       throw new Error('Select at least one calendar before syncing events.')
@@ -682,15 +675,15 @@ export function createCalendarService(
 
     for (const connection of selectedConnections) {
       try {
-        const result = await syncCalendarConnection(user.id, connection.calendarId, accessToken, now)
+        const result = await syncCalendarConnection(userId, connection.calendarId, accessToken, now)
         eventCount += result.eventCount
         recoveredExpiredToken = recoveredExpiredToken || result.recoveredExpiredToken
       } catch (error) {
-        const existingState = await findSyncState(user.id, connection.calendarId)
+        const existingState = await findSyncState(userId, connection.calendarId)
         const planningWindow = getGoogleSyncWindow(now)
 
         await upsertSyncState(
-          user.id,
+          userId,
           connection.calendarId,
           {
             lastSyncedAt: existingState?.lastSyncedAt ?? null,
@@ -717,31 +710,29 @@ export function createCalendarService(
   }
 
   return {
-    ensureDefaultUser: () => ensureDefaultUser(database),
     getSettingsData,
     getCalendarViewData,
     getCalendarEventsForDay,
     syncSelectedCalendarEvents,
     startGoogleConnect,
-    async completeGoogleConnect(code: string, state: string) {
+    async completeGoogleConnect(userId: string, code: string, state: string) {
       const payload = googleApi.verifyState(state)
-      const user = await ensureDefaultUser(database)
 
-      if (payload.userId !== user.id) {
+      if (payload.userId !== userId) {
         throw new Error('Google OAuth state does not match the active user')
       }
 
       const tokens = await googleApi.exchangeCode(code)
       const userInfo = await googleApi.fetchUserInfo(tokens.accessToken)
       const now = new Date()
-      const googleAccountId = await persistGoogleAccount(user.id, userInfo, tokens, now)
+      const googleAccountId = await persistGoogleAccount(userId, userInfo, tokens, now)
       const calendars = await googleApi.fetchCalendarList(tokens.accessToken)
-      const connections = await upsertCalendarConnections(user.id, googleAccountId, calendars, now)
+      const connections = await upsertCalendarConnections(userId, googleAccountId, calendars, now)
       const selectedConnections = connections.filter((calendar) => calendar.isSelected)
       let syncedEventCount = 0
 
       for (const connection of selectedConnections) {
-        const result = await runFullCalendarSync(user.id, connection.calendarId, tokens.accessToken, now)
+        const result = await runFullCalendarSync(userId, connection.calendarId, tokens.accessToken, now)
         syncedEventCount += result.eventCount
       }
 
@@ -752,9 +743,8 @@ export function createCalendarService(
         syncedEventCount,
       }
     },
-    async refreshCalendarConnections() {
-      const user = await ensureDefaultUser(database)
-      const account = await getRelevantAccount(user.id)
+    async refreshCalendarConnections(userId: string) {
+      const account = await getRelevantAccount(userId)
 
       if (!account || account.disconnectedAt) {
         throw new Error('Reconnect Google Calendar before refreshing calendars.')
@@ -763,16 +753,15 @@ export function createCalendarService(
       const accessToken = await getFreshAccessToken(account.id)
       const calendars = await googleApi.fetchCalendarList(accessToken)
       const now = new Date()
-      const connections = await upsertCalendarConnections(user.id, account.id, calendars, now)
+      const connections = await upsertCalendarConnections(userId, account.id, calendars, now)
 
       return {
         ok: true as const,
         calendars: connections,
       }
     },
-    async updateCalendarSelections(input: GoogleCalendarSelectionInput) {
-      const user = await ensureDefaultUser(database)
-      const account = await getRelevantAccount(user.id)
+    async updateCalendarSelections(userId: string, input: GoogleCalendarSelectionInput) {
+      const account = await getRelevantAccount(userId)
 
       if (!account) {
         throw new Error('Connect Google Calendar before choosing calendars.')
@@ -781,7 +770,7 @@ export function createCalendarService(
       const selectedIds = new Set(input.calendarIds)
       const connections = await database.query.calendarConnections.findMany({
         where: and(
-          eq(calendarConnections.userId, user.id),
+          eq(calendarConnections.userId, userId),
           eq(calendarConnections.googleAccountId, account.id),
         ),
       })
@@ -803,9 +792,8 @@ export function createCalendarService(
         selectedCount: connections.filter((connection) => selectedIds.has(connection.calendarId)).length,
       }
     },
-    async disconnectGoogleCalendar() {
-      const user = await ensureDefaultUser(database)
-      const account = await getRelevantAccount(user.id)
+    async disconnectGoogleCalendar(userId: string) {
+      const account = await getRelevantAccount(userId)
 
       if (!account) {
         return { ok: true as const }

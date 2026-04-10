@@ -15,16 +15,16 @@ export function createDashboardService(database: Database) {
   const remindersService = createRemindersService(database)
 
   return {
-    async getDashboardData(now = new Date()) {
+    async getDashboardData(userId: string, now = new Date()) {
       const today = getTodayDateString(now)
       const completionStart = new Date(now)
       completionStart.setDate(completionStart.getDate() - 29)
       const completionStartDate = getTodayDateString(completionStart)
 
       const [tasks, habits, completions] = await Promise.all([
-        tasksService.listTasksWithCalendarLinks(now),
-        habitsService.listHabitsWithCalendarLinks(now),
-        habitsService.listHabitCompletions(completionStartDate, today),
+        tasksService.listTasksWithCalendarLinks(userId, now),
+        habitsService.listHabitsWithCalendarLinks(userId, now),
+        habitsService.listHabitCompletions(userId, completionStartDate, today),
       ])
 
       const overdueTasks = sortTasks(applyTaskFilter(tasks, 'overdue', now), 'due-asc')
@@ -34,7 +34,7 @@ export function createDashboardService(database: Database) {
         completedToday: isHabitCompletedOnDate(habit, completions, today),
       }))
 
-      const dueReminders = await remindersService.syncReminderEvents(now)
+      const dueReminders = await remindersService.syncReminderEvents(userId, now)
 
       return {
         today,
