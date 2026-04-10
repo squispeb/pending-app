@@ -1,10 +1,12 @@
 import { createServerFn } from '@tanstack/react-start'
 import { db } from '../db/client'
 import { ideaCreateSchema, ideaToggleStarSchema } from '../lib/ideas'
+import { createAssistantThreadService } from './assistant-thread-service'
 import { resolveAuthenticatedPlannerUser } from './authenticated-user'
 import { createIdeasService } from './ideas-service'
 
 const ideasService = createIdeasService(db)
+const assistantThreadService = createAssistantThreadService(db)
 
 export const listIdeas = createServerFn({ method: 'GET' }).handler(async () => {
   const { user } = await resolveAuthenticatedPlannerUser(db)
@@ -30,4 +32,10 @@ export const toggleIdeaStar = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const { user } = await resolveAuthenticatedPlannerUser(db)
     return ideasService.toggleIdeaStar(data.id, user.id)
+  })
+
+export const resolveIdeaThread = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    return assistantThreadService.resolveIdeaThread(data.id)
   })
