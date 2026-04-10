@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { Lightbulb, Settings } from 'lucide-react'
+import AuthStatusChip from './AuthStatusChip'
 import ThemeToggle from './ThemeToggle'
 
 export default function Header() {
@@ -19,6 +20,7 @@ export default function Header() {
         </h2>
 
         <div className="ml-auto flex items-center gap-2">
+          <AuthStatusChip />
           <Link
             to="/ideas"
             aria-label="Ideas"

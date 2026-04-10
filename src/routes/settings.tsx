@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, Link2, RefreshCw, Unplug } from 'lucide-react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
+import AuthStatusChip from '../components/AuthStatusChip'
 import {
   disconnectGoogleCalendar,
   getCalendarSettings,
@@ -174,6 +175,19 @@ function SettingsPage() {
       <article className="panel rounded-[1.75rem] p-6 sm:p-8">
         <h1 className="display-title mb-4 text-3xl font-bold text-[var(--ink-strong)]">Settings</h1>
         <p className="max-w-3xl text-base leading-7 text-[var(--ink-soft)]">{renderConnectionCopy()}</p>
+
+        <div className="mt-6 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="m-0 text-base font-semibold text-[var(--ink-strong)]">Session</h2>
+              <p className="mt-1 text-sm text-[var(--ink-soft)]">
+                The app now uses a Better Auth-backed session shared with the assistant service. You can explicitly start or end your current session here.
+              </p>
+            </div>
+
+            <AuthStatusChip />
+          </div>
+        </div>
 
         <div className="mt-6 flex flex-wrap gap-3">
           <button
