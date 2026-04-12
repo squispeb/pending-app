@@ -6,7 +6,7 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from '@tanstack/react-query'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 import { z } from 'zod'
 import type { PlanningItemCalendarLinkView } from '../server/planning-item-calendar-links'
 import type { Habit, HabitCompletion } from '../db/schema'
@@ -62,11 +62,17 @@ const habitCompletionsQueryOptions = () =>
 // ─── Route ───────────────────────────────────────────────────────────────────
 
 export const Route = createFileRoute('/habits')({
-  loader: ({ context }) =>
-    Promise.all([
+  beforeLoad: async ({ context, location }) => {
+    if (context.auth.state !== 'authenticated') {
+      throw redirect({ to: '/login', search: { redirect: location.href } })
+    }
+  },
+  loader: ({ context }) => {
+    return Promise.all([
       context.queryClient.ensureQueryData(habitsQueryOptions()),
       context.queryClient.ensureQueryData(habitCompletionsQueryOptions()),
-    ]),
+    ])
+  },
   component: HabitsPage,
 })
 

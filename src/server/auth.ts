@@ -25,7 +25,40 @@ function getAssistantServiceUrl() {
 }
 
 function getAuthHeaders() {
-  return new Headers(getRequestHeaders())
+  const source = new Headers(getRequestHeaders())
+  const headers = new Headers()
+
+  const cookie = source.get('cookie')
+  if (cookie) {
+    headers.set('cookie', cookie)
+  }
+
+  const authorization = source.get('authorization')
+  if (authorization) {
+    headers.set('authorization', authorization)
+  }
+
+  const origin = source.get('origin')
+  if (origin) {
+    headers.set('origin', origin)
+  }
+
+  const referer = source.get('referer')
+  if (referer) {
+    headers.set('referer', referer)
+  }
+
+  if (!headers.get('origin') && env.APP_URL) {
+    try {
+      const appUrl = new URL(env.APP_URL)
+      headers.set('origin', appUrl.origin)
+      headers.set('referer', env.APP_URL)
+    } catch {
+      // Ignore invalid APP_URL here and let the assistant auth service fail clearly if needed.
+    }
+  }
+
+  return headers
 }
 
 async function parseAssistantResponse(response: Response) {
@@ -49,6 +82,16 @@ function mirrorSetCookieHeaders(response: Response) {
   }
 }
 
+const otpRequestSchema = z.object({
+  email: z.email(),
+})
+
+const otpVerifySchema = z.object({
+  email: z.email(),
+  otp: z.string().min(1),
+  name: z.string().trim().optional(),
+})
+
 export const getAuthStatus = createServerFn({ method: 'GET' }).handler(async () => {
   const requestHeaders = getAuthHeaders()
   const sessionResponse = await fetch(`${getAssistantServiceUrl()}/api/auth/get-session`, {
@@ -64,13 +107,28 @@ export const getAuthStatus = createServerFn({ method: 'GET' }).handler(async () 
     })
   }
 
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'user' in payload &&
+    payload.user &&
+    typeof payload.user === 'object' &&
+    'email' in payload.user &&
+    typeof payload.user.email === 'string' &&
+    payload.user.email.endsWith('@anon-user.com')
+  ) {
+    return authStatusSchema.parse({
+      state: 'anonymous',
+      user: null,
+    })
+  }
+
   const { user } = await resolveAuthenticatedPlannerUser(db, {
     requestHeaders,
   })
-  const isAnonymous = user.email.endsWith('@anon-user.com')
 
   return authStatusSchema.parse({
-    state: isAnonymous ? 'anonymous' : 'authenticated',
+    state: 'authenticated',
     user: {
       id: user.id,
       email: user.email,
@@ -79,21 +137,48 @@ export const getAuthStatus = createServerFn({ method: 'GET' }).handler(async () 
   })
 })
 
-export const startAnonymousSession = createServerFn({ method: 'POST' }).handler(async () => {
-  const requestHeaders = getAuthHeaders()
-  const headers = new Headers(requestHeaders)
-  headers.set('content-type', 'application/json')
+export const requestEmailOtp = createServerFn({ method: 'POST' })
+  .inputValidator((input) => otpRequestSchema.parse(input))
+  .handler(async ({ data }) => {
+    const requestHeaders = getAuthHeaders()
+    const headers = new Headers(requestHeaders)
+    headers.set('content-type', 'application/json')
 
-  const response = await fetch(`${getAssistantServiceUrl()}/api/auth/sign-in/anonymous`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({}),
+    const response = await fetch(`${getAssistantServiceUrl()}/api/auth/email-otp/send-verification-otp`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        email: data.email,
+        type: 'sign-in',
+      }),
+    })
+
+    await parseAssistantResponse(response)
+
+    return { ok: true as const }
   })
-  const payload = await parseAssistantResponse(response)
-  mirrorSetCookieHeaders(response)
 
-  return payload
-})
+export const verifyEmailOtp = createServerFn({ method: 'POST' })
+  .inputValidator((input) => otpVerifySchema.parse(input))
+  .handler(async ({ data }) => {
+    const requestHeaders = getAuthHeaders()
+    const headers = new Headers(requestHeaders)
+    headers.set('content-type', 'application/json')
+
+    const response = await fetch(`${getAssistantServiceUrl()}/api/auth/sign-in/email-otp`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        email: data.email,
+        otp: data.otp,
+        name: data.name,
+      }),
+    })
+    const payload = await parseAssistantResponse(response)
+    mirrorSetCookieHeaders(response)
+
+    return payload
+  })
 
 export const signOutSession = createServerFn({ method: 'POST' }).handler(async () => {
   const requestHeaders = getAuthHeaders()

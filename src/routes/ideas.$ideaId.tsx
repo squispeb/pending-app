@@ -1,6 +1,6 @@
 import { Lightbulb, Quote, Star } from 'lucide-react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { Link, createFileRoute, notFound } from '@tanstack/react-router'
+import { Link, createFileRoute, notFound, redirect } from '@tanstack/react-router'
 import { getIdeaExcerpt, isIdeaStarred } from '../lib/ideas'
 import { getIdea, toggleIdeaStar } from '../server/ideas'
 
@@ -11,7 +11,14 @@ const ideaDetailQueryOptions = (ideaId: string) =>
   })
 
 export const Route = createFileRoute('/ideas/$ideaId')({
-  loader: ({ context, params }) => context.queryClient.ensureQueryData(ideaDetailQueryOptions(params.ideaId)),
+  beforeLoad: async ({ context, location }) => {
+    if (context.auth.state !== 'authenticated') {
+      throw redirect({ to: '/login', search: { redirect: location.href } })
+    }
+  },
+  loader: ({ context, params }) => {
+    return context.queryClient.ensureQueryData(ideaDetailQueryOptions(params.ideaId))
+  },
   component: IdeaDetailPage,
 })
 

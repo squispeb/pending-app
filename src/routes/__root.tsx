@@ -1,5 +1,6 @@
 import {
   HeadContent,
+  Outlet,
   Scripts,
   createRootRouteWithContext,
 } from '@tanstack/react-router'
@@ -10,6 +11,7 @@ import Footer from '../components/Footer'
 import GlobalCaptureHost from '../components/GlobalCaptureHost'
 import Header from '../components/Header'
 import PwaLifecycle from '../components/PwaLifecycle'
+import { getAuthStatus } from '../server/auth'
 
 import TanStackQueryDevtools from '../integrations/tanstack-query/devtools'
 
@@ -20,6 +22,23 @@ import type { QueryClient } from '@tanstack/react-query'
 interface MyRouterContext {
   queryClient: QueryClient
 }
+
+type AuthContext =
+  | {
+      auth: {
+        state: 'authenticated'
+        user: {
+          id: string
+          email: string
+          displayName: string | null
+        } | null
+      }
+    }
+  | {
+      auth: {
+        state: 'needs_login'
+      }
+    }
 
 const THEME_INIT_SCRIPT = `(function(){try{var stored=window.localStorage.getItem('theme');var mode=(stored==='light'||stored==='dark'||stored==='auto')?stored:'auto';var prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;var resolved=mode==='auto'?(prefersDark?'dark':'light'):mode;var root=document.documentElement;root.classList.remove('light','dark');root.classList.add(resolved);if(mode==='auto'){root.removeAttribute('data-theme')}else{root.setAttribute('data-theme',mode)}root.style.colorScheme=resolved;}catch(e){}})();`
 
@@ -67,7 +86,33 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
       <p>404 — Page not found</p>
     </div>
   ),
+  beforeLoad: async ({ context }) => {
+    const auth = await context.queryClient.fetchQuery({
+      queryKey: ['auth-status'],
+      queryFn: () => getAuthStatus(),
+    })
+
+    if (auth.state === 'authenticated') {
+      return {
+        auth: {
+          state: 'authenticated' as const,
+          user: auth.user,
+        },
+      }
+    }
+
+    return {
+      auth: {
+        state: 'needs_login' as const,
+      },
+    }
+  },
+  component: RootLayout,
 })
+
+function RootLayout() {
+  return <Outlet />
+}
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (

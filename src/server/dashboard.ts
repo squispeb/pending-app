@@ -7,5 +7,12 @@ const dashboardService = createDashboardService(db)
 
 export const getDashboardData = createServerFn({ method: 'GET' }).handler(async () => {
   const { user } = await resolveAuthenticatedPlannerUser(db)
-  return dashboardService.getDashboardData(user.id)
+  const now = new Date()
+  const dashboard = await dashboardService.getDashboardData(user.id, now)
+
+  return {
+    ...dashboard,
+    renderedAt: now.toISOString(),
+    timezone: user.timezone,
+  }
 })

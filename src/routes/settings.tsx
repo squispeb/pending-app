@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, Link2, RefreshCw, Unplug } from 'lucide-react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { createFileRoute } from '@tanstack/react-router'
-import AuthStatusChip from '../components/AuthStatusChip'
+import { createFileRoute, redirect } from '@tanstack/react-router'
+import AuthControls from '../components/AuthControls'
 import {
   disconnectGoogleCalendar,
   getCalendarSettings,
@@ -19,7 +19,14 @@ const settingsQueryOptions = () =>
   })
 
 export const Route = createFileRoute('/settings')({
-  loader: ({ context }) => context.queryClient.ensureQueryData(settingsQueryOptions()),
+  beforeLoad: async ({ context, location }) => {
+    if (context.auth.state !== 'authenticated') {
+      throw redirect({ to: '/login', search: { redirect: location.href } })
+    }
+  },
+  loader: ({ context }) => {
+    return context.queryClient.ensureQueryData(settingsQueryOptions())
+  },
   component: SettingsPage,
 })
 
@@ -181,11 +188,11 @@ function SettingsPage() {
             <div>
               <h2 className="m-0 text-base font-semibold text-[var(--ink-strong)]">Session</h2>
               <p className="mt-1 text-sm text-[var(--ink-soft)]">
-                The app now uses a Better Auth-backed session shared with the assistant service. You can explicitly start or end your current session here.
+                The app now uses a Better Auth-backed session shared with the assistant service. Use the login flow to establish a session, and sign out here when needed.
               </p>
             </div>
 
-            <AuthStatusChip />
+            <AuthControls />
           </div>
         </div>
 

@@ -66,53 +66,18 @@ describe('authenticated planner user resolution', () => {
     })
   })
 
-  it('bootstraps an anonymous Better Auth session when no session exists yet', async () => {
-    const setCookieResponse = new Response(
-      JSON.stringify({
-        token: 'session-2',
-        user: { id: 'anon-user', email: 'temp@anon-user.com', name: 'Anonymous' },
+  it('requires an authenticated Better Auth session', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(null))
+
+    await expect(
+      resolveAuthenticatedPlannerUser(db, {
+        requestHeaders: new Headers(),
+        fetchImpl: fetchMock as unknown as typeof fetch,
+        baseUrl: 'https://assistant.example',
+        setResponseHeaderImpl: vi.fn() as unknown as typeof import('@tanstack/start-server-core').setResponseHeader,
       }),
-      {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      },
-    )
-    setCookieResponse.headers.append(
-      'set-cookie',
-      'better-auth.session_token=signed-session; Path=/; HttpOnly; SameSite=Lax',
-    )
-    setCookieResponse.headers.append(
-      'set-cookie',
-      'better-auth.session_data=signed-data; Path=/; HttpOnly; SameSite=Lax',
-    )
+    ).rejects.toThrow('Authentication required')
 
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(Response.json(null))
-      .mockResolvedValueOnce(setCookieResponse)
-      .mockResolvedValueOnce(
-        Response.json({
-          session: { id: 'session-2', userId: 'anon-user' },
-          user: { id: 'anon-user', email: 'temp@anon-user.com', name: 'Anonymous' },
-        }),
-      )
-    const responseHeaderMock = vi.fn()
-
-    const result = await resolveAuthenticatedPlannerUser(db, {
-      requestHeaders: new Headers(),
-      fetchImpl: fetchMock as unknown as typeof fetch,
-      baseUrl: 'https://assistant.example',
-      setResponseHeaderImpl: responseHeaderMock as unknown as typeof import('@tanstack/start-server-core').setResponseHeader,
-    })
-
-    expect(result.user.id).toBe('anon-user')
-    expect(result.authHeaders.get('cookie')).toBe(
-      'better-auth.session_token=signed-session; better-auth.session_data=signed-data',
-    )
-    expect(responseHeaderMock).toHaveBeenCalledWith('set-cookie', [
-      'better-auth.session_token=signed-session; Path=/; HttpOnly; SameSite=Lax',
-      'better-auth.session_data=signed-data; Path=/; HttpOnly; SameSite=Lax',
-    ])
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

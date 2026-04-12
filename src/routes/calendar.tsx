@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { queryOptions, useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 import { ChevronDown, ChevronUp, RefreshCw, Settings2 } from 'lucide-react'
 import { getCalendarView, getCalendarEventsForDay, syncGoogleCalendar } from '../server/calendar'
 import { getTodayDateString } from '../lib/tasks'
@@ -21,7 +21,14 @@ const calendarDayQueryOptions = (dateStr: string) =>
   })
 
 export const Route = createFileRoute('/calendar')({
-  loader: ({ context }) => context.queryClient.ensureQueryData(calendarViewQueryOptions()),
+  beforeLoad: async ({ context, location }) => {
+    if (context.auth.state !== 'authenticated') {
+      throw redirect({ to: '/login', search: { redirect: location.href } })
+    }
+  },
+  loader: ({ context }) => {
+    return context.queryClient.ensureQueryData(calendarViewQueryOptions())
+  },
   component: CalendarPage,
 })
 

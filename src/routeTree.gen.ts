@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as IdeasRouteImport } from './routes/ideas'
 import { Route as HabitsRouteImport } from './routes/habits'
 import { Route as CalendarRouteImport } from './routes/calendar'
@@ -26,6 +27,11 @@ const TasksRoute = TasksRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IdeasRoute = IdeasRouteImport.update({
@@ -64,6 +70,7 @@ export interface FileRoutesByFullPath {
   '/calendar': typeof CalendarRoute
   '/habits': typeof HabitsRoute
   '/ideas': typeof IdeasRouteWithChildren
+  '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/tasks': typeof TasksRoute
   '/ideas/$ideaId': typeof IdeasIdeaIdRoute
@@ -74,6 +81,7 @@ export interface FileRoutesByTo {
   '/calendar': typeof CalendarRoute
   '/habits': typeof HabitsRoute
   '/ideas': typeof IdeasRouteWithChildren
+  '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/tasks': typeof TasksRoute
   '/ideas/$ideaId': typeof IdeasIdeaIdRoute
@@ -85,6 +93,7 @@ export interface FileRoutesById {
   '/calendar': typeof CalendarRoute
   '/habits': typeof HabitsRoute
   '/ideas': typeof IdeasRouteWithChildren
+  '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/tasks': typeof TasksRoute
   '/ideas/$ideaId': typeof IdeasIdeaIdRoute
@@ -97,6 +106,7 @@ export interface FileRouteTypes {
     | '/calendar'
     | '/habits'
     | '/ideas'
+    | '/login'
     | '/settings'
     | '/tasks'
     | '/ideas/$ideaId'
@@ -107,6 +117,7 @@ export interface FileRouteTypes {
     | '/calendar'
     | '/habits'
     | '/ideas'
+    | '/login'
     | '/settings'
     | '/tasks'
     | '/ideas/$ideaId'
@@ -117,6 +128,7 @@ export interface FileRouteTypes {
     | '/calendar'
     | '/habits'
     | '/ideas'
+    | '/login'
     | '/settings'
     | '/tasks'
     | '/ideas/$ideaId'
@@ -128,6 +140,7 @@ export interface RootRouteChildren {
   CalendarRoute: typeof CalendarRoute
   HabitsRoute: typeof HabitsRoute
   IdeasRoute: typeof IdeasRouteWithChildren
+  LoginRoute: typeof LoginRoute
   SettingsRoute: typeof SettingsRoute
   TasksRoute: typeof TasksRoute
   AuthGoogleCallbackRoute: typeof AuthGoogleCallbackRoute
@@ -147,6 +160,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ideas': {
@@ -209,6 +229,7 @@ const rootRouteChildren: RootRouteChildren = {
   CalendarRoute: CalendarRoute,
   HabitsRoute: HabitsRoute,
   IdeasRoute: IdeasRouteWithChildren,
+  LoginRoute: LoginRoute,
   SettingsRoute: SettingsRoute,
   TasksRoute: TasksRoute,
   AuthGoogleCallbackRoute: AuthGoogleCallbackRoute,

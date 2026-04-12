@@ -17,15 +17,6 @@ const authSessionResponseSchema = z.object({
   }),
 })
 
-const anonymousSignInResponseSchema = z.object({
-  token: z.string().min(1),
-  user: z.object({
-    id: z.string().min(1),
-    email: z.string().min(1),
-    name: z.string().min(1).nullable().optional(),
-  }),
-})
-
 type ResolvedPlannerAuthUser = {
   id: string
   email: string
@@ -193,51 +184,14 @@ export async function resolveAuthenticatedPlannerUser(
     options,
   )
 
-  let session = sessionResult.payload
+  const session = sessionResult.payload
 
   if (!session) {
-    authHeaders = new Headers(authHeaders)
-    authHeaders.set('content-type', 'application/json')
+    throw new Error('Authentication required')
+  }
 
-    const anonymousSignInResult = await fetchAssistantAuthJson(
-      '/api/auth/sign-in/anonymous',
-      {
-        method: 'POST',
-        headers: authHeaders,
-        body: JSON.stringify({}),
-      },
-      anonymousSignInResponseSchema,
-      options,
-    )
-
-    const setCookieHeaders = anonymousSignInResult.response.headers.getSetCookie()
-    if (setCookieHeaders.length > 0) {
-      ;(options?.setResponseHeaderImpl ?? setResponseHeader)('set-cookie', setCookieHeaders)
-      authHeaders = new Headers(authHeaders)
-      authHeaders.set('cookie', getCookieHeaderFromSetCookie(setCookieHeaders))
-    }
-
-    const hydratedSessionResult = await fetchAssistantAuthJson(
-      '/api/auth/get-session',
-      {
-        method: 'GET',
-        headers: authHeaders,
-      },
-      authSessionResponseSchema.nullable(),
-      options,
-    )
-
-    session = hydratedSessionResult.payload
-
-    if (!session) {
-      session = {
-        session: {
-          id: anonymousSignInResult.payload.token,
-          userId: anonymousSignInResult.payload.user.id,
-        },
-        user: anonymousSignInResult.payload.user,
-      }
-    }
+  if (session.user.email.endsWith('@anon-user.com')) {
+    throw new Error('Login required')
   }
 
   const user = await upsertPlannerUser(database, {

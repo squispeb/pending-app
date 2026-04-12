@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { queryOptions, useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 import { Bell, CalendarDays, CheckSquare, Mic, Repeat, Settings2 } from 'lucide-react'
 import type { Habit, Task } from '../db/schema'
-import { getTaskTimingLabel, getTodayDateString, isTaskCompleted } from '../lib/tasks'
+import { getTaskTimingLabel, isTaskCompleted } from '../lib/tasks'
 import { getHabitCadenceLabel } from '../lib/habits'
 import type { ReminderItem } from '../lib/reminders'
 import { completeTask, reopenTask } from '../server/tasks'
@@ -17,6 +17,32 @@ import {
   snoozeReminder,
 } from '../server/reminders'
 import { useCaptureContext } from '../contexts/CaptureContext'
+
+const todayHeadingFormatter = new Intl.DateTimeFormat('en-US', {
+  weekday: 'long',
+  month: 'long',
+  day: 'numeric',
+  timeZone: 'UTC',
+})
+
+function formatTodayHeading(dateStr: string) {
+  const [year, month, day] = dateStr.split('-').map(Number)
+  return todayHeadingFormatter.format(new Date(Date.UTC(year, month - 1, day, 12)))
+}
+
+function formatMeetingTimeRange(start: Date, end: Date, allDay: boolean, timeZone: string) {
+  if (allDay) {
+    return 'All day'
+  }
+
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone,
+  })
+
+  return `${formatter.format(start)} – ${formatter.format(end)}`
+}
 
 const dashboardQueryOptions = () =>
   queryOptions({
@@ -39,29 +65,29 @@ const calendarViewQueryOptions = () =>
   })
 
 export const Route = createFileRoute('/')({
-  loader: ({ context }) => context.queryClient.ensureQueryData(dashboardQueryOptions()),
+  beforeLoad: async ({ context, location }) => {
+    if (context.auth.state !== 'authenticated') {
+      throw redirect({ to: '/login', search: { redirect: location.href } })
+    }
+  },
+  loader: ({ context }) => {
+    return context.queryClient.ensureQueryData(dashboardQueryOptions())
+  },
   component: DashboardPage,
 })
-
-function formatTodayHeading() {
-  return new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-  })
-}
 
 function DashboardPage() {
   const queryClient = useQueryClient()
   const { data } = useSuspenseQuery(dashboardQueryOptions())
   const { openCapture, openCaptureWithText } = useCaptureContext()
 
-  const todayStr = getTodayDateString()
+  const todayStr = data.today
   const { data: calendarViewData } = useQuery(calendarViewQueryOptions())
   const { data: calendarDayData } = useQuery(calendarDayQueryOptions(todayStr))
   const todayMeetings = calendarDayData?.events ?? []
 
   const [quickEntryText, setQuickEntryText] = useState('')
+  const [meetingNow, setMeetingNow] = useState(() => new Date(data.renderedAt))
 
   function handleQuickEntrySubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -74,13 +100,7 @@ function DashboardPage() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [activeHabitId, setActiveHabitId] = useState<string | null>(null)
   const [activeReminderId, setActiveReminderId] = useState<string | null>(null)
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(() => {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      return 'unsupported'
-    }
-
-    return Notification.permission
-  })
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>('unsupported')
 
   const {
     today,
@@ -187,6 +207,23 @@ function DashboardPage() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setNotificationPermission('unsupported')
+      return
+    }
+
+    setNotificationPermission(Notification.permission)
+  }, [])
+
+  useEffect(() => {
+    // Re-sync meeting status after hydration, then keep minute-level badges fresh.
+    setMeetingNow(new Date())
+    const intervalId = window.setInterval(() => setMeetingNow(new Date()), 60_000)
+    return () => window.clearInterval(intervalId)
+  }, [])
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
     if (autoSyncAttemptedRef.current) {
       return
     }
@@ -265,7 +302,7 @@ function DashboardPage() {
         <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.24),transparent_66%)]" />
         <div className="pointer-events-none absolute -bottom-20 -right-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(16,185,129,0.18),transparent_66%)]" />
         <h1 className="display-title mb-6 text-3xl font-bold tracking-tight text-[var(--ink-strong)] sm:text-4xl">
-          {formatTodayHeading()}
+          {formatTodayHeading(data.today)}
         </h1>
         <div className="grid grid-cols-2 gap-y-4 sm:flex sm:flex-wrap sm:items-center">
           {(
@@ -311,10 +348,10 @@ function DashboardPage() {
             type="button"
             onClick={openCapture}
             aria-label="Voice capture"
-            className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full transition active:scale-95"
-            style={{ background: 'linear-gradient(135deg, #2563eb, #10b981)' }}
+            suppressHydrationWarning
+            className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-[linear-gradient(135deg,_#2563eb,_#10b981)] transition active:scale-95"
           >
-            <Mic size={18} className="text-white" />
+            <Mic suppressHydrationWarning size={18} className="text-white" />
           </button>
           {quickEntryText.trim() ? (
             <button
@@ -456,7 +493,7 @@ function DashboardPage() {
           </div>
           <div className="space-y-2">
             {todayMeetings.map((event) => (
-              <MeetingRow key={event.id} event={event} />
+              <MeetingRow key={event.id} event={event} now={meetingNow} timeZone={data.timezone} />
             ))}
           </div>
         </section>
@@ -474,7 +511,7 @@ function DashboardPage() {
             href={href}
             className="subpanel flex items-center gap-3 rounded-2xl px-4 py-4 no-underline"
           >
-            <Icon size={18} className="shrink-0 text-[var(--ink-soft)]" />
+            <Icon suppressHydrationWarning size={18} className="shrink-0 text-[var(--ink-soft)]" />
             <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">{title}</p>
           </a>
         ))}
@@ -504,7 +541,7 @@ function ReminderPanel({
     <section className="panel rounded-[1.75rem] p-6 sm:p-7">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <Bell size={18} className="text-[var(--ink-soft)]" />
+          <Bell suppressHydrationWarning size={18} className="text-[var(--ink-soft)]" />
           <h2 className="m-0 text-lg font-semibold text-[var(--ink-strong)]">Reminders</h2>
         </div>
         {permission === 'default' ? (
@@ -615,6 +652,8 @@ function DashboardTaskRow({
 
 function MeetingRow({
   event,
+  now,
+  timeZone,
 }: {
   event: {
     id: string
@@ -627,14 +666,12 @@ function MeetingRow({
     calendarName: string
     primaryFlag: boolean
   }
+  now: Date
+  timeZone: string
 }) {
   const start = new Date(event.startsAt)
   const end = new Date(event.endsAt)
-  const timeLabel = event.allDay
-    ? 'All day'
-    : `${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
-
-  const now = new Date()
+  const timeLabel = formatMeetingTimeRange(start, end, event.allDay, timeZone)
   const isNow = !event.allDay && start <= now && now < end
   const isPast = !event.allDay && end <= now
 

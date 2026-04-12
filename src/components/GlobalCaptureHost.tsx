@@ -1256,8 +1256,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
           type="button"
           onClick={openCapture}
           aria-label="Voice capture"
-          className="fixed bottom-8 right-8 z-30 hidden size-14 cursor-pointer items-center justify-center rounded-full shadow-[0_4px_24px_rgba(37,99,235,0.45)] transition hover:scale-105 active:scale-95 lg:flex"
-          style={{ background: 'linear-gradient(135deg, #2563eb, #10b981)' }}
+          className="fixed bottom-8 right-8 z-30 hidden size-14 cursor-pointer items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-emerald-500 shadow-[0_4px_24px_rgba(37,99,235,0.45)] transition hover:scale-105 active:scale-95 lg:flex"
         >
           <Mic size={24} className="text-white" />
         </button>
