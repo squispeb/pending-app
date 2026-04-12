@@ -130,4 +130,22 @@ describe('assistant service client', () => {
     expect(url).toBe('https://assistant.example/threads/idea-123')
     expect(init?.method).toBe('GET')
   })
+
+  it('surfaces assistant-service read errors', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ message: 'Failed to read thread state' }), {
+        status: 502,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+
+    const { getAssistantIdeaThread } = await import('./assistant-service-client')
+
+    await expect(
+      getAssistantIdeaThread(
+        { ideaId: 'idea-123', authHeaders: { authorization: 'Bearer invalid' } },
+        { fetchImpl: fetchMock as unknown as typeof fetch },
+      ),
+    ).rejects.toThrow('Failed to read thread state')
+  })
 })

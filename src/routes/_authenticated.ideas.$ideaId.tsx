@@ -1,6 +1,7 @@
 import { Lightbulb, Quote, Star } from 'lucide-react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
+import { IdeaThreadHistory } from '../components/idea-thread-history'
 import { getIdeaExcerpt, isIdeaStarred } from '../lib/ideas'
 import { getIdea, getIdeaThread, toggleIdeaStar } from '../server/ideas'
 
@@ -94,30 +95,7 @@ function IdeaDetailPage() {
               </div>
             </article>
 
-            <section className="rounded-[28px] border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Thread history</div>
-                <div className="rounded-full border border-[var(--line)] px-3 py-1 text-xs font-medium text-[var(--ink-soft)]">
-                  {thread.status.replace('_', ' ')}
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {thread.visibleEvents.length > 0 ? (
-                  thread.visibleEvents.map((event) => (
-                    <article key={event.eventId} className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="text-sm font-semibold text-[var(--ink-strong)]">{formatThreadEventLabel(event.type)}</div>
-                        <div className="text-xs text-[var(--ink-faint)]">{new Date(event.createdAt).toLocaleString()}</div>
-                      </div>
-                      <p className="mt-2 m-0 text-sm leading-6 text-[var(--ink-soft)]">{event.summary}</p>
-                    </article>
-                  ))
-                ) : (
-                  <p className="m-0 text-sm text-[var(--ink-soft)]">No visible thread history yet.</p>
-                )}
-              </div>
-            </section>
+            <IdeaThreadHistory visibleEvents={thread.visibleEvents} />
           </div>
 
           <aside className="space-y-4 rounded-[28px] border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
@@ -157,19 +135,4 @@ function IdeaDetailPage() {
       </div>
     </main>
   )
-}
-
-function formatThreadEventLabel(type: 'thread_created' | 'proposal_created' | 'proposal_approved' | 'proposal_rejected' | 'assistant_failed') {
-  switch (type) {
-    case 'thread_created':
-      return 'Thread created'
-    case 'proposal_created':
-      return 'Proposal created'
-    case 'proposal_approved':
-      return 'Proposal approved'
-    case 'proposal_rejected':
-      return 'Proposal rejected'
-    case 'assistant_failed':
-      return 'Assistant failed'
-  }
 }

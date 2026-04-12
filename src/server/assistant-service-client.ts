@@ -1,20 +1,28 @@
 import { z } from 'zod'
 import { env } from '../lib/env'
 
+const threadEventSchema = z.object({
+  eventId: z.string().min(1),
+  type: z.enum(['thread_created', 'proposal_created', 'proposal_approved', 'proposal_rejected', 'assistant_failed']),
+  createdAt: z.string().min(1),
+  summary: z.string().min(1),
+  visibleToUser: z.literal(true),
+})
+
 const resolveIdeaThreadResponseSchema = z.object({
   threadId: z.string().min(1),
   ideaId: z.string().min(1),
   userId: z.string().min(1),
   status: z.literal('ready'),
-  visibleEvents: z.array(
-    z.object({
-      eventId: z.string().min(1),
-      type: z.enum(['thread_created', 'proposal_created', 'proposal_approved', 'proposal_rejected', 'assistant_failed']),
-      createdAt: z.string().min(1),
-      summary: z.string().min(1),
-      visibleToUser: z.literal(true),
-    }),
-  ),
+  visibleEvents: z.array(threadEventSchema),
+})
+
+const getIdeaThreadResponseSchema = z.object({
+  threadId: z.string().min(1),
+  ideaId: z.string().min(1),
+  userId: z.string().min(1),
+  status: z.literal('ready'),
+  visibleEvents: z.array(threadEventSchema),
 })
 
 export async function resolveAssistantIdeaThread(
@@ -46,7 +54,7 @@ export async function resolveAssistantIdeaThread(
     throw new Error(message)
   }
 
-  return resolveIdeaThreadResponseSchema.parse(payload)
+  return getIdeaThreadResponseSchema.parse(payload)
 }
 
 export async function getAssistantIdeaThread(
