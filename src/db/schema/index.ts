@@ -83,6 +83,55 @@ export const ideas = sqliteTable('ideas', {
     .default(sql`(unixepoch() * 1000)`),
 })
 
+export const ideaSnapshots = sqliteTable(
+  'idea_snapshots',
+  {
+    id: text('id').primaryKey(),
+    ideaId: text('idea_id')
+      .notNull()
+      .references(() => ideas.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull().default(''),
+    sourceType: text('source_type').notNull().default('manual'),
+    sourceInput: text('source_input'),
+    threadSummary: text('thread_summary'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    ideaVersionIdx: uniqueIndex('idea_snapshot_version_unique').on(table.ideaId, table.version),
+  }),
+)
+
+export const ideaThreadRefs = sqliteTable(
+  'idea_thread_refs',
+  {
+    id: text('id').primaryKey(),
+    ideaId: text('idea_id')
+      .notNull()
+      .references(() => ideas.id, { onDelete: 'cascade' }),
+    threadId: text('thread_id').notNull(),
+    initialSnapshotId: text('initial_snapshot_id')
+      .notNull()
+      .references(() => ideaSnapshots.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    ideaIdIdx: uniqueIndex('idea_thread_ref_idea_unique').on(table.ideaId),
+    threadIdIdx: uniqueIndex('idea_thread_ref_thread_unique').on(table.threadId),
+  }),
+)
+
 export const habitCompletions = sqliteTable(
   'habit_completions',
   {
@@ -260,6 +309,8 @@ export type User = typeof users.$inferSelect
 export type Task = typeof tasks.$inferSelect
 export type Habit = typeof habits.$inferSelect
 export type Idea = typeof ideas.$inferSelect
+export type IdeaSnapshot = typeof ideaSnapshots.$inferSelect
+export type IdeaThreadRef = typeof ideaThreadRefs.$inferSelect
 export type HabitCompletion = typeof habitCompletions.$inferSelect
 export type GoogleAccount = typeof googleAccounts.$inferSelect
 export type CalendarConnection = typeof calendarConnections.$inferSelect

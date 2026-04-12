@@ -1,5 +1,6 @@
 import { createClient } from '@libsql/client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/libsql'
 import { sql } from 'drizzle-orm'
 import * as schema from '../db/schema'
@@ -42,6 +43,50 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
       updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
     );
+  `)
+
+  await db.run(sql`
+    CREATE TABLE idea_snapshots (
+      id text PRIMARY KEY NOT NULL,
+      idea_id text NOT NULL,
+      version integer NOT NULL,
+      title text NOT NULL,
+      body text DEFAULT '' NOT NULL,
+      source_type text DEFAULT 'manual' NOT NULL,
+      source_input text,
+      thread_summary text,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
+    CREATE UNIQUE INDEX idea_snapshot_version_unique
+      ON idea_snapshots (idea_id, version);
+  `)
+
+  await db.run(sql`
+    CREATE TABLE idea_thread_refs (
+      id text PRIMARY KEY NOT NULL,
+      idea_id text NOT NULL,
+      thread_id text NOT NULL,
+      initial_snapshot_id text NOT NULL,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE cascade,
+      FOREIGN KEY (initial_snapshot_id) REFERENCES idea_snapshots(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
+    CREATE UNIQUE INDEX idea_thread_ref_idea_unique
+      ON idea_thread_refs (idea_id);
+  `)
+
+  await db.run(sql`
+    CREATE UNIQUE INDEX idea_thread_ref_thread_unique
+      ON idea_thread_refs (thread_id);
   `)
 }
 
@@ -146,6 +191,121 @@ describe('assistant thread service', () => {
         assistantServiceBaseUrl: 'https://assistant.example',
       }),
     ).rejects.toThrow('Idea not found')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('bootstraps and stores thread linkage for a newly created idea', async () => {
+    await db.insert(schema.users).values({
+      id: 'user-1',
+      email: 'user-1@example.com',
+      displayName: 'User One',
+      timezone: 'UTC',
+    })
+    await db.insert(schema.ideas).values({
+      id: 'idea-123',
+      userId: 'user-1',
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'typed_capture',
+      sourceInput: 'This should create a thread link.',
+    })
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          session: { id: 'session-1', userId: 'user-1' },
+          user: { id: 'user-1', email: 'user-1@example.com', name: 'User One' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          threadId: 'thread-user-1:idea-123',
+          ideaId: 'idea-123',
+          userId: 'user-1',
+          status: 'ready',
+        }),
+      )
+
+    const service = createAssistantThreadService(db)
+    const result = await service.bootstrapIdeaThread('idea-123', {
+      requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      assistantServiceBaseUrl: 'https://assistant.example',
+    })
+
+    const threadRef = await db.query.ideaThreadRefs.findFirst({
+      where: eq(schema.ideaThreadRefs.ideaId, 'idea-123'),
+    })
+    const snapshot = await db.query.ideaSnapshots.findFirst({
+      where: eq(schema.ideaSnapshots.id, result.initialSnapshotId),
+    })
+
+    expect(result).toMatchObject({
+      threadId: 'thread-user-1:idea-123',
+      created: true,
+    })
+    expect(threadRef).toMatchObject({
+      ideaId: 'idea-123',
+      threadId: 'thread-user-1:idea-123',
+      initialSnapshotId: result.initialSnapshotId,
+    })
+    expect(snapshot).toMatchObject({
+      ideaId: 'idea-123',
+      version: 1,
+      title: 'Owned idea',
+      sourceInput: 'This should create a thread link.',
+    })
+  })
+
+  it('reuses an existing stored thread reference for the owner', async () => {
+    await db.insert(schema.users).values({
+      id: 'user-1',
+      email: 'user-1@example.com',
+      displayName: 'User One',
+      timezone: 'UTC',
+    })
+    await db.insert(schema.ideas).values({
+      id: 'idea-123',
+      userId: 'user-1',
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'manual',
+    })
+    await db.insert(schema.ideaSnapshots).values({
+      id: 'snapshot-1',
+      ideaId: 'idea-123',
+      version: 1,
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'manual',
+    })
+    await db.insert(schema.ideaThreadRefs).values({
+      id: 'thread-ref-1',
+      ideaId: 'idea-123',
+      threadId: 'thread-user-1:idea-123',
+      initialSnapshotId: 'snapshot-1',
+    })
+
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      Response.json({
+        session: { id: 'session-1', userId: 'user-1' },
+        user: { id: 'user-1', email: 'user-1@example.com', name: 'User One' },
+      }),
+    )
+
+    const service = createAssistantThreadService(db)
+    const result = await service.bootstrapIdeaThread('idea-123', {
+      requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      assistantServiceBaseUrl: 'https://assistant.example',
+    })
+
+    expect(result).toEqual({
+      threadId: 'thread-user-1:idea-123',
+      initialSnapshotId: 'snapshot-1',
+      created: false,
+    })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

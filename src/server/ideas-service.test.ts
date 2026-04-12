@@ -1,5 +1,6 @@
 import { createClient } from '@libsql/client'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/libsql'
 import { sql } from 'drizzle-orm'
 import * as schema from '../db/schema'
@@ -42,6 +43,50 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
       updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
     );
+  `)
+
+  await db.run(sql`
+    CREATE TABLE idea_snapshots (
+      id text PRIMARY KEY NOT NULL,
+      idea_id text NOT NULL,
+      version integer NOT NULL,
+      title text NOT NULL,
+      body text DEFAULT '' NOT NULL,
+      source_type text DEFAULT 'manual' NOT NULL,
+      source_input text,
+      thread_summary text,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
+    CREATE UNIQUE INDEX idea_snapshot_version_unique
+      ON idea_snapshots (idea_id, version);
+  `)
+
+  await db.run(sql`
+    CREATE TABLE idea_thread_refs (
+      id text PRIMARY KEY NOT NULL,
+      idea_id text NOT NULL,
+      thread_id text NOT NULL,
+      initial_snapshot_id text NOT NULL,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE cascade,
+      FOREIGN KEY (initial_snapshot_id) REFERENCES idea_snapshots(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
+    CREATE UNIQUE INDEX idea_thread_ref_idea_unique
+      ON idea_thread_refs (idea_id);
+  `)
+
+  await db.run(sql`
+    CREATE UNIQUE INDEX idea_thread_ref_thread_unique
+      ON idea_thread_refs (thread_id);
   `)
 }
 
@@ -146,5 +191,62 @@ describe('ideas service', () => {
     await expect(service.getIdea(created.id, secondaryUserId)).resolves.toBeUndefined()
     await expect(service.listIdeas(secondaryUserId)).resolves.toEqual([])
     await expect(service.toggleIdeaStar(created.id, secondaryUserId)).rejects.toThrow('Idea not found')
+  })
+
+  it('stores an initial snapshot and thread reference for a created idea', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Thread bootstrap idea',
+      body: 'Create the canonical record before bootstrapping the thread.',
+      sourceType: 'typed_capture',
+      sourceInput: 'This should become a real idea thread.',
+    })
+
+    const linkage = await service.createInitialSnapshotAndThreadRef(
+      {
+        ideaId: created.id,
+        threadId: 'thread-user-1:idea-123',
+      },
+      primaryUserId,
+    )
+
+    const threadRef = await service.getIdeaThreadRef(created.id, primaryUserId)
+    const snapshots = await db.query.ideaSnapshots.findMany({
+      where: eq(schema.ideaSnapshots.ideaId, created.id),
+    })
+
+    expect(linkage.threadId).toBe('thread-user-1:idea-123')
+    expect(linkage.snapshotId).toBeTruthy()
+    expect(threadRef).toMatchObject({
+      ideaId: created.id,
+      threadId: 'thread-user-1:idea-123',
+      initialSnapshotId: linkage.snapshotId,
+    })
+    expect(snapshots).toHaveLength(1)
+    expect(snapshots[0]).toMatchObject({
+      ideaId: created.id,
+      version: 1,
+      title: 'Thread bootstrap idea',
+      sourceType: 'typed_capture',
+      sourceInput: 'This should become a real idea thread.',
+    })
+  })
+
+  it('does not expose a thread reference to a different user', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Owner-only thread ref',
+      body: 'Thread refs must remain tied to the canonical idea owner.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    await service.createInitialSnapshotAndThreadRef(
+      {
+        ideaId: created.id,
+        threadId: 'thread-user-1:idea-456',
+      },
+      primaryUserId,
+    )
+
+    await expect(service.getIdeaThreadRef(created.id, secondaryUserId)).resolves.toBeUndefined()
   })
 })
