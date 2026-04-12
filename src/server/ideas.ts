@@ -81,3 +81,9 @@ export const resolveIdeaThread = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     return assistantThreadService.resolveIdeaThread(data.id)
   })
+
+export const getIdeaThread = createServerFn({ method: 'GET' })
+  .inputValidator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    return assistantThreadService.getIdeaThread(data.id)
+  })

@@ -2,7 +2,7 @@ import { Lightbulb, Quote, Star } from 'lucide-react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
 import { getIdeaExcerpt, isIdeaStarred } from '../lib/ideas'
-import { getIdea, toggleIdeaStar } from '../server/ideas'
+import { getIdea, getIdeaThread, toggleIdeaStar } from '../server/ideas'
 
 const ideaDetailQueryOptions = (ideaId: string) =>
   queryOptions({
@@ -10,9 +10,18 @@ const ideaDetailQueryOptions = (ideaId: string) =>
     queryFn: () => getIdea({ data: { id: ideaId } }),
   })
 
+const ideaThreadQueryOptions = (ideaId: string) =>
+  queryOptions({
+    queryKey: ['idea-thread', ideaId],
+    queryFn: () => getIdeaThread({ data: { id: ideaId } }),
+  })
+
 export const Route = createFileRoute('/_authenticated/ideas/$ideaId')({
   loader: ({ context, params }) => {
-    return context.queryClient.ensureQueryData(ideaDetailQueryOptions(params.ideaId))
+    return Promise.all([
+      context.queryClient.ensureQueryData(ideaDetailQueryOptions(params.ideaId)),
+      context.queryClient.ensureQueryData(ideaThreadQueryOptions(params.ideaId)),
+    ])
   },
   component: IdeaDetailPage,
 })
@@ -21,6 +30,7 @@ function IdeaDetailPage() {
   const { ideaId } = Route.useParams()
   const queryClient = useQueryClient()
   const { data: idea } = useSuspenseQuery(ideaDetailQueryOptions(ideaId))
+  const { data: thread } = useSuspenseQuery(ideaThreadQueryOptions(ideaId))
 
   if (!idea) {
     throw notFound()
@@ -64,24 +74,51 @@ function IdeaDetailPage() {
         </div>
 
         <section className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_320px]">
-          <article className="rounded-[28px] border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
-            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
-              <Lightbulb size={14} />
-              Idea notes
-            </div>
+          <div className="space-y-6">
+            <article className="rounded-[28px] border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
+                <Lightbulb size={14} />
+                Idea notes
+              </div>
 
-            <div className="space-y-4 text-sm leading-7 text-[var(--ink-soft)]">
-              {idea.body ? (
-                idea.body.split(/\n{2,}/).map((paragraph, index) => (
-                  <p key={index} className="m-0 whitespace-pre-wrap">
-                    {paragraph}
-                  </p>
-                ))
-              ) : (
-                <p className="m-0">No detailed notes yet. This slice establishes the canonical idea record and vault surface so refinement can land here later.</p>
-              )}
-            </div>
-          </article>
+              <div className="space-y-4 text-sm leading-7 text-[var(--ink-soft)]">
+                {idea.body ? (
+                  idea.body.split(/\n{2,}/).map((paragraph, index) => (
+                    <p key={index} className="m-0 whitespace-pre-wrap">
+                      {paragraph}
+                    </p>
+                  ))
+                ) : (
+                  <p className="m-0">No detailed notes yet. This slice establishes the canonical idea record and vault surface so refinement can land here later.</p>
+                )}
+              </div>
+            </article>
+
+            <section className="rounded-[28px] border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Thread history</div>
+                <div className="rounded-full border border-[var(--line)] px-3 py-1 text-xs font-medium text-[var(--ink-soft)]">
+                  {thread.status.replace('_', ' ')}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {thread.visibleEvents.length > 0 ? (
+                  thread.visibleEvents.map((event) => (
+                    <article key={event.eventId} className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="text-sm font-semibold text-[var(--ink-strong)]">{formatThreadEventLabel(event.type)}</div>
+                        <div className="text-xs text-[var(--ink-faint)]">{new Date(event.createdAt).toLocaleString()}</div>
+                      </div>
+                      <p className="mt-2 m-0 text-sm leading-6 text-[var(--ink-soft)]">{event.summary}</p>
+                    </article>
+                  ))
+                ) : (
+                  <p className="m-0 text-sm text-[var(--ink-soft)]">No visible thread history yet.</p>
+                )}
+              </div>
+            </section>
+          </div>
 
           <aside className="space-y-4 rounded-[28px] border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
             <div>
@@ -120,4 +157,19 @@ function IdeaDetailPage() {
       </div>
     </main>
   )
+}
+
+function formatThreadEventLabel(type: 'thread_created' | 'proposal_created' | 'proposal_approved' | 'proposal_rejected' | 'assistant_failed') {
+  switch (type) {
+    case 'thread_created':
+      return 'Thread created'
+    case 'proposal_created':
+      return 'Proposal created'
+    case 'proposal_approved':
+      return 'Proposal approved'
+    case 'proposal_rejected':
+      return 'Proposal rejected'
+    case 'assistant_failed':
+      return 'Assistant failed'
+  }
 }

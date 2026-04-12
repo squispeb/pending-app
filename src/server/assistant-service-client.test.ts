@@ -14,6 +14,15 @@ describe('assistant service client', () => {
           ideaId: 'idea-123',
           userId: 'local-user',
           status: 'ready',
+          visibleEvents: [
+            {
+              eventId: 'event-1',
+              type: 'thread_created',
+              createdAt: '2026-04-12T00:00:00.000Z',
+              summary: 'Idea thread created and linked to the saved idea.',
+              visibleToUser: true,
+            },
+          ],
         }),
         {
           status: 200,
@@ -39,6 +48,15 @@ describe('assistant service client', () => {
       ideaId: 'idea-123',
       userId: 'local-user',
       status: 'ready',
+      visibleEvents: [
+        {
+          eventId: 'event-1',
+          type: 'thread_created',
+          createdAt: '2026-04-12T00:00:00.000Z',
+          summary: 'Idea thread created and linked to the saved idea.',
+          visibleToUser: true,
+        },
+      ],
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -68,5 +86,48 @@ describe('assistant service client', () => {
         { fetchImpl: fetchMock as unknown as typeof fetch },
       ),
     ).rejects.toThrow('Unauthorized thread access')
+  })
+
+  it('retrieves visible thread history through the read contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          threadId: 'thread-local-user:idea-123',
+          ideaId: 'idea-123',
+          userId: 'local-user',
+          status: 'ready',
+          visibleEvents: [
+            {
+              eventId: 'event-1',
+              type: 'thread_created',
+              createdAt: '2026-04-12T00:00:00.000Z',
+              summary: 'Idea thread created and linked to the saved idea.',
+              visibleToUser: true,
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    )
+
+    const { getAssistantIdeaThread } = await import('./assistant-service-client')
+    const result = await getAssistantIdeaThread(
+      {
+        ideaId: 'idea-123',
+        authHeaders: {
+          authorization: 'Bearer test-session-token',
+          cookie: 'better-auth.session_token=test-session',
+        },
+      },
+      { fetchImpl: fetchMock as unknown as typeof fetch },
+    )
+
+    expect(result.visibleEvents).toHaveLength(1)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123')
+    expect(init?.method).toBe('GET')
   })
 })

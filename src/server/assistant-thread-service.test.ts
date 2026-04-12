@@ -130,6 +130,15 @@ describe('assistant thread service', () => {
           ideaId: 'idea-123',
           userId: 'user-1',
           status: 'ready',
+          visibleEvents: [
+            {
+              eventId: 'event-1',
+              type: 'thread_created',
+              createdAt: '2026-04-12T00:00:00.000Z',
+              summary: 'Idea thread created and linked to the saved idea.',
+              visibleToUser: true,
+            },
+          ],
         }),
       )
 
@@ -145,6 +154,15 @@ describe('assistant thread service', () => {
       ideaId: 'idea-123',
       userId: 'user-1',
       status: 'ready',
+      visibleEvents: [
+        {
+          eventId: 'event-1',
+          type: 'thread_created',
+          createdAt: '2026-04-12T00:00:00.000Z',
+          summary: 'Idea thread created and linked to the saved idea.',
+          visibleToUser: true,
+        },
+      ],
     })
     expect(fetchMock).toHaveBeenCalledTimes(2)
     const [, assistantRequest] = fetchMock.mock.calls[1] ?? []
@@ -224,6 +242,15 @@ describe('assistant thread service', () => {
           ideaId: 'idea-123',
           userId: 'user-1',
           status: 'ready',
+          visibleEvents: [
+            {
+              eventId: 'event-1',
+              type: 'thread_created',
+              createdAt: '2026-04-12T00:00:00.000Z',
+              summary: 'Idea thread created and linked to the saved idea.',
+              visibleToUser: true,
+            },
+          ],
         }),
       )
 
@@ -307,5 +334,60 @@ describe('assistant thread service', () => {
       created: false,
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('retrieves visible thread history only for the authenticated owner', async () => {
+    await db.insert(schema.users).values({
+      id: 'user-1',
+      email: 'user-1@example.com',
+      displayName: 'User One',
+      timezone: 'UTC',
+    })
+    await db.insert(schema.ideas).values({
+      id: 'idea-123',
+      userId: 'user-1',
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'manual',
+    })
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          session: { id: 'session-1', userId: 'user-1' },
+          user: { id: 'user-1', email: 'user-1@example.com', name: 'User One' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          threadId: 'thread-user-1:idea-123',
+          ideaId: 'idea-123',
+          userId: 'user-1',
+          status: 'ready',
+          visibleEvents: [
+            {
+              eventId: 'event-1',
+              type: 'thread_created',
+              createdAt: '2026-04-12T00:00:00.000Z',
+              summary: 'Idea thread created and linked to the saved idea.',
+              visibleToUser: true,
+            },
+          ],
+        }),
+      )
+
+    const service = createAssistantThreadService(db)
+    const result = await service.getIdeaThread('idea-123', {
+      requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      assistantServiceBaseUrl: 'https://assistant.example',
+    })
+
+    expect(result.visibleEvents).toHaveLength(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const [url, init] = fetchMock.mock.calls[1] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123')
+    expect(init?.method).toBe('GET')
   })
 })
