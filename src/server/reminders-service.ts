@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import type { Database } from '../db/client'
 import { habitCompletions, habits, reminderEvents, tasks } from '../db/schema'
 import {
@@ -160,6 +160,22 @@ export function createRemindersService(database: Database) {
             : { deliveredInAppAt: new Date(), updatedAt: new Date() },
         )
         .where(and(eq(reminderEvents.id, id), eq(reminderEvents.userId, userId)))
+
+      return { ok: true as const }
+    },
+    async markRemindersDelivered(ids: Array<string>, userId: string, channel: 'in-app' | 'browser') {
+      if (!ids.length) {
+        return { ok: true as const }
+      }
+
+      await database
+        .update(reminderEvents)
+        .set(
+          channel === 'browser'
+            ? { deliveredBrowserAt: new Date(), updatedAt: new Date() }
+            : { deliveredInAppAt: new Date(), updatedAt: new Date() },
+        )
+        .where(and(eq(reminderEvents.userId, userId), inArray(reminderEvents.id, ids)))
 
       return { ok: true as const }
     },

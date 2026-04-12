@@ -9,159 +9,148 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as TasksRouteImport } from './routes/tasks'
-import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as LoginRouteImport } from './routes/login'
-import { Route as IdeasRouteImport } from './routes/ideas'
-import { Route as HabitsRouteImport } from './routes/habits'
-import { Route as CalendarRouteImport } from './routes/calendar'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as IdeasIdeaIdRouteImport } from './routes/ideas.$ideaId'
-import { Route as AuthGoogleCallbackRouteImport } from './routes/auth/google/callback'
+import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
+import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated.index'
+import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated.tasks'
+import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated.settings'
+import { Route as AuthenticatedIdeasRouteImport } from './routes/_authenticated.ideas'
+import { Route as AuthenticatedHabitsRouteImport } from './routes/_authenticated.habits'
+import { Route as AuthenticatedCalendarRouteImport } from './routes/_authenticated.calendar'
+import { Route as AuthenticatedIdeasIdeaIdRouteImport } from './routes/_authenticated.ideas.$ideaId'
+import { Route as AuthenticatedAuthGoogleCallbackRouteImport } from './routes/_authenticated.auth.google.callback'
 
-const TasksRoute = TasksRouteImport.update({
-  id: '/tasks',
-  path: '/tasks',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IdeasRoute = IdeasRouteImport.update({
-  id: '/ideas',
-  path: '/ideas',
+const AuthenticatedRoute = AuthenticatedRouteImport.update({
+  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
-const HabitsRoute = HabitsRouteImport.update({
-  id: '/habits',
-  path: '/habits',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CalendarRoute = CalendarRouteImport.update({
-  id: '/calendar',
-  path: '/calendar',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const IndexRoute = IndexRouteImport.update({
+const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
-const IdeasIdeaIdRoute = IdeasIdeaIdRouteImport.update({
-  id: '/$ideaId',
-  path: '/$ideaId',
-  getParentRoute: () => IdeasRoute,
+const AuthenticatedTasksRoute = AuthenticatedTasksRouteImport.update({
+  id: '/tasks',
+  path: '/tasks',
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
-const AuthGoogleCallbackRoute = AuthGoogleCallbackRouteImport.update({
-  id: '/auth/google/callback',
-  path: '/auth/google/callback',
-  getParentRoute: () => rootRouteImport,
+const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedIdeasRoute = AuthenticatedIdeasRouteImport.update({
+  id: '/ideas',
+  path: '/ideas',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedHabitsRoute = AuthenticatedHabitsRouteImport.update({
+  id: '/habits',
+  path: '/habits',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedCalendarRoute = AuthenticatedCalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedIdeasIdeaIdRoute =
+  AuthenticatedIdeasIdeaIdRouteImport.update({
+    id: '/$ideaId',
+    path: '/$ideaId',
+    getParentRoute: () => AuthenticatedIdeasRoute,
+  } as any)
+const AuthenticatedAuthGoogleCallbackRoute =
+  AuthenticatedAuthGoogleCallbackRouteImport.update({
+    id: '/auth/google/callback',
+    path: '/auth/google/callback',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/calendar': typeof CalendarRoute
-  '/habits': typeof HabitsRoute
-  '/ideas': typeof IdeasRouteWithChildren
+  '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
-  '/settings': typeof SettingsRoute
-  '/tasks': typeof TasksRoute
-  '/ideas/$ideaId': typeof IdeasIdeaIdRoute
-  '/auth/google/callback': typeof AuthGoogleCallbackRoute
+  '/calendar': typeof AuthenticatedCalendarRoute
+  '/habits': typeof AuthenticatedHabitsRoute
+  '/ideas': typeof AuthenticatedIdeasRouteWithChildren
+  '/settings': typeof AuthenticatedSettingsRoute
+  '/tasks': typeof AuthenticatedTasksRoute
+  '/ideas/$ideaId': typeof AuthenticatedIdeasIdeaIdRoute
+  '/auth/google/callback': typeof AuthenticatedAuthGoogleCallbackRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/calendar': typeof CalendarRoute
-  '/habits': typeof HabitsRoute
-  '/ideas': typeof IdeasRouteWithChildren
   '/login': typeof LoginRoute
-  '/settings': typeof SettingsRoute
-  '/tasks': typeof TasksRoute
-  '/ideas/$ideaId': typeof IdeasIdeaIdRoute
-  '/auth/google/callback': typeof AuthGoogleCallbackRoute
+  '/calendar': typeof AuthenticatedCalendarRoute
+  '/habits': typeof AuthenticatedHabitsRoute
+  '/ideas': typeof AuthenticatedIdeasRouteWithChildren
+  '/settings': typeof AuthenticatedSettingsRoute
+  '/tasks': typeof AuthenticatedTasksRoute
+  '/': typeof AuthenticatedIndexRoute
+  '/ideas/$ideaId': typeof AuthenticatedIdeasIdeaIdRoute
+  '/auth/google/callback': typeof AuthenticatedAuthGoogleCallbackRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/calendar': typeof CalendarRoute
-  '/habits': typeof HabitsRoute
-  '/ideas': typeof IdeasRouteWithChildren
+  '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/login': typeof LoginRoute
-  '/settings': typeof SettingsRoute
-  '/tasks': typeof TasksRoute
-  '/ideas/$ideaId': typeof IdeasIdeaIdRoute
-  '/auth/google/callback': typeof AuthGoogleCallbackRoute
+  '/_authenticated/calendar': typeof AuthenticatedCalendarRoute
+  '/_authenticated/habits': typeof AuthenticatedHabitsRoute
+  '/_authenticated/ideas': typeof AuthenticatedIdeasRouteWithChildren
+  '/_authenticated/settings': typeof AuthenticatedSettingsRoute
+  '/_authenticated/tasks': typeof AuthenticatedTasksRoute
+  '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/ideas/$ideaId': typeof AuthenticatedIdeasIdeaIdRoute
+  '/_authenticated/auth/google/callback': typeof AuthenticatedAuthGoogleCallbackRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/login'
     | '/calendar'
     | '/habits'
     | '/ideas'
-    | '/login'
     | '/settings'
     | '/tasks'
     | '/ideas/$ideaId'
     | '/auth/google/callback'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
+    | '/login'
     | '/calendar'
     | '/habits'
     | '/ideas'
-    | '/login'
     | '/settings'
     | '/tasks'
+    | '/'
     | '/ideas/$ideaId'
     | '/auth/google/callback'
   id:
     | '__root__'
-    | '/'
-    | '/calendar'
-    | '/habits'
-    | '/ideas'
+    | '/_authenticated'
     | '/login'
-    | '/settings'
-    | '/tasks'
-    | '/ideas/$ideaId'
-    | '/auth/google/callback'
+    | '/_authenticated/calendar'
+    | '/_authenticated/habits'
+    | '/_authenticated/ideas'
+    | '/_authenticated/settings'
+    | '/_authenticated/tasks'
+    | '/_authenticated/'
+    | '/_authenticated/ideas/$ideaId'
+    | '/_authenticated/auth/google/callback'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  CalendarRoute: typeof CalendarRoute
-  HabitsRoute: typeof HabitsRoute
-  IdeasRoute: typeof IdeasRouteWithChildren
+  AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   LoginRoute: typeof LoginRoute
-  SettingsRoute: typeof SettingsRoute
-  TasksRoute: typeof TasksRoute
-  AuthGoogleCallbackRoute: typeof AuthGoogleCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/tasks': {
-      id: '/tasks'
-      path: '/tasks'
-      fullPath: '/tasks'
-      preLoaderRoute: typeof TasksRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -169,70 +158,110 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/ideas': {
-      id: '/ideas'
-      path: '/ideas'
-      fullPath: '/ideas'
-      preLoaderRoute: typeof IdeasRouteImport
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/habits': {
-      id: '/habits'
-      path: '/habits'
-      fullPath: '/habits'
-      preLoaderRoute: typeof HabitsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/calendar': {
-      id: '/calendar'
-      path: '/calendar'
-      fullPath: '/calendar'
-      preLoaderRoute: typeof CalendarRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/': {
-      id: '/'
+    '/_authenticated/': {
+      id: '/_authenticated/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/ideas/$ideaId': {
-      id: '/ideas/$ideaId'
+    '/_authenticated/tasks': {
+      id: '/_authenticated/tasks'
+      path: '/tasks'
+      fullPath: '/tasks'
+      preLoaderRoute: typeof AuthenticatedTasksRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/settings': {
+      id: '/_authenticated/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/ideas': {
+      id: '/_authenticated/ideas'
+      path: '/ideas'
+      fullPath: '/ideas'
+      preLoaderRoute: typeof AuthenticatedIdeasRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/habits': {
+      id: '/_authenticated/habits'
+      path: '/habits'
+      fullPath: '/habits'
+      preLoaderRoute: typeof AuthenticatedHabitsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/calendar': {
+      id: '/_authenticated/calendar'
+      path: '/calendar'
+      fullPath: '/calendar'
+      preLoaderRoute: typeof AuthenticatedCalendarRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/ideas/$ideaId': {
+      id: '/_authenticated/ideas/$ideaId'
       path: '/$ideaId'
       fullPath: '/ideas/$ideaId'
-      preLoaderRoute: typeof IdeasIdeaIdRouteImport
-      parentRoute: typeof IdeasRoute
+      preLoaderRoute: typeof AuthenticatedIdeasIdeaIdRouteImport
+      parentRoute: typeof AuthenticatedIdeasRoute
     }
-    '/auth/google/callback': {
-      id: '/auth/google/callback'
+    '/_authenticated/auth/google/callback': {
+      id: '/_authenticated/auth/google/callback'
       path: '/auth/google/callback'
       fullPath: '/auth/google/callback'
-      preLoaderRoute: typeof AuthGoogleCallbackRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedAuthGoogleCallbackRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
   }
 }
 
-interface IdeasRouteChildren {
-  IdeasIdeaIdRoute: typeof IdeasIdeaIdRoute
+interface AuthenticatedIdeasRouteChildren {
+  AuthenticatedIdeasIdeaIdRoute: typeof AuthenticatedIdeasIdeaIdRoute
 }
 
-const IdeasRouteChildren: IdeasRouteChildren = {
-  IdeasIdeaIdRoute: IdeasIdeaIdRoute,
+const AuthenticatedIdeasRouteChildren: AuthenticatedIdeasRouteChildren = {
+  AuthenticatedIdeasIdeaIdRoute: AuthenticatedIdeasIdeaIdRoute,
 }
 
-const IdeasRouteWithChildren = IdeasRoute._addFileChildren(IdeasRouteChildren)
+const AuthenticatedIdeasRouteWithChildren =
+  AuthenticatedIdeasRoute._addFileChildren(AuthenticatedIdeasRouteChildren)
+
+interface AuthenticatedRouteChildren {
+  AuthenticatedCalendarRoute: typeof AuthenticatedCalendarRoute
+  AuthenticatedHabitsRoute: typeof AuthenticatedHabitsRoute
+  AuthenticatedIdeasRoute: typeof AuthenticatedIdeasRouteWithChildren
+  AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
+  AuthenticatedTasksRoute: typeof AuthenticatedTasksRoute
+  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedAuthGoogleCallbackRoute: typeof AuthenticatedAuthGoogleCallbackRoute
+}
+
+const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedCalendarRoute: AuthenticatedCalendarRoute,
+  AuthenticatedHabitsRoute: AuthenticatedHabitsRoute,
+  AuthenticatedIdeasRoute: AuthenticatedIdeasRouteWithChildren,
+  AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
+  AuthenticatedTasksRoute: AuthenticatedTasksRoute,
+  AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedAuthGoogleCallbackRoute: AuthenticatedAuthGoogleCallbackRoute,
+}
+
+const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
+  AuthenticatedRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  CalendarRoute: CalendarRoute,
-  HabitsRoute: HabitsRoute,
-  IdeasRoute: IdeasRouteWithChildren,
+  AuthenticatedRoute: AuthenticatedRouteWithChildren,
   LoginRoute: LoginRoute,
-  SettingsRoute: SettingsRoute,
-  TasksRoute: TasksRoute,
-  AuthGoogleCallbackRoute: AuthGoogleCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

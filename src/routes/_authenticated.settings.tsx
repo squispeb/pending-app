@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, Link2, RefreshCw, Unplug } from 'lucide-react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import AuthControls from '../components/AuthControls'
 import {
   disconnectGoogleCalendar,
@@ -18,12 +18,7 @@ const settingsQueryOptions = () =>
     queryFn: () => getCalendarSettings(),
   })
 
-export const Route = createFileRoute('/settings')({
-  beforeLoad: async ({ context, location }) => {
-    if (context.auth.state !== 'authenticated') {
-      throw redirect({ to: '/login', search: { redirect: location.href } })
-    }
-  },
+export const Route = createFileRoute('/_authenticated/settings')({
   loader: ({ context }) => {
     return context.queryClient.ensureQueryData(settingsQueryOptions())
   },

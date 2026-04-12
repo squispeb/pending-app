@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { queryOptions, useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
+import { createFileRoute } from '@tanstack/react-router'
 import { Bell, CalendarDays, CheckSquare, Mic, Repeat, Settings2 } from 'lucide-react'
 import type { Habit, Task } from '../db/schema'
 import { getTaskTimingLabel, isTaskCompleted } from '../lib/tasks'
@@ -9,11 +9,11 @@ import type { ReminderItem } from '../lib/reminders'
 import { completeTask, reopenTask } from '../server/tasks'
 import { completeHabitForDate, uncompleteHabitForDate } from '../server/habits'
 import { getDashboardData } from '../server/dashboard'
-import { getCalendarEventsForDay, getCalendarView, syncGoogleCalendar } from '../server/calendar'
+import { syncGoogleCalendar } from '../server/calendar'
 import {
   deferReminder,
   dismissReminder,
-  markReminderDelivered,
+  markRemindersDelivered,
   snoozeReminder,
 } from '../server/reminders'
 import { useCaptureContext } from '../contexts/CaptureContext'
@@ -50,26 +50,7 @@ const dashboardQueryOptions = () =>
     queryFn: () => getDashboardData(),
   })
 
-const calendarDayQueryOptions = (dateStr: string) =>
-  queryOptions({
-    queryKey: ['calendar-day', dateStr],
-    queryFn: () => getCalendarEventsForDay({ data: { dateStr } }),
-    staleTime: 60_000,
-  })
-
-const calendarViewQueryOptions = () =>
-  queryOptions({
-    queryKey: ['calendar-view'],
-    queryFn: () => getCalendarView(),
-    staleTime: 60_000,
-  })
-
-export const Route = createFileRoute('/')({
-  beforeLoad: async ({ context, location }) => {
-    if (context.auth.state !== 'authenticated') {
-      throw redirect({ to: '/login', search: { redirect: location.href } })
-    }
-  },
+export const Route = createFileRoute('/_authenticated/')({
   loader: ({ context }) => {
     return context.queryClient.ensureQueryData(dashboardQueryOptions())
   },
@@ -82,9 +63,8 @@ function DashboardPage() {
   const { openCapture, openCaptureWithText } = useCaptureContext()
 
   const todayStr = data.today
-  const { data: calendarViewData } = useQuery(calendarViewQueryOptions())
-  const { data: calendarDayData } = useQuery(calendarDayQueryOptions(todayStr))
-  const todayMeetings = calendarDayData?.events ?? []
+  const calendarViewData = data.calendarView
+  const todayMeetings = data.todayMeetings
 
   const [quickEntryText, setQuickEntryText] = useState('')
   const [meetingNow, setMeetingNow] = useState(() => new Date(data.renderedAt))
@@ -256,9 +236,12 @@ function DashboardPage() {
       return
     }
 
-    reminders.forEach((item) => {
-      markReminderDelivered({ data: { id: item.id, channel: 'in-app' } }).catch(() => {})
-    })
+    void markRemindersDelivered({
+      data: {
+        ids: reminders.map((item) => item.id),
+        channel: 'in-app',
+      },
+    }).catch(() => {})
   // visibleReminderKey is a stable primitive derived from the IDs — fires exactly when the set changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleReminderKey])
@@ -274,12 +257,21 @@ function DashboardPage() {
     }
 
     const browserEligible = dueRemindersRef.current.filter((item) => !item.deliveredBrowserAt)
+    if (!browserEligible.length) {
+      return
+    }
+
     browserEligible.forEach((item) => {
       new Notification(item.title, {
         body: item.timingLabel,
       })
-      markReminderDelivered({ data: { id: item.id, channel: 'browser' } }).catch(() => {})
     })
+    void markRemindersDelivered({
+      data: {
+        ids: browserEligible.map((item) => item.id),
+        channel: 'browser',
+      },
+    }).catch(() => {})
   // dueReminderKey is a stable primitive derived from the IDs — fires exactly when the set changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dueReminderKey, notificationPermission])

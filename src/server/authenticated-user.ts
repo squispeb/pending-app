@@ -17,6 +17,8 @@ const authSessionResponseSchema = z.object({
   }),
 })
 
+export type AssistantAuthSession = z.infer<typeof authSessionResponseSchema>
+
 type ResolvedPlannerAuthUser = {
   id: string
   email: string
@@ -28,6 +30,7 @@ type ResolveAuthenticatedPlannerUserOptions = {
   fetchImpl?: typeof fetch
   baseUrl?: string
   setResponseHeaderImpl?: typeof setResponseHeader
+  session?: AssistantAuthSession | null
 }
 
 function getAssistantServiceUrl(baseUrl?: string) {
@@ -130,6 +133,29 @@ async function fetchAssistantAuthJson<T>(
   }
 }
 
+export async function resolveAssistantAuthSession(
+  requestHeaders?: HeadersInit,
+  options?: Pick<ResolveAuthenticatedPlannerUserOptions, 'fetchImpl' | 'baseUrl'>,
+) {
+  const resolvedRequestHeaders = requestHeaders ?? getRequestHeaders()
+  const authHeaders = ensureOriginHeaders(getForwardedAuthHeaders(resolvedRequestHeaders), resolvedRequestHeaders)
+
+  const sessionResult = await fetchAssistantAuthJson(
+    '/api/auth/get-session',
+    {
+      method: 'GET',
+      headers: authHeaders,
+    },
+    authSessionResponseSchema.nullable(),
+    options,
+  )
+
+  return {
+    authHeaders,
+    session: sessionResult.payload,
+  }
+}
+
 async function upsertPlannerUser(database: Database, authUser: ResolvedPlannerAuthUser) {
   const now = new Date()
   const existing = await database.query.users.findFirst({
@@ -172,19 +198,11 @@ export async function resolveAuthenticatedPlannerUser(
   options?: ResolveAuthenticatedPlannerUserOptions,
 ) {
   const requestHeaders = options?.requestHeaders ?? getRequestHeaders()
-  let authHeaders = ensureOriginHeaders(getForwardedAuthHeaders(requestHeaders), requestHeaders)
-
-  const sessionResult = await fetchAssistantAuthJson(
-    '/api/auth/get-session',
-    {
-      method: 'GET',
-      headers: authHeaders,
-    },
-    authSessionResponseSchema.nullable(),
-    options,
-  )
-
-  const session = sessionResult.payload
+  const authHeaders = ensureOriginHeaders(getForwardedAuthHeaders(requestHeaders), requestHeaders)
+  const session =
+    options && 'session' in options
+      ? options.session
+      : (await resolveAssistantAuthSession(requestHeaders, options)).session
 
   if (!session) {
     throw new Error('Authentication required')

@@ -7,7 +7,7 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from '@tanstack/react-query'
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import type { Task } from '../db/schema'
 import {
   applyTaskFilter,
@@ -41,12 +41,7 @@ const tasksQueryOptions = () =>
     queryFn: () => listTasks(),
   })
 
-export const Route = createFileRoute('/tasks')({
-  beforeLoad: async ({ context, location }) => {
-    if (context.auth.state !== 'authenticated') {
-      throw redirect({ to: '/login', search: { redirect: location.href } })
-    }
-  },
+export const Route = createFileRoute('/_authenticated/tasks')({
   loader: ({ context }) => {
     return context.queryClient.ensureQueryData(tasksQueryOptions())
   },

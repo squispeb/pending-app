@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
-import { completeGoogleConnect } from '../../../server/calendar'
+import { completeGoogleConnect } from '../server/calendar'
 
 const googleCallbackSearchSchema = z.object({
   code: z.string().optional(),
@@ -9,7 +9,7 @@ const googleCallbackSearchSchema = z.object({
   error: z.string().optional(),
 })
 
-export const Route = createFileRoute('/auth/google/callback')({
+export const Route = createFileRoute('/_authenticated/auth/google/callback')({
   validateSearch: (search) => googleCallbackSearchSchema.parse(search),
   loaderDeps: ({ search }) => search,
   loader: async ({ deps }) => {

@@ -84,6 +84,42 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
   `)
 
   await db.run(sql`
+    CREATE TABLE google_accounts (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL,
+      google_subject text NOT NULL,
+      email text NOT NULL,
+      scope text,
+      access_token text,
+      refresh_token text,
+      token_expiry_at integer,
+      connected_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      disconnected_at integer,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
+    CREATE TABLE sync_states (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL,
+      provider text NOT NULL,
+      scope_key text NOT NULL,
+      last_synced_at integer,
+      next_sync_token text,
+      sync_window_start integer,
+      sync_window_end integer,
+      last_status text,
+      last_error text,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
     CREATE TABLE reminder_events (
       id text PRIMARY KEY NOT NULL,
       user_id text NOT NULL,

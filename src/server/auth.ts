@@ -3,7 +3,7 @@ import { getRequestHeaders, setResponseHeader } from '@tanstack/start-server-cor
 import { z } from 'zod'
 import { db } from '../db/client'
 import { env } from '../lib/env'
-import { resolveAuthenticatedPlannerUser } from './authenticated-user'
+import { resolveAssistantAuthSession, resolveAuthenticatedPlannerUser } from './authenticated-user'
 
 const authStatusSchema = z.object({
   state: z.enum(['authenticated', 'anonymous', 'signed_out']),
@@ -94,13 +94,9 @@ const otpVerifySchema = z.object({
 
 export const getAuthStatus = createServerFn({ method: 'GET' }).handler(async () => {
   const requestHeaders = getAuthHeaders()
-  const sessionResponse = await fetch(`${getAssistantServiceUrl()}/api/auth/get-session`, {
-    method: 'GET',
-    headers: requestHeaders,
-  })
-  const payload = await parseAssistantResponse(sessionResponse)
+  const { session } = await resolveAssistantAuthSession(requestHeaders)
 
-  if (!payload) {
+  if (!session) {
     return authStatusSchema.parse({
       state: 'signed_out',
       user: null,
@@ -108,14 +104,7 @@ export const getAuthStatus = createServerFn({ method: 'GET' }).handler(async () 
   }
 
   if (
-    payload &&
-    typeof payload === 'object' &&
-    'user' in payload &&
-    payload.user &&
-    typeof payload.user === 'object' &&
-    'email' in payload.user &&
-    typeof payload.user.email === 'string' &&
-    payload.user.email.endsWith('@anon-user.com')
+    session.user.email.endsWith('@anon-user.com')
   ) {
     return authStatusSchema.parse({
       state: 'anonymous',
@@ -125,6 +114,7 @@ export const getAuthStatus = createServerFn({ method: 'GET' }).handler(async () 
 
   const { user } = await resolveAuthenticatedPlannerUser(db, {
     requestHeaders,
+    session,
   })
 
   return authStatusSchema.parse({

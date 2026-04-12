@@ -36,11 +36,11 @@ export const deferReminder = createServerFn({ method: 'POST' })
     return remindersService.deferReminder(data.id, user.id, data.minutes)
   })
 
-export const markReminderDelivered = createServerFn({ method: 'POST' })
-  .inputValidator((input: { id: string; channel: 'in-app' | 'browser' }) => input)
+export const markRemindersDelivered = createServerFn({ method: 'POST' })
+  .inputValidator((input: { ids: Array<string>; channel: 'in-app' | 'browser' }) => input)
   .handler(async ({ data }) => {
     const { user } = await resolveAuthenticatedPlannerUser(db)
-    return remindersService.markReminderDelivered(data.id, user.id, data.channel)
+    return remindersService.markRemindersDelivered(data.ids, user.id, data.channel)
   })
 
 export const completeReminder = createServerFn({ method: 'POST' })

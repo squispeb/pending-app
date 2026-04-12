@@ -6,7 +6,7 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from '@tanstack/react-query'
-import { Link, createFileRoute, redirect } from '@tanstack/react-router'
+import { Link, createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { getIdeaExcerpt, ideaFormSchema, isIdeaStarred, toIdeaFormValues, type IdeaFormValues } from '../lib/ideas'
 import { createIdea, listIdeas, toggleIdeaStar } from '../server/ideas'
@@ -17,12 +17,7 @@ const ideasQueryOptions = () =>
     queryFn: () => listIdeas(),
   })
 
-export const Route = createFileRoute('/ideas')({
-  beforeLoad: async ({ context, location }) => {
-    if (context.auth.state !== 'authenticated') {
-      throw redirect({ to: '/login', search: { redirect: location.href } })
-    }
-  },
+export const Route = createFileRoute('/_authenticated/ideas')({
   loader: ({ context }) => {
     return context.queryClient.ensureQueryData(ideasQueryOptions())
   },
