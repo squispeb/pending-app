@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { taskCreateSchema, taskPrioritySchema } from './tasks'
 import { habitCadenceSchema, habitCreateSchema, habitWeekdaySchema, type HabitWeekday } from './habits'
+import { ideaSourceTypeSchema } from './ideas'
 import {
   transcriptionDetectedLanguageSchema,
   transcribeAudioUploadInputSchema,
@@ -18,7 +19,7 @@ export const interpretCaptureInputSchema = z.object({
   languageHint: captureLanguageHintSchema.optional(),
 })
 
-export const candidateTypeSchema = z.enum(['task', 'habit'])
+export const candidateTypeSchema = z.enum(['task', 'habit', 'idea'])
 
 export const matchedCalendarContextSchema = z.object({
   calendarEventId: z.string().min(1),
@@ -142,6 +143,14 @@ export const confirmCapturedHabitInputSchema = z.object({
   habit: habitCreateSchema,
 })
 
+export const confirmCapturedIdeaInputSchema = z.object({
+  rawInput: z.string().trim().min(1).max(4000),
+  title: z.string().trim().min(1).max(160),
+  body: z.string().trim().max(10000).optional().or(z.literal('')).transform((value) => value || undefined),
+  sourceType: ideaSourceTypeSchema.default('typed_capture'),
+  sourceInput: z.string().trim().max(4000).optional().or(z.literal('')).transform((value) => value || undefined),
+})
+
 export const processVoiceCaptureInputSchema = transcribeAudioUploadInputSchema.extend({
   currentDate: captureDateSchema,
   timezone: z.string().trim().min(1).max(120),
@@ -156,6 +165,14 @@ export const processVoiceCaptureAutoSavedSchema = z.object({
   createdId: z.string().min(1),
   title: z.string().trim().min(1),
   matchedCalendarContext: matchedCalendarContextSchema.nullable(),
+})
+
+export const processVoiceCaptureIdeaConfirmationSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('idea_confirmation'),
+  transcript: z.string().trim().min(1),
+  language: transcriptionDetectedLanguageSchema,
+  draft: typedTaskDraftSchema,
 })
 
 export const processVoiceCaptureReviewSchema = z.object({
@@ -184,6 +201,7 @@ export const processVoiceCaptureFailureSchema = z.object({
 
 export const processVoiceCaptureResponseSchema = z.union([
   processVoiceCaptureAutoSavedSchema,
+  processVoiceCaptureIdeaConfirmationSchema,
   processVoiceCaptureReviewSchema,
   processVoiceCaptureClarifySchema,
   processVoiceCaptureFailureSchema,
@@ -198,9 +216,11 @@ export type InterpretCaptureSuccess = z.infer<typeof interpretCaptureSuccessSche
 export type InterpretCaptureFailure = z.infer<typeof interpretCaptureFailureSchema>
 export type ConfirmCapturedTaskInput = z.infer<typeof confirmCapturedTaskInputSchema>
 export type ConfirmCapturedHabitInput = z.infer<typeof confirmCapturedHabitInputSchema>
+export type ConfirmCapturedIdeaInput = z.infer<typeof confirmCapturedIdeaInputSchema>
 export type MatchedCalendarContext = z.infer<typeof matchedCalendarContextSchema>
 export type ProcessVoiceCaptureInput = z.infer<typeof processVoiceCaptureInputSchema>
 export type ProcessVoiceCaptureAutoSaved = z.infer<typeof processVoiceCaptureAutoSavedSchema>
+export type ProcessVoiceCaptureIdeaConfirmation = z.infer<typeof processVoiceCaptureIdeaConfirmationSchema>
 export type ProcessVoiceCaptureReview = z.infer<typeof processVoiceCaptureReviewSchema>
 export type ProcessVoiceCaptureClarify = z.infer<typeof processVoiceCaptureClarifySchema>
 export type ProcessVoiceCaptureFailure = z.infer<typeof processVoiceCaptureFailureSchema>

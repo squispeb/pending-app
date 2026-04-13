@@ -20,11 +20,13 @@ import {
 } from '../lib/tasks'
 import type { CandidateType, ProcessVoiceCaptureAutoSaved, TypedTaskDraft } from '../lib/capture'
 import {
+  confirmCapturedIdea as confirmCapturedIdeaFn,
   confirmCapturedHabit as confirmCapturedHabitFn,
   confirmCapturedTask as confirmCapturedTaskFn,
   interpretCaptureInput,
   processVoiceCapture,
 } from '../server/capture'
+import { ideaFormSchema, toIdeaFormValues, type IdeaFormValues } from '../lib/ideas'
 
 // ---------------------------------------------------------------------------
 // Route → context mapping
@@ -37,7 +39,8 @@ type RouteContext = {
 function routeContext(pathname: string): RouteContext {
   if (pathname === '/tasks') return { defaultType: 'task', allowed: ['task'] }
   if (pathname === '/habits') return { defaultType: 'habit', allowed: ['habit'] }
-  if (pathname === '/') return { defaultType: 'auto', allowed: ['task', 'habit'] }
+  if (pathname === '/ideas') return { defaultType: 'idea', allowed: ['idea'] }
+  if (pathname === '/') return { defaultType: 'auto', allowed: ['task', 'habit', 'idea'] }
   return { defaultType: 'task', allowed: ['task'] }
 }
 
@@ -48,6 +51,7 @@ type CaptureMode = 'closed' | 'recording' | 'transcribing' | 'interpreting' | 'i
 
 const EMPTY_TASK_FORM = toTaskFormValues(null)
 const EMPTY_HABIT_FORM = toHabitFormValues(null)
+const EMPTY_IDEA_FORM = toIdeaFormValues(null)
 
 const WEEKDAYS: Array<{ value: HabitWeekday; label: string }> = [
   { value: 'mon', label: 'Mon' },
@@ -114,6 +118,8 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   // Habit review form
   const [habitForm, setHabitForm] = useState<HabitFormValues>(EMPTY_HABIT_FORM)
   const [habitFieldErrors, setHabitFieldErrors] = useState<Partial<Record<keyof HabitFormValues, string>>>({})
+  const [ideaForm, setIdeaForm] = useState<IdeaFormValues>(EMPTY_IDEA_FORM)
+  const [ideaFieldErrors, setIdeaFieldErrors] = useState<Partial<Record<keyof IdeaFormValues, string>>>({})
 
   const [captureError, setCaptureError] = useState<string | null>(null)
   const [captureClarifyMessage, setCaptureClarifyMessage] = useState<string | null>(null)
@@ -250,6 +256,34 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     },
   })
 
+  const confirmIdeaMutation = useMutation({
+    mutationFn: async () => {
+      const parsed = ideaFormSchema.parse(ideaForm)
+      const rawInput = captureDraft?.rawInput ?? captureRawInput
+
+      return confirmCapturedIdeaFn({
+        data: {
+          title: parsed.title,
+          body: parsed.body,
+          rawInput,
+          sourceType: captureReviewBackMode === 'recording' ? 'voice_capture' : 'typed_capture',
+          sourceInput: rawInput,
+        },
+      })
+    },
+    onSuccess: async (createdIdea) => {
+      resetCapture()
+      await queryClient.invalidateQueries({ queryKey: ['ideas'] })
+      await navigate({
+        to: '/ideas/$ideaId',
+        params: { ideaId: createdIdea.id },
+      })
+    },
+    onError: (error) => {
+      setCaptureError(error instanceof Error ? error.message : 'Failed to save idea.')
+    },
+  })
+
   const voiceProcessMutation = useMutation({
     mutationFn: async (audioBlob: Blob) => {
       const audioFile = new File([audioBlob], 'recording.webm', { type: audioBlob.type || 'audio/webm' })
@@ -281,6 +315,12 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
 
       if (result.outcome === 'clarify') {
         applyClarifyState(result.message, result.questions, result.transcript, result.draft)
+        setTranscribeError(null)
+        return
+      }
+
+      if (result.outcome === 'idea_confirmation') {
+        applyDraftForReview(result.draft, result.transcript, 'recording')
         setTranscribeError(null)
         return
       }
@@ -369,6 +409,8 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setTaskFieldErrors({})
     setHabitForm(EMPTY_HABIT_FORM)
     setHabitFieldErrors({})
+    setIdeaForm(EMPTY_IDEA_FORM)
+    setIdeaFieldErrors({})
     setCaptureError(null)
     setCaptureClarifyMessage(null)
     setCaptureClarifyQuestions([])
@@ -420,6 +462,11 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setHabitForm((c) => ({ ...c, [key]: value }))
   }
 
+  function handleIdeaChange<K extends keyof IdeaFormValues>(key: K, value: IdeaFormValues[K]) {
+    setIdeaFieldErrors((current) => (current[key] ? { ...current, [key]: undefined } : current))
+    setIdeaForm((current) => ({ ...current, [key]: value }))
+  }
+
   function toggleWeekday(day: HabitWeekday) {
     setHabitForm((c) => {
       const days = c.cadenceDays ?? []
@@ -443,7 +490,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   function handleConfirm(event: React.FormEvent) {
     event.preventDefault()
     setCaptureError(null)
-    if (captureType === 'habit') {
+    if (captureType === 'idea') {
+      confirmIdeaMutation.mutate()
+    } else if (captureType === 'habit') {
       confirmHabitMutation.mutate()
     } else {
       confirmTaskMutation.mutate()
@@ -495,6 +544,14 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     if (resolvedType === 'habit') {
       setHabitForm(draftToHabitForm(draft))
       setHabitFieldErrors({})
+    } else if (resolvedType === 'idea') {
+      setIdeaForm({
+        title: draft.title ?? draft.rawInput,
+        body: draft.notes ?? draft.rawInput,
+        sourceType: 'manual',
+        sourceInput: draft.rawInput,
+      })
+      setIdeaFieldErrors({})
     } else {
       setTaskForm(draftToTaskForm(draft))
       setTaskFieldErrors({})
@@ -509,7 +566,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   }
 
   const isOpen = captureMode !== 'closed'
-  const isConfirming = confirmTaskMutation.isPending || confirmHabitMutation.isPending
+  const isConfirming = confirmTaskMutation.isPending || confirmHabitMutation.isPending || confirmIdeaMutation.isPending
   const isVoiceStep = captureMode === 'recording' || captureMode === 'transcribing' || captureMode === 'interpreting'
 
   // Sheet title
@@ -519,10 +576,14 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
       : captureMode === 'success'
         ? captureAutoSaved?.candidateType === 'habit'
           ? 'Habit saved'
+          : captureAutoSaved?.candidateType === 'idea'
+            ? 'Idea saved'
           : 'Task saved'
         : captureMode === 'review'
           ? captureType === 'habit'
             ? 'Review habit'
+            : captureType === 'idea'
+              ? 'Confirm idea'
             : 'Review task'
           : captureMode === 'clarify'
             ? 'Need a bit more detail'
@@ -531,7 +592,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   // Confirm button label
   const confirmLabel = isConfirming
     ? 'Saving…'
-    : captureType === 'habit'
+    : captureType === 'idea'
+      ? 'Create idea'
+      : captureType === 'habit'
       ? 'Create habit'
       : 'Create task'
 
@@ -724,7 +787,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                             ? 'Describe a habit'
                             : ctx.defaultType === 'task'
                               ? 'What do you need to do?'
-                              : 'What do you need?'}
+                              : ctx.defaultType === 'idea'
+                                ? 'Describe the idea'
+                                : 'What are you capturing?'}
                         </span>
                         <textarea
                           autoFocus
@@ -734,7 +799,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                           placeholder={
                             ctx.defaultType === 'habit'
                               ? 'Exercise every morning, meditate for 10 min'
-                              : 'Call the bank tomorrow morning, high priority'
+                              : ctx.defaultType === 'idea'
+                                ? 'An idea for improving onboarding, a product direction to explore, a creative concept'
+                                : 'Call the bank tomorrow morning, high priority, or I have an idea for a better onboarding flow'
                           }
                           className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
                         />
@@ -777,6 +844,14 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                                 setCaptureType(t)
                                 if (t === 'habit' && captureDraft) setHabitForm(draftToHabitForm(captureDraft))
                                 if (t === 'task' && captureDraft) setTaskForm(draftToTaskForm(captureDraft))
+                                if (t === 'idea' && captureDraft) {
+                                  setIdeaForm({
+                                    title: captureDraft.title ?? captureDraft.rawInput,
+                                    body: captureDraft.notes ?? captureDraft.rawInput,
+                                    sourceType: 'manual',
+                                    sourceInput: captureDraft.rawInput,
+                                  })
+                                }
                               }}
                               className={
                                 captureType === t
@@ -784,7 +859,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                                   : 'secondary-pill inline-flex cursor-pointer items-center border-0 !py-1.5 !px-3.5 text-sm font-semibold'
                               }
                             >
-                              {t === 'task' ? 'Task' : 'Habit'}
+                              {t === 'task' ? 'Task' : t === 'habit' ? 'Habit' : 'Idea'}
                             </button>
                           ))}
                         </div>
@@ -1041,6 +1116,54 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                         </>
                       ) : null}
 
+                      {captureType === 'idea' ? (
+                        <>
+                          <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+                            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                              Idea confirmation
+                            </span>
+                            <p className="m-0 text-sm leading-6 text-[var(--ink-soft)]">
+                              Keep the original transcript, shape a clear title, and capture enough context so the idea can continue in its assistant thread after confirmation.
+                            </p>
+                          </div>
+
+                          <label className="block">
+                            <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Title</span>
+                            <input
+                              autoFocus
+                              value={ideaForm.title}
+                              onChange={(e) => handleIdeaChange('title', e.target.value)}
+                              placeholder="Name the idea"
+                              className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                            />
+                            {ideaFieldErrors.title ? (
+                              <span className="mt-2 block text-sm font-medium text-red-500">{ideaFieldErrors.title}</span>
+                            ) : null}
+                          </label>
+
+                          <label className="block">
+                            <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Notes</span>
+                            <textarea
+                              value={ideaForm.body ?? ''}
+                              onChange={(e) => handleIdeaChange('body', e.target.value)}
+                              rows={5}
+                              placeholder="Capture the shape of the idea, why it matters, or what should be explored next."
+                              className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                            />
+                            {ideaFieldErrors.body ? (
+                              <span className="mt-2 block text-sm font-medium text-red-500">{ideaFieldErrors.body}</span>
+                            ) : null}
+                          </label>
+
+                          <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+                            <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                              Source transcript
+                            </span>
+                            <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureDraft?.rawInput ?? captureRawInput}</p>
+                          </div>
+                        </>
+                      ) : null}
+
                       {captureError ? (
                         <p className="m-0 text-sm font-medium text-red-500">{captureError}</p>
                       ) : null}
@@ -1183,7 +1306,11 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                           <CheckCircle size={32} className="text-green-500" />
                         </div>
                         <p className="m-0 text-center text-base font-semibold text-[var(--ink-strong)]">
-                          {captureAutoSaved.candidateType === 'habit' ? 'Habit saved' : 'Task saved'}
+                          {captureAutoSaved.candidateType === 'habit'
+                            ? 'Habit saved'
+                            : captureAutoSaved.candidateType === 'idea'
+                              ? 'Idea saved'
+                              : 'Task saved'}
                         </p>
                         <p className="m-0 text-center text-sm text-[var(--ink-soft)]">
                           {captureAutoSaved.title}
@@ -1225,7 +1352,17 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                         <button
                           type="button"
                           onClick={() => {
-                            void navigate({ to: captureAutoSaved.candidateType === 'habit' ? '/habits' : '/tasks' })
+                            void navigate({
+                              to:
+                                captureAutoSaved.candidateType === 'habit'
+                                  ? '/habits'
+                                  : captureAutoSaved.candidateType === 'idea'
+                                    ? '/ideas/$ideaId'
+                                    : '/tasks',
+                              ...(captureAutoSaved.candidateType === 'idea'
+                                ? { params: { ideaId: captureAutoSaved.createdId } }
+                                : {}),
+                            })
                             resetCapture()
                           }}
                           className="primary-pill cursor-pointer border-0 text-sm font-semibold"

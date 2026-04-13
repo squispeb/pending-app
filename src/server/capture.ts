@@ -1,6 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { db } from '../db/client'
 import {
+  confirmCapturedIdeaInputSchema,
   confirmCapturedHabitInputSchema,
   confirmCapturedTaskInputSchema,
   interpretCaptureInputSchema,
@@ -8,8 +9,13 @@ import {
 } from '../lib/capture'
 import { resolveAuthenticatedPlannerUser } from './authenticated-user'
 import { createCaptureService } from './capture-service'
+import { createAssistantThreadService } from './assistant-thread-service'
+import { createIdeaAndBootstrapThread } from './ideas'
+import { createTranscriptionBroker } from './transcription'
 
 const captureService = createCaptureService(db)
+const assistantThreadService = createAssistantThreadService(db)
+const transcriptionBroker = createTranscriptionBroker()
 
 export const interpretCaptureInput = createServerFn({ method: 'POST' })
   .inputValidator((input) => interpretCaptureInputSchema.parse(input))
@@ -21,8 +27,16 @@ export const interpretCaptureInput = createServerFn({ method: 'POST' })
 export const processVoiceCapture = createServerFn({ method: 'POST' })
   .inputValidator((input) => parseProcessVoiceCaptureFormData(input))
   .handler(async ({ data }) => {
+    const { user } = await resolveAuthenticatedPlannerUser(db)
     const { createVoiceCaptureProcessor } = await import('./voice-capture-processor')
-    const voiceCaptureProcessor = createVoiceCaptureProcessor()
+    const voiceCaptureProcessor = createVoiceCaptureProcessor({
+      transcriptionBroker,
+      captureService: {
+        interpretTypedTaskInput: (input) => captureService.interpretTypedTaskInput(user.id, input),
+        confirmCapturedTask: (input) => captureService.confirmCapturedTask(user.id, input),
+        confirmCapturedHabit: (input) => captureService.confirmCapturedHabit(user.id, input),
+      },
+    })
     return voiceCaptureProcessor.processVoiceCapture(data)
   })
 
@@ -38,4 +52,17 @@ export const confirmCapturedHabit = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const { user } = await resolveAuthenticatedPlannerUser(db)
     return captureService.confirmCapturedHabit(user.id, data)
+  })
+
+export const confirmCapturedIdea = createServerFn({ method: 'POST' })
+  .inputValidator((input) => confirmCapturedIdeaInputSchema.parse(input))
+  .handler(async ({ data }) => {
+    return createIdeaAndBootstrapThread(data, {
+      resolveUser: async () => resolveAuthenticatedPlannerUser(db),
+      createIdea: (userId, input) => captureService.confirmCapturedIdea(userId, input),
+      bootstrapIdeaThread: (ideaId, options) =>
+        assistantThreadService.bootstrapIdeaThread(ideaId, {
+          requestHeaders: options.requestHeaders,
+        }),
+    })
   })

@@ -291,6 +291,78 @@ describe('voice capture processor', () => {
     })
   })
 
+  it('routes high-confidence idea captures into idea confirmation instead of task auto-save', async () => {
+    const processor = createVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'I have an idea for a better onboarding flow.',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput(input) {
+          return {
+            ok: true as const,
+            draft: {
+              rawInput: input.rawInput,
+              normalizedInput: input.rawInput,
+              candidateType: 'idea' as const,
+              title: 'Better onboarding flow',
+              notes: 'Explore a more guided setup for new users.',
+              dueDate: null,
+              dueTime: null,
+              priority: null,
+              estimatedMinutes: null,
+              cadenceType: null,
+              cadenceDays: [],
+              targetCount: null,
+              matchedCalendarContext: null,
+              preferredStartTime: null,
+              preferredEndTime: null,
+              interpretationNotes: [],
+            },
+          }
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture(sampleUpload)
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'idea_confirmation',
+      transcript: 'I have an idea for a better onboarding flow.',
+      language: 'en',
+      draft: {
+        rawInput: 'I have an idea for a better onboarding flow.',
+        normalizedInput: 'I have an idea for a better onboarding flow.',
+        candidateType: 'idea',
+        title: 'Better onboarding flow',
+        notes: 'Explore a more guided setup for new users.',
+        dueDate: null,
+        dueTime: null,
+        priority: null,
+        estimatedMinutes: null,
+        cadenceType: null,
+        cadenceDays: [],
+        targetCount: null,
+        matchedCalendarContext: null,
+        preferredStartTime: null,
+        preferredEndTime: null,
+        interpretationNotes: [],
+      },
+    })
+  })
+
   it('returns transcription failures directly', async () => {
     const processor = createVoiceCaptureProcessor({
       transcriptionBroker: {

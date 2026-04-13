@@ -3,10 +3,12 @@ import type { Database } from '../db/client'
 import { calendarConnections, calendarEvents } from '../db/schema'
 import {
   buildHeuristicTaskDraft,
+  confirmCapturedIdeaInputSchema,
   confirmCapturedHabitInputSchema,
   confirmCapturedTaskInputSchema,
   interpretCaptureInputSchema,
   mergeTypedTaskDrafts,
+  type ConfirmCapturedIdeaInput,
   type ConfirmCapturedHabitInput,
   type ConfirmCapturedTaskInput,
   type InterpretCaptureFailure,
@@ -16,6 +18,7 @@ import {
 import type { CaptureInterpreter } from './capture-interpreter'
 import { CaptureInterpreterError, createRemoteCaptureInterpreter } from './capture-interpreter'
 import { createHabitsService } from './habits-service'
+import { createIdeasService } from './ideas-service'
 import { replacePlanningItemCalendarLink } from './planning-item-calendar-links'
 import { createTasksService } from './tasks-service'
 
@@ -88,6 +91,7 @@ export function createCaptureService(
 ) {
   const tasksService = createTasksService(database)
   const habitsService = createHabitsService(database)
+  const ideasService = createIdeasService(database)
 
   async function findRelevantCalendarContext(
     userId: string,
@@ -261,6 +265,16 @@ export function createCaptureService(
       })
 
       return result
+    },
+    async confirmCapturedIdea(userId: string, input: ConfirmCapturedIdeaInput) {
+      const parsed = confirmCapturedIdeaInputSchema.parse(input)
+
+      return ideasService.createIdea(userId, {
+        title: parsed.title,
+        body: parsed.body,
+        sourceType: parsed.sourceType,
+        sourceInput: parsed.sourceInput ?? parsed.rawInput,
+      })
     },
   }
 }

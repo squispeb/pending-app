@@ -48,6 +48,48 @@ describe('ideas server flow', () => {
     })
   })
 
+  it('supports voice-capture metadata when bootstrapping an idea from the capture flow', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({
+      user: { id: 'user-1' },
+      authHeaders: { cookie: 'better-auth.session_token=session-1' },
+    })
+    const createIdea = vi.fn().mockResolvedValue({
+      ok: true as const,
+      id: 'idea-voice-1',
+    })
+    const bootstrapIdeaThread = vi.fn().mockResolvedValue({
+      threadId: 'thread-user-1:idea-voice-1',
+      initialSnapshotId: 'snapshot-voice-1',
+    })
+
+    const result = await createIdeaAndBootstrapThread(
+      {
+        title: 'Voice idea',
+        body: 'Preserve the transcript and continue refining in the thread.',
+        sourceType: 'voice_capture',
+        sourceInput: 'I have an idea for a better capture flow.',
+      },
+      {
+        resolveUser,
+        createIdea,
+        bootstrapIdeaThread,
+      },
+    )
+
+    expect(createIdea).toHaveBeenCalledWith('user-1', {
+      title: 'Voice idea',
+      body: 'Preserve the transcript and continue refining in the thread.',
+      sourceType: 'voice_capture',
+      sourceInput: 'I have an idea for a better capture flow.',
+    })
+    expect(result).toEqual({
+      ok: true,
+      id: 'idea-voice-1',
+      threadId: 'thread-user-1:idea-voice-1',
+      initialSnapshotId: 'snapshot-voice-1',
+    })
+  })
+
   it('approves a proposal and persists the canonical write payload through the app boundary', async () => {
     const resolveUser = vi.fn().mockResolvedValue({
       user: { id: 'user-1' },

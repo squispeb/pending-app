@@ -11,19 +11,33 @@ import {
 import { createCaptureService } from './capture-service'
 import { createTranscriptionBroker } from './transcription'
 
-const captureService = createCaptureService(db)
 const transcriptionBroker = createTranscriptionBroker()
+
+type VoiceCaptureService = {
+  interpretTypedTaskInput: Pick<ReturnType<typeof createCaptureService>, 'interpretTypedTaskInput'>['interpretTypedTaskInput'] extends (
+    userId: string,
+    input: infer T,
+  ) => Promise<infer R>
+    ? (input: T) => Promise<R>
+    : never
+  confirmCapturedTask: Pick<ReturnType<typeof createCaptureService>, 'confirmCapturedTask'>['confirmCapturedTask'] extends (
+    userId: string,
+    input: infer T,
+  ) => Promise<infer R>
+    ? (input: T) => Promise<R>
+    : never
+  confirmCapturedHabit: Pick<ReturnType<typeof createCaptureService>, 'confirmCapturedHabit'>['confirmCapturedHabit'] extends (
+    userId: string,
+    input: infer T,
+  ) => Promise<infer R>
+    ? (input: T) => Promise<R>
+    : never
+}
 
 export function createVoiceCaptureProcessor(
   dependencies: {
     transcriptionBroker: Pick<ReturnType<typeof createTranscriptionBroker>, 'transcribeAudioUpload'>
-    captureService: Pick<
-      ReturnType<typeof createCaptureService>,
-      'interpretTypedTaskInput' | 'confirmCapturedTask' | 'confirmCapturedHabit'
-    >
-  } = {
-    transcriptionBroker,
-    captureService,
+    captureService: VoiceCaptureService
   },
 ) {
   return {
@@ -57,6 +71,16 @@ export function createVoiceCaptureProcessor(
 
       if (confidence === 'high') {
         const draftTitle = interpretation.draft.title ?? transcription.transcript
+
+        if (interpretation.draft.candidateType === 'idea') {
+          return {
+            ok: true,
+            outcome: 'idea_confirmation',
+            transcript: transcription.transcript,
+            language: transcription.language,
+            draft: interpretation.draft,
+          }
+        }
 
         if (interpretation.draft.candidateType === 'habit') {
           const created = await dependencies.captureService.confirmCapturedHabit({

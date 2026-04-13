@@ -479,4 +479,62 @@ describe('capture service', () => {
     expect(links).toHaveLength(1)
     expect(links[0]?.sourceType).toBe('habit')
   })
+
+  it('creates an idea through the ideas service on confirmation', async () => {
+    const service = createCaptureService(db, null)
+    await db.run(sql`
+      CREATE TABLE ideas (
+        id text PRIMARY KEY NOT NULL,
+        user_id text NOT NULL,
+        title text NOT NULL,
+        body text DEFAULT '' NOT NULL,
+        source_type text DEFAULT 'manual' NOT NULL,
+        source_input text,
+        classification_confidence real,
+        capture_language text,
+        thread_summary text,
+        status text DEFAULT 'active' NOT NULL,
+        starred_at integer,
+        archived_at integer,
+        created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+        updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+      );
+    `)
+
+    await db.run(sql`
+      INSERT OR IGNORE INTO users (
+        id,
+        email,
+        timezone,
+        created_at,
+        updated_at
+      ) VALUES (
+        'user-1',
+        'me@example.com',
+        'UTC',
+        (unixepoch() * 1000),
+        (unixepoch() * 1000)
+      );
+    `)
+
+    const result = await service.confirmCapturedIdea(userId, {
+      rawInput: 'I have an idea for improving the microphone-first capture flow.',
+      title: 'Improve microphone-first capture flow',
+      body: 'Route idea candidates into a dedicated review flow before confirmation.',
+      sourceType: 'voice_capture',
+      sourceInput: 'I have an idea for improving the microphone-first capture flow.',
+    })
+
+    expect(result.ok).toBe(true)
+
+    const ideas = await db.query.ideas.findMany()
+    expect(ideas).toHaveLength(1)
+    expect(ideas[0]).toMatchObject({
+      title: 'Improve microphone-first capture flow',
+      body: 'Route idea candidates into a dedicated review flow before confirmation.',
+      sourceType: 'voice_capture',
+      sourceInput: 'I have an idea for improving the microphone-first capture flow.',
+    })
+  })
 })

@@ -66,7 +66,7 @@ const CAPTURE_DRAFT_JSON_SCHEMA = {
     properties: {
       candidateType: {
         type: 'string',
-        enum: ['task', 'habit'],
+        enum: ['task', 'habit', 'idea'],
       },
       title: {
         type: ['string', 'null'],
@@ -156,7 +156,7 @@ const CAPTURE_DRAFT_JSON_SCHEMA = {
 export const CAPTURE_INTERPRETATION_SYSTEM_PROMPT = [
   'You are a task-draft extraction engine for Pending App.',
   'Return only a JSON object with these keys: candidateType, title, notes, dueDate, dueTime, priority, estimatedMinutes, cadenceType, cadenceDays, targetCount, matchedCalendarContext, preferredStartTime, preferredEndTime, interpretationNotes.',
-  'candidateType must be either task or habit.',
+  'candidateType must be one of task, habit, or idea.',
   'Support Spanish and English input.',
   'Be conservative. Use null instead of guessing.',
   'You may use the supplied calendarContext candidates to enrich the draft when they are clearly relevant.',
@@ -164,7 +164,9 @@ export const CAPTURE_INTERPRETATION_SYSTEM_PROMPT = [
   'If no calendar context is clearly relevant, matchedCalendarContext must be null.',
   'Use habit when the input clearly describes a recurring routine or cadence.',
   'Use task when the input clearly describes a one-off obligation.',
+  'Use idea when the input is exploratory, strategic, creative, partially formed, or better suited to refinement than immediate execution.',
   'If it is unclear whether the user means a one-off task or a recurring habit, keep the most likely candidateType but add an interpretation note that the task-vs-habit intent is unclear.',
+  'If the input is better represented as an idea than a task or habit, choose idea even when some execution language is present.',
   'If cadence is not explicit, keep cadenceType null and cadenceDays empty.',
   'If a title is uncertain, return null and add a note in interpretationNotes.',
   'If a date is ambiguous, return null unless the user text clearly supports a date; add an ambiguity note.',
@@ -173,6 +175,7 @@ export const CAPTURE_INTERPRETATION_SYSTEM_PROMPT = [
   'Calendar context must never override explicit user-provided details silently.',
   'For task outputs, return cadenceType null, cadenceDays empty, and targetCount null.',
   'For habit outputs, set targetCount only when a meaningful daily count is explicit; otherwise use 1.',
+  'For idea outputs, keep dueDate, dueTime, priority, estimatedMinutes, cadenceType, cadenceDays, targetCount, preferredStartTime, and preferredEndTime null or empty; use title and notes to preserve the idea candidate.',
   'Do not include markdown, code fences, prose, or extra keys.',
 ].join(' ')
 
