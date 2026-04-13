@@ -17,6 +17,7 @@ import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedIdeasRouteImport } from './routes/_authenticated.ideas'
 import { Route as AuthenticatedHabitsRouteImport } from './routes/_authenticated.habits'
 import { Route as AuthenticatedCalendarRouteImport } from './routes/_authenticated.calendar'
+import { Route as AuthenticatedIdeasIndexRouteImport } from './routes/_authenticated.ideas.index'
 import { Route as AuthenticatedIdeasIdeaIdRouteImport } from './routes/_authenticated.ideas.$ideaId'
 import { Route as AuthenticatedAuthGoogleCallbackRouteImport } from './routes/_authenticated.auth.google.callback'
 
@@ -59,6 +60,11 @@ const AuthenticatedCalendarRoute = AuthenticatedCalendarRouteImport.update({
   path: '/calendar',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedIdeasIndexRoute = AuthenticatedIdeasIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AuthenticatedIdeasRoute,
+} as any)
 const AuthenticatedIdeasIdeaIdRoute =
   AuthenticatedIdeasIdeaIdRouteImport.update({
     id: '/$ideaId',
@@ -81,17 +87,18 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AuthenticatedSettingsRoute
   '/tasks': typeof AuthenticatedTasksRoute
   '/ideas/$ideaId': typeof AuthenticatedIdeasIdeaIdRoute
+  '/ideas/': typeof AuthenticatedIdeasIndexRoute
   '/auth/google/callback': typeof AuthenticatedAuthGoogleCallbackRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/calendar': typeof AuthenticatedCalendarRoute
   '/habits': typeof AuthenticatedHabitsRoute
-  '/ideas': typeof AuthenticatedIdeasRouteWithChildren
   '/settings': typeof AuthenticatedSettingsRoute
   '/tasks': typeof AuthenticatedTasksRoute
   '/': typeof AuthenticatedIndexRoute
   '/ideas/$ideaId': typeof AuthenticatedIdeasIdeaIdRoute
+  '/ideas': typeof AuthenticatedIdeasIndexRoute
   '/auth/google/callback': typeof AuthenticatedAuthGoogleCallbackRoute
 }
 export interface FileRoutesById {
@@ -105,6 +112,7 @@ export interface FileRoutesById {
   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/ideas/$ideaId': typeof AuthenticatedIdeasIdeaIdRoute
+  '/_authenticated/ideas/': typeof AuthenticatedIdeasIndexRoute
   '/_authenticated/auth/google/callback': typeof AuthenticatedAuthGoogleCallbackRoute
 }
 export interface FileRouteTypes {
@@ -118,17 +126,18 @@ export interface FileRouteTypes {
     | '/settings'
     | '/tasks'
     | '/ideas/$ideaId'
+    | '/ideas/'
     | '/auth/google/callback'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
     | '/calendar'
     | '/habits'
-    | '/ideas'
     | '/settings'
     | '/tasks'
     | '/'
     | '/ideas/$ideaId'
+    | '/ideas'
     | '/auth/google/callback'
   id:
     | '__root__'
@@ -141,6 +150,7 @@ export interface FileRouteTypes {
     | '/_authenticated/tasks'
     | '/_authenticated/'
     | '/_authenticated/ideas/$ideaId'
+    | '/_authenticated/ideas/'
     | '/_authenticated/auth/google/callback'
   fileRoutesById: FileRoutesById
 }
@@ -207,6 +217,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCalendarRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/ideas/': {
+      id: '/_authenticated/ideas/'
+      path: '/'
+      fullPath: '/ideas/'
+      preLoaderRoute: typeof AuthenticatedIdeasIndexRouteImport
+      parentRoute: typeof AuthenticatedIdeasRoute
+    }
     '/_authenticated/ideas/$ideaId': {
       id: '/_authenticated/ideas/$ideaId'
       path: '/$ideaId'
@@ -226,10 +243,12 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedIdeasRouteChildren {
   AuthenticatedIdeasIdeaIdRoute: typeof AuthenticatedIdeasIdeaIdRoute
+  AuthenticatedIdeasIndexRoute: typeof AuthenticatedIdeasIndexRoute
 }
 
 const AuthenticatedIdeasRouteChildren: AuthenticatedIdeasRouteChildren = {
   AuthenticatedIdeasIdeaIdRoute: AuthenticatedIdeasIdeaIdRoute,
+  AuthenticatedIdeasIndexRoute: AuthenticatedIdeasIndexRoute,
 }
 
 const AuthenticatedIdeasRouteWithChildren =
