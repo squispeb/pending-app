@@ -240,6 +240,75 @@ describe('assistant service client', () => {
     expect(init?.method).toBe('POST')
   })
 
+  it('submits a discovery turn through the thread contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        thread: {
+          threadId: 'thread-local-user:idea-123',
+          ideaId: 'idea-123',
+          userId: 'local-user',
+          stage: 'discovery',
+          status: 'idle',
+          visibleEvents: [
+            {
+              eventId: 'event-1',
+              type: 'thread_created',
+              createdAt: '2026-04-12T00:00:00.000Z',
+              summary: 'Idea discovery thread created and ready for context building.',
+              visibleToUser: true,
+            },
+            {
+              eventId: 'event-2',
+              type: 'user_turn_added',
+              createdAt: '2026-04-12T00:01:00.000Z',
+              summary: 'Reduce onboarding drop-off for first-time users.',
+              visibleToUser: true,
+            },
+            {
+              eventId: 'event-3',
+              type: 'assistant_synthesis',
+              createdAt: '2026-04-12T00:01:01.000Z',
+              summary: 'Captured purpose: Reduce onboarding drop-off for first-time users.',
+              visibleToUser: true,
+            },
+            {
+              eventId: 'event-4',
+              type: 'assistant_question',
+              createdAt: '2026-04-12T00:01:02.000Z',
+              summary: 'Who is the main user or audience for this idea?',
+              visibleToUser: true,
+            },
+          ],
+          workingIdea: {
+            provisionalTitle: 'Idea title',
+            currentSummary: 'Purpose: Reduce onboarding drop-off for first-time users.',
+            purpose: 'Reduce onboarding drop-off for first-time users.',
+            scope: null,
+            targetUsers: [],
+            expectedImpact: null,
+            researchAreas: [],
+            constraints: [],
+            openQuestions: [],
+          },
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const { submitIdeaDiscoveryTurn } = await import('./assistant-service-client')
+    const result = await submitIdeaDiscoveryTurn({
+      ideaId: 'idea-123',
+      authHeaders: { cookie: 'better-auth.session_token=test-session' },
+      message: 'Reduce onboarding drop-off for first-time users.',
+    }, { fetchImpl: fetchMock as unknown as typeof fetch })
+
+    expect(result.thread.workingIdea.purpose).toBe('Reduce onboarding drop-off for first-time users.')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/turns')
+    expect(init?.method).toBe('POST')
+    expect(init?.body).toBe(JSON.stringify({ message: 'Reduce onboarding drop-off for first-time users.' }))
+  })
+
   it('approves a proposal through the approval contract', async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({

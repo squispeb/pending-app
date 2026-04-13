@@ -52,6 +52,11 @@ const elaborateIdeaResponseSchema = z.object({
   }),
 })
 
+const submitDiscoveryTurnResponseSchema = z.object({
+  ok: z.literal(true),
+  thread: ideaThreadViewSchema,
+})
+
 const approveIdeaResponseSchema = z.object({
   ok: z.literal(true),
   outcome: z.literal('approved'),
@@ -168,6 +173,33 @@ export async function requestIdeaThreadElaboration(
   const payload = await parseAssistantResponse(response)
 
   return elaborateIdeaResponseSchema.parse(payload)
+}
+
+export async function submitIdeaDiscoveryTurn(
+  input: {
+    ideaId: string
+    authHeaders: HeadersInit
+    message: string
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+
+  if (!baseUrl) {
+    throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  }
+
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/turns`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ message: input.message }),
+  })
+  const payload = await parseAssistantResponse(response)
+
+  return submitDiscoveryTurnResponseSchema.parse(payload)
 }
 
 export async function approveIdeaThreadProposal(

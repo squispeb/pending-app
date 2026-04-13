@@ -139,6 +139,14 @@ export const getIdeaThread = createServerFn({ method: 'GET' })
     return assistantThreadService.getIdeaThread(data.id)
   })
 
+export const submitIdeaThreadTurn = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string; message: string }) => input)
+  .handler(async ({ data }) => {
+    return assistantThreadService.submitIdeaDiscoveryTurn(data.id, {
+      message: data.message,
+    })
+  })
+
 export const elaborateIdea = createServerFn({ method: 'POST' })
   .inputValidator((input: { id: string; actionInput: string | null }) => input)
   .handler(async ({ data }) => {

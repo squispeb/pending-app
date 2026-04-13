@@ -1,9 +1,10 @@
-import { Compass, Lightbulb, Quote, Star } from 'lucide-react'
+import { Compass, Lightbulb, Quote, SendHorizonal, Star } from 'lucide-react'
+import { useState } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
 import { IdeaThreadHistory } from '../components/idea-thread-history'
 import { getIdeaExcerpt, isIdeaStarred } from '../lib/ideas'
-import { getIdea, getIdeaThread, toggleIdeaStar } from '../server/ideas'
+import { getIdea, getIdeaThread, submitIdeaThreadTurn, toggleIdeaStar } from '../server/ideas'
 
 const ideaDetailQueryOptions = (ideaId: string) =>
   queryOptions({
@@ -32,10 +33,26 @@ function IdeaDetailPage() {
   const queryClient = useQueryClient()
   const { data: idea } = useSuspenseQuery(ideaDetailQueryOptions(ideaId))
   const { data: thread } = useSuspenseQuery(ideaThreadQueryOptions(ideaId))
+  const [discoveryMessage, setDiscoveryMessage] = useState('')
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null)
 
   if (!idea) {
     throw notFound()
   }
+
+  const latestAssistantQuestion = [...thread.visibleEvents]
+    .reverse()
+    .find((event) => event.type === 'assistant_question')?.summary ?? null
+
+  const missingDiscoveryAreas = [
+    !thread.workingIdea.purpose ? 'purpose' : null,
+    thread.workingIdea.targetUsers.length === 0 ? 'users' : null,
+    !thread.workingIdea.expectedImpact ? 'impact' : null,
+    !thread.workingIdea.scope ? 'scope' : null,
+    thread.workingIdea.researchAreas.length === 0 ? 'research' : null,
+    thread.workingIdea.constraints.length === 0 ? 'constraints' : null,
+    thread.workingIdea.openQuestions.length === 0 ? 'open questions' : null,
+  ].filter((value): value is string => value !== null)
 
   const toggleStarMutation = useMutation({
     mutationFn: async () => toggleIdeaStar({ data: { id: idea.id } }),
@@ -46,6 +63,30 @@ function IdeaDetailPage() {
       ])
     },
   })
+
+  const submitTurnMutation = useMutation({
+    mutationFn: async (message: string) => submitIdeaThreadTurn({ data: { id: ideaId, message } }),
+    onSuccess: async () => {
+      setDiscoveryMessage('')
+      setDiscoveryError(null)
+      await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
+    },
+    onError: (error) => {
+      setDiscoveryError(error instanceof Error ? error.message : 'Failed to submit discovery turn.')
+    },
+  })
+
+  function handleDiscoverySubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const message = discoveryMessage.trim()
+
+    if (!message) {
+      return
+    }
+
+    setDiscoveryError(null)
+    submitTurnMutation.mutate(message)
+  }
 
   return (
     <main className="page-wrap pb-28 pt-8 lg:pb-16">
@@ -119,6 +160,52 @@ function IdeaDetailPage() {
                       : 'The idea has enough context for later structured actions and conversions if needed.'}
                 </p>
               </div>
+
+              <div className="mt-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+                <div className="text-sm font-medium text-[var(--ink-strong)]">
+                  {latestAssistantQuestion ? 'Latest assistant question' : 'Next discovery focus'}
+                </div>
+                <p className="mt-2 m-0 text-sm leading-6 text-[var(--ink-soft)]">
+                  {latestAssistantQuestion
+                    ? latestAssistantQuestion
+                    : missingDiscoveryAreas.length > 0
+                      ? `The biggest gaps right now are ${missingDiscoveryAreas.join(', ')}.`
+                      : 'The working idea has enough context for a stronger framing pass.'}
+                </p>
+              </div>
+
+              <form className="mt-4 space-y-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4" onSubmit={handleDiscoverySubmit}>
+                <label className="block text-sm font-medium text-[var(--ink-soft)]">
+                  Add context to the thread
+                  <textarea
+                    value={discoveryMessage}
+                    onChange={(event) => setDiscoveryMessage(event.target.value)}
+                    placeholder={latestAssistantQuestion ?? 'Describe the purpose, users, impact, scope, research needs, constraints, or open questions for this idea.'}
+                    rows={4}
+                    className="mt-2 w-full rounded-2xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3 text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                  />
+                </label>
+
+                {discoveryError ? (
+                  <p className="m-0 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">
+                    {discoveryError}
+                  </p>
+                ) : null}
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="m-0 text-sm text-[var(--ink-soft)]">
+                    Reply in your own words. Each turn updates the working idea and the next assistant question.
+                  </p>
+                  <button
+                    type="submit"
+                    disabled={submitTurnMutation.isPending || discoveryMessage.trim().length === 0}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] px-4 py-3 font-semibold text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    <SendHorizonal size={16} />
+                    {submitTurnMutation.isPending ? 'Sending...' : 'Send reply'}
+                  </button>
+                </div>
+              </form>
             </section>
 
             <IdeaThreadHistory visibleEvents={thread.visibleEvents} />

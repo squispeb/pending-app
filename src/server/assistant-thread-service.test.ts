@@ -522,6 +522,88 @@ describe('assistant thread service', () => {
     expect(init?.method).toBe('POST')
   })
 
+  it('submits a discovery turn for the authenticated idea owner', async () => {
+    await db.insert(schema.users).values({
+      id: 'user-1',
+      email: 'user-1@example.com',
+      displayName: 'User One',
+      timezone: 'UTC',
+    })
+    await db.insert(schema.ideas).values({
+      id: 'idea-123',
+      userId: 'user-1',
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'manual',
+    })
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          session: { id: 'session-1', userId: 'user-1' },
+          user: { id: 'user-1', email: 'user-1@example.com', name: 'User One' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          ok: true,
+          thread: {
+            threadId: 'thread-user-1:idea-123',
+            ideaId: 'idea-123',
+            userId: 'user-1',
+            stage: 'discovery',
+            status: 'idle',
+            visibleEvents: [
+              {
+                eventId: 'event-1',
+                type: 'thread_created',
+                createdAt: '2026-04-12T00:00:00.000Z',
+                summary: 'Idea discovery thread created and ready for context building.',
+                visibleToUser: true,
+              },
+              {
+                eventId: 'event-2',
+                type: 'user_turn_added',
+                createdAt: '2026-04-12T00:00:30.000Z',
+                summary: 'Reduce onboarding drop-off for first-time users.',
+                visibleToUser: true,
+              },
+            ],
+            workingIdea: {
+              provisionalTitle: 'Owned idea',
+              currentSummary: 'Purpose: Reduce onboarding drop-off for first-time users.',
+              purpose: 'Reduce onboarding drop-off for first-time users.',
+              scope: null,
+              targetUsers: [],
+              expectedImpact: null,
+              researchAreas: [],
+              constraints: [],
+              openQuestions: [],
+            },
+          },
+        }),
+      )
+
+    const service = createAssistantThreadService(db)
+    const result = await service.submitIdeaDiscoveryTurn(
+      'idea-123',
+      {
+        message: 'Reduce onboarding drop-off for first-time users.',
+      },
+      {
+        requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+        fetchImpl: fetchMock as unknown as typeof fetch,
+        assistantServiceBaseUrl: 'https://assistant.example',
+      },
+    )
+
+    expect(result.thread.workingIdea.purpose).toBe('Reduce onboarding drop-off for first-time users.')
+    const [url, init] = fetchMock.mock.calls[1] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/turns')
+    expect(init?.method).toBe('POST')
+  })
+
   it('approves a proposal through the authenticated assistant thread boundary', async () => {
     await db.insert(schema.users).values({
       id: 'user-1',
