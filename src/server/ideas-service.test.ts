@@ -249,4 +249,95 @@ describe('ideas service', () => {
 
     await expect(service.getIdeaThreadRef(created.id, secondaryUserId)).resolves.toBeUndefined()
   })
+
+  it('applies an approved proposal as the next accepted canonical snapshot', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Original idea',
+      body: 'Original body',
+      sourceType: 'typed_capture',
+      sourceInput: 'Original source input',
+    })
+
+    await service.createInitialSnapshotAndThreadRef(
+      {
+        ideaId: created.id,
+        threadId: 'thread-user-1:idea-123',
+      },
+      primaryUserId,
+    )
+
+    const result = await service.applyApprovedProposal(
+      {
+        ideaId: created.id,
+        expectedSnapshotVersion: 1,
+        title: 'Expanded idea',
+        body: 'Expanded body',
+        threadSummary: 'Expanded summary',
+      },
+      primaryUserId,
+    )
+
+    const detail = await service.getIdea(created.id, primaryUserId)
+    const snapshots = await db.query.ideaSnapshots.findMany({
+      where: eq(schema.ideaSnapshots.ideaId, created.id),
+      orderBy: [schema.ideaSnapshots.version],
+    })
+
+    expect(result.version).toBe(2)
+    expect(detail).toMatchObject({
+      title: 'Expanded idea',
+      body: 'Expanded body',
+      threadSummary: 'Expanded summary',
+    })
+    expect(snapshots).toHaveLength(2)
+    expect(snapshots[1]).toMatchObject({
+      ideaId: created.id,
+      version: 2,
+      title: 'Expanded idea',
+      body: 'Expanded body',
+      threadSummary: 'Expanded summary',
+      sourceInput: 'Original source input',
+    })
+  })
+
+  it('rejects approved proposal writes when the snapshot version is stale', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Original idea',
+      body: 'Original body',
+      sourceType: 'typed_capture',
+      sourceInput: 'Original source input',
+    })
+
+    await service.createInitialSnapshotAndThreadRef(
+      {
+        ideaId: created.id,
+        threadId: 'thread-user-1:idea-123',
+      },
+      primaryUserId,
+    )
+
+    await service.applyApprovedProposal(
+      {
+        ideaId: created.id,
+        expectedSnapshotVersion: 1,
+        title: 'Expanded idea',
+        body: 'Expanded body',
+        threadSummary: 'Expanded summary',
+      },
+      primaryUserId,
+    )
+
+    await expect(
+      service.applyApprovedProposal(
+        {
+          ideaId: created.id,
+          expectedSnapshotVersion: 1,
+          title: 'Stale idea',
+          body: 'Stale body',
+          threadSummary: 'Stale summary',
+        },
+        primaryUserId,
+      ),
+    ).rejects.toThrow('Idea snapshot conflict')
+  })
 })

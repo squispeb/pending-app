@@ -23,6 +23,7 @@ describe('assistant service client', () => {
               visibleToUser: true,
             },
           ],
+          pendingProposal: null,
         }),
         {
           status: 200,
@@ -57,6 +58,7 @@ describe('assistant service client', () => {
           visibleToUser: true,
         },
       ],
+      pendingProposal: null,
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -105,6 +107,7 @@ describe('assistant service client', () => {
               visibleToUser: true,
             },
           ],
+          pendingProposal: null,
         }),
         {
           status: 200,
@@ -147,5 +150,125 @@ describe('assistant service client', () => {
         { fetchImpl: fetchMock as unknown as typeof fetch },
       ),
     ).rejects.toThrow('Failed to read thread state')
+  })
+
+  it('requests an elaborate proposal through the action contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        outcome: 'proposal_created',
+        thread: {
+          threadId: 'thread-local-user:idea-123',
+          ideaId: 'idea-123',
+          userId: 'local-user',
+          status: 'awaiting_approval',
+          visibleEvents: [],
+          pendingProposal: {
+            proposalId: 'proposal-1',
+            actionType: 'elaborate',
+            basedOnSnapshotVersion: 1,
+            proposedTitle: 'Idea title',
+            proposedBody: 'Expanded body',
+            proposedSummary: 'Expanded summary',
+            explanation: 'Generated a richer version of the idea.',
+            createdAt: '2026-04-12T00:01:00.000Z',
+          },
+        },
+        proposal: {
+          proposalId: 'proposal-1',
+          actionType: 'elaborate',
+          basedOnSnapshotVersion: 1,
+          proposedTitle: 'Idea title',
+          proposedBody: 'Expanded body',
+          proposedSummary: 'Expanded summary',
+          explanation: 'Generated a richer version of the idea.',
+          createdAt: '2026-04-12T00:01:00.000Z',
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const { requestIdeaThreadElaboration } = await import('./assistant-service-client')
+    const result = await requestIdeaThreadElaboration({
+      ideaId: 'idea-123',
+      authHeaders: { cookie: 'better-auth.session_token=test-session' },
+      actionInput: null,
+      currentSnapshotVersion: 1,
+      currentTitle: 'Idea title',
+      currentBody: 'Idea body',
+      currentSummary: null,
+    }, { fetchImpl: fetchMock as unknown as typeof fetch })
+
+    expect(result.outcome).toBe('proposal_created')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/elaborate')
+    expect(init?.method).toBe('POST')
+  })
+
+  it('approves a proposal through the approval contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        outcome: 'approved',
+        thread: {
+          threadId: 'thread-local-user:idea-123',
+          ideaId: 'idea-123',
+          userId: 'local-user',
+          status: 'ready',
+          visibleEvents: [],
+          pendingProposal: null,
+        },
+        canonicalWritePayload: {
+          ideaId: 'idea-123',
+          expectedSnapshotVersion: 1,
+          title: 'Idea title',
+          body: 'Expanded body',
+          threadSummary: 'Expanded summary',
+        },
+        threadEventId: 'event-2',
+      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const { approveIdeaThreadProposal } = await import('./assistant-service-client')
+    const result = await approveIdeaThreadProposal({
+      ideaId: 'idea-123',
+      authHeaders: { cookie: 'better-auth.session_token=test-session' },
+      proposalId: 'proposal-1',
+      expectedSnapshotVersion: 1,
+    }, { fetchImpl: fetchMock as unknown as typeof fetch })
+
+    expect(result.outcome).toBe('approved')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/approve')
+    expect(init?.method).toBe('POST')
+  })
+
+  it('rejects a proposal through the rejection contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        outcome: 'rejected',
+        thread: {
+          threadId: 'thread-local-user:idea-123',
+          ideaId: 'idea-123',
+          userId: 'local-user',
+          status: 'ready',
+          visibleEvents: [],
+          pendingProposal: null,
+        },
+        threadEventId: 'event-2',
+      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const { rejectIdeaThreadProposal } = await import('./assistant-service-client')
+    const result = await rejectIdeaThreadProposal({
+      ideaId: 'idea-123',
+      authHeaders: { cookie: 'better-auth.session_token=test-session' },
+      proposalId: 'proposal-1',
+    }, { fetchImpl: fetchMock as unknown as typeof fetch })
+
+    expect(result.outcome).toBe('rejected')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/reject')
+    expect(init?.method).toBe('POST')
   })
 })

@@ -1,5 +1,11 @@
 import type { Database } from '../db/client'
-import { getAssistantIdeaThread, resolveAssistantIdeaThread } from './assistant-service-client'
+import {
+  approveIdeaThreadProposal,
+  getAssistantIdeaThread,
+  rejectIdeaThreadProposal,
+  requestIdeaThreadElaboration,
+  resolveAssistantIdeaThread,
+} from './assistant-service-client'
 import { resolveAuthenticatedPlannerUser } from './authenticated-user'
 import { createIdeasService } from './ideas-service'
 
@@ -99,6 +105,101 @@ export function createAssistantThreadService(database: Database) {
         {
           ideaId,
           authHeaders,
+        },
+        {
+          fetchImpl: options?.fetchImpl,
+          baseUrl: options?.assistantServiceBaseUrl,
+        },
+      )
+    },
+    async requestIdeaThreadElaboration(
+      ideaId: string,
+      input: {
+        actionInput: string | null
+        currentSnapshotVersion: number
+        currentTitle: string
+        currentBody: string
+        currentSummary: string | null
+      },
+      options?: ResolveIdeaThreadOptions,
+    ) {
+      const { user, authHeaders } = await resolveAuthenticatedPlannerUser(database, {
+        requestHeaders: options?.requestHeaders,
+        fetchImpl: options?.fetchImpl,
+        baseUrl: options?.assistantServiceBaseUrl,
+      })
+      const idea = await ideasService.getIdea(ideaId, user.id)
+
+      if (!idea) {
+        throw new Error('Idea not found')
+      }
+
+      return requestIdeaThreadElaboration(
+        {
+          ideaId,
+          authHeaders,
+          ...input,
+        },
+        {
+          fetchImpl: options?.fetchImpl,
+          baseUrl: options?.assistantServiceBaseUrl,
+        },
+      )
+    },
+    async approveIdeaThreadProposal(
+      ideaId: string,
+      input: {
+        proposalId: string
+        expectedSnapshotVersion: number
+      },
+      options?: ResolveIdeaThreadOptions,
+    ) {
+      const { user, authHeaders } = await resolveAuthenticatedPlannerUser(database, {
+        requestHeaders: options?.requestHeaders,
+        fetchImpl: options?.fetchImpl,
+        baseUrl: options?.assistantServiceBaseUrl,
+      })
+      const idea = await ideasService.getIdea(ideaId, user.id)
+
+      if (!idea) {
+        throw new Error('Idea not found')
+      }
+
+      return approveIdeaThreadProposal(
+        {
+          ideaId,
+          authHeaders,
+          ...input,
+        },
+        {
+          fetchImpl: options?.fetchImpl,
+          baseUrl: options?.assistantServiceBaseUrl,
+        },
+      )
+    },
+    async rejectIdeaThreadProposal(
+      ideaId: string,
+      input: {
+        proposalId: string
+      },
+      options?: ResolveIdeaThreadOptions,
+    ) {
+      const { user, authHeaders } = await resolveAuthenticatedPlannerUser(database, {
+        requestHeaders: options?.requestHeaders,
+        fetchImpl: options?.fetchImpl,
+        baseUrl: options?.assistantServiceBaseUrl,
+      })
+      const idea = await ideasService.getIdea(ideaId, user.id)
+
+      if (!idea) {
+        throw new Error('Idea not found')
+      }
+
+      return rejectIdeaThreadProposal(
+        {
+          ideaId,
+          authHeaders,
+          ...input,
         },
         {
           fetchImpl: options?.fetchImpl,

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createIdeaAndBootstrapThread } from './ideas'
+import { approveIdeaProposalAndPersist, createIdeaAndBootstrapThread } from './ideas'
 
 describe('ideas server flow', () => {
   it('creates the canonical idea and bootstraps the assistant thread in one app-side path', async () => {
@@ -45,6 +45,67 @@ describe('ideas server flow', () => {
       id: 'idea-123',
       threadId: 'thread-user-1:idea-123',
       initialSnapshotId: 'snapshot-1',
+    })
+  })
+
+  it('approves a proposal and persists the canonical write payload through the app boundary', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({
+      user: { id: 'user-1' },
+    })
+    const approveIdeaThreadProposal = vi.fn().mockResolvedValue({
+      thread: {
+        threadId: 'thread-user-1:idea-123',
+        ideaId: 'idea-123',
+        userId: 'user-1',
+        status: 'ready',
+        visibleEvents: [],
+        pendingProposal: null,
+      },
+      canonicalWritePayload: {
+        ideaId: 'idea-123',
+        expectedSnapshotVersion: 1,
+        title: 'Expanded idea',
+        body: 'Expanded body',
+        threadSummary: 'Expanded summary',
+      },
+    })
+    const applyApprovedProposal = vi.fn().mockResolvedValue({ snapshotId: 'snapshot-2', version: 2 })
+
+    const result = await approveIdeaProposalAndPersist(
+      {
+        ideaId: 'idea-123',
+        proposalId: 'proposal-1',
+        expectedSnapshotVersion: 1,
+      },
+      {
+        resolveUser,
+        approveIdeaThreadProposal,
+        applyApprovedProposal,
+      },
+    )
+
+    expect(resolveUser).toHaveBeenCalledTimes(1)
+    expect(approveIdeaThreadProposal).toHaveBeenCalledWith('idea-123', {
+      proposalId: 'proposal-1',
+      expectedSnapshotVersion: 1,
+    })
+    expect(applyApprovedProposal).toHaveBeenCalledWith(
+      {
+        ideaId: 'idea-123',
+        expectedSnapshotVersion: 1,
+        title: 'Expanded idea',
+        body: 'Expanded body',
+        threadSummary: 'Expanded summary',
+      },
+      'user-1',
+    )
+    expect(result).toEqual({
+      threadId: 'thread-user-1:idea-123',
+      ideaId: 'idea-123',
+      userId: 'user-1',
+      status: 'ready',
+      visibleEvents: [],
+      pendingProposal: null,
     })
   })
 })

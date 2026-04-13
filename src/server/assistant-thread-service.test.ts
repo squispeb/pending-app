@@ -139,6 +139,7 @@ describe('assistant thread service', () => {
               visibleToUser: true,
             },
           ],
+          pendingProposal: null,
         }),
       )
 
@@ -163,6 +164,7 @@ describe('assistant thread service', () => {
           visibleToUser: true,
         },
       ],
+      pendingProposal: null,
     })
     expect(fetchMock).toHaveBeenCalledTimes(2)
     const [, assistantRequest] = fetchMock.mock.calls[1] ?? []
@@ -251,6 +253,7 @@ describe('assistant thread service', () => {
               visibleToUser: true,
             },
           ],
+          pendingProposal: null,
         }),
       )
 
@@ -374,6 +377,7 @@ describe('assistant thread service', () => {
               visibleToUser: true,
             },
           ],
+          pendingProposal: null,
         }),
       )
 
@@ -389,5 +393,209 @@ describe('assistant thread service', () => {
     const [url, init] = fetchMock.mock.calls[1] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123')
     expect(init?.method).toBe('GET')
+  })
+
+  it('requests an elaborate proposal for the authenticated idea owner', async () => {
+    await db.insert(schema.users).values({
+      id: 'user-1',
+      email: 'user-1@example.com',
+      displayName: 'User One',
+      timezone: 'UTC',
+    })
+    await db.insert(schema.ideas).values({
+      id: 'idea-123',
+      userId: 'user-1',
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'manual',
+    })
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          session: { id: 'session-1', userId: 'user-1' },
+          user: { id: 'user-1', email: 'user-1@example.com', name: 'User One' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          ok: true,
+          outcome: 'proposal_created',
+          thread: {
+            threadId: 'thread-user-1:idea-123',
+            ideaId: 'idea-123',
+            userId: 'user-1',
+            status: 'awaiting_approval',
+            visibleEvents: [],
+            pendingProposal: {
+              proposalId: 'proposal-1',
+              actionType: 'elaborate',
+              basedOnSnapshotVersion: 1,
+              proposedTitle: 'Owned idea',
+              proposedBody: 'Expanded body',
+              proposedSummary: 'Expanded summary',
+              explanation: 'Generated a richer version of the idea.',
+              createdAt: '2026-04-12T00:01:00.000Z',
+            },
+          },
+          proposal: {
+            proposalId: 'proposal-1',
+            actionType: 'elaborate',
+            basedOnSnapshotVersion: 1,
+            proposedTitle: 'Owned idea',
+            proposedBody: 'Expanded body',
+            proposedSummary: 'Expanded summary',
+            explanation: 'Generated a richer version of the idea.',
+            createdAt: '2026-04-12T00:01:00.000Z',
+          },
+        }),
+      )
+
+    const service = createAssistantThreadService(db)
+    const result = await service.requestIdeaThreadElaboration(
+      'idea-123',
+      {
+        actionInput: null,
+        currentSnapshotVersion: 1,
+        currentTitle: 'Owned idea',
+        currentBody: 'Private idea body',
+        currentSummary: null,
+      },
+      {
+        requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+        fetchImpl: fetchMock as unknown as typeof fetch,
+        assistantServiceBaseUrl: 'https://assistant.example',
+      },
+    )
+
+    expect(result.outcome).toBe('proposal_created')
+    const [url, init] = fetchMock.mock.calls[1] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/elaborate')
+    expect(init?.method).toBe('POST')
+  })
+
+  it('approves a proposal through the authenticated assistant thread boundary', async () => {
+    await db.insert(schema.users).values({
+      id: 'user-1',
+      email: 'user-1@example.com',
+      displayName: 'User One',
+      timezone: 'UTC',
+    })
+    await db.insert(schema.ideas).values({
+      id: 'idea-123',
+      userId: 'user-1',
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'manual',
+    })
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          session: { id: 'session-1', userId: 'user-1' },
+          user: { id: 'user-1', email: 'user-1@example.com', name: 'User One' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          ok: true,
+          outcome: 'approved',
+          thread: {
+            threadId: 'thread-user-1:idea-123',
+            ideaId: 'idea-123',
+            userId: 'user-1',
+            status: 'ready',
+            visibleEvents: [],
+            pendingProposal: null,
+          },
+          canonicalWritePayload: {
+            ideaId: 'idea-123',
+            expectedSnapshotVersion: 1,
+            title: 'Owned idea',
+            body: 'Expanded body',
+            threadSummary: 'Expanded summary',
+          },
+          threadEventId: 'event-2',
+        }),
+      )
+
+    const service = createAssistantThreadService(db)
+    const result = await service.approveIdeaThreadProposal(
+      'idea-123',
+      {
+        proposalId: 'proposal-1',
+        expectedSnapshotVersion: 1,
+      },
+      {
+        requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+        fetchImpl: fetchMock as unknown as typeof fetch,
+        assistantServiceBaseUrl: 'https://assistant.example',
+      },
+    )
+
+    expect(result.outcome).toBe('approved')
+    const [url, init] = fetchMock.mock.calls[1] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/approve')
+    expect(init?.method).toBe('POST')
+  })
+
+  it('rejects a proposal through the authenticated assistant thread boundary', async () => {
+    await db.insert(schema.users).values({
+      id: 'user-1',
+      email: 'user-1@example.com',
+      displayName: 'User One',
+      timezone: 'UTC',
+    })
+    await db.insert(schema.ideas).values({
+      id: 'idea-123',
+      userId: 'user-1',
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'manual',
+    })
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          session: { id: 'session-1', userId: 'user-1' },
+          user: { id: 'user-1', email: 'user-1@example.com', name: 'User One' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          ok: true,
+          outcome: 'rejected',
+          thread: {
+            threadId: 'thread-user-1:idea-123',
+            ideaId: 'idea-123',
+            userId: 'user-1',
+            status: 'ready',
+            visibleEvents: [],
+            pendingProposal: null,
+          },
+          threadEventId: 'event-2',
+        }),
+      )
+
+    const service = createAssistantThreadService(db)
+    const result = await service.rejectIdeaThreadProposal(
+      'idea-123',
+      {
+        proposalId: 'proposal-1',
+      },
+      {
+        requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+        fetchImpl: fetchMock as unknown as typeof fetch,
+        assistantServiceBaseUrl: 'https://assistant.example',
+      },
+    )
+
+    expect(result.outcome).toBe('rejected')
+    const [url, init] = fetchMock.mock.calls[1] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/reject')
+    expect(init?.method).toBe('POST')
   })
 })

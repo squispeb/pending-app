@@ -96,6 +96,83 @@ export function createIdeasService(database: Database) {
         where: eq(ideaThreadRefs.ideaId, ideaId),
       })
     },
+    async getLatestIdeaSnapshot(ideaId: string, userId: string) {
+      const idea = await database.query.ideas.findFirst({
+        where: and(eq(ideas.id, ideaId), eq(ideas.userId, userId), isNull(ideas.archivedAt)),
+      })
+
+      if (!idea) {
+        return undefined
+      }
+
+      const snapshots = await database.query.ideaSnapshots.findMany({
+        where: eq(ideaSnapshots.ideaId, ideaId),
+        orderBy: [desc(ideaSnapshots.version)],
+        limit: 1,
+      })
+
+      return snapshots[0]
+    },
+    async applyApprovedProposal(
+      input: {
+        ideaId: string
+        expectedSnapshotVersion: number
+        title: string
+        body: string
+        threadSummary: string | null
+      },
+      userId: string,
+    ) {
+      const idea = await database.query.ideas.findFirst({
+        where: and(eq(ideas.id, input.ideaId), eq(ideas.userId, userId), isNull(ideas.archivedAt)),
+      })
+
+      if (!idea) {
+        throw new Error('Idea not found')
+      }
+
+      const latestSnapshot = await this.getLatestIdeaSnapshot(input.ideaId, userId)
+
+      if (!latestSnapshot) {
+        throw new Error('Accepted snapshot not found')
+      }
+
+      if (latestSnapshot.version !== input.expectedSnapshotVersion) {
+        throw new Error('Idea snapshot conflict')
+      }
+
+      const now = new Date()
+      const nextVersion = latestSnapshot.version + 1
+      const snapshotId = crypto.randomUUID()
+
+      await database.insert(ideaSnapshots).values({
+        id: snapshotId,
+        ideaId: idea.id,
+        version: nextVersion,
+        title: input.title,
+        body: input.body,
+        sourceType: idea.sourceType,
+        sourceInput: idea.sourceInput,
+        threadSummary: input.threadSummary,
+        createdAt: now,
+        updatedAt: now,
+      })
+
+      await database
+        .update(ideas)
+        .set({
+          title: input.title,
+          body: input.body,
+          threadSummary: input.threadSummary,
+          updatedAt: now,
+        })
+        .where(and(eq(ideas.id, idea.id), eq(ideas.userId, userId), isNull(ideas.archivedAt)))
+
+      return {
+        snapshotId,
+        version: nextVersion,
+      }
+    },
     async toggleIdeaStar(id: string, userId: string) {
       const existing = await database.query.ideas.findFirst({
         where: and(eq(ideas.id, id), eq(ideas.userId, userId), isNull(ideas.archivedAt)),

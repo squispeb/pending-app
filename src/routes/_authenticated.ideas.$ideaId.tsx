@@ -1,9 +1,9 @@
-import { Lightbulb, Quote, Star } from 'lucide-react'
+import { Lightbulb, Quote, Sparkles, Star } from 'lucide-react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
 import { IdeaThreadHistory } from '../components/idea-thread-history'
 import { getIdeaExcerpt, isIdeaStarred } from '../lib/ideas'
-import { getIdea, getIdeaThread, toggleIdeaStar } from '../server/ideas'
+import { approveIdeaProposal, elaborateIdea, getIdea, getIdeaThread, rejectIdeaProposal, toggleIdeaStar } from '../server/ideas'
 
 const ideaDetailQueryOptions = (ideaId: string) =>
   queryOptions({
@@ -44,6 +44,41 @@ function IdeaDetailPage() {
         queryClient.invalidateQueries({ queryKey: ['ideas'] }),
         queryClient.invalidateQueries({ queryKey: ['ideas', ideaId] }),
       ])
+    },
+  })
+
+  const invalidateIdeaThread = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['ideas'] }),
+      queryClient.invalidateQueries({ queryKey: ['ideas', ideaId] }),
+      queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] }),
+    ])
+
+  const elaborateMutation = useMutation({
+    mutationFn: async () => elaborateIdea({ data: { id: ideaId, actionInput: null } }),
+    onSuccess: async () => {
+      await invalidateIdeaThread()
+    },
+  })
+
+  const approveMutation = useMutation({
+    mutationFn: async (proposalId: string) =>
+      approveIdeaProposal({
+        data: {
+          id: ideaId,
+          proposalId,
+          expectedSnapshotVersion: thread.pendingProposal?.basedOnSnapshotVersion ?? 1,
+        },
+      }),
+    onSuccess: async () => {
+      await invalidateIdeaThread()
+    },
+  })
+
+  const rejectMutation = useMutation({
+    mutationFn: async (proposalId: string) => rejectIdeaProposal({ data: { id: ideaId, proposalId } }),
+    onSuccess: async () => {
+      await invalidateIdeaThread()
     },
   })
 
@@ -94,6 +129,81 @@ function IdeaDetailPage() {
                 )}
               </div>
             </article>
+
+            <section className="rounded-[28px] border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
+                    <Sparkles size={14} />
+                    Refinement
+                  </div>
+                  <h2 className="mt-3 text-lg font-semibold text-[var(--ink-strong)]">Elaborate this idea</h2>
+                  <p className="mt-2 text-sm text-[var(--ink-soft)]">
+                    Ask the assistant to expand this idea into a clearer opportunity without changing the accepted idea until you approve it.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => elaborateMutation.mutate()}
+                  disabled={elaborateMutation.isPending || thread.status === 'awaiting_approval'}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] px-4 py-3 font-semibold text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  <Sparkles size={16} />
+                  {elaborateMutation.isPending ? 'Generating proposal...' : 'Elaborate idea'}
+                </button>
+              </div>
+
+              {thread.pendingProposal ? (
+                <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/70 p-5 dark:border-amber-500/30 dark:bg-amber-500/10">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-[var(--ink-strong)]">Pending proposal</div>
+                      <p className="mt-1 text-sm text-[var(--ink-soft)]">{thread.pendingProposal.explanation}</p>
+                    </div>
+                    <div className="text-xs text-[var(--ink-faint)]">Based on snapshot v{thread.pendingProposal.basedOnSnapshotVersion}</div>
+                  </div>
+
+                  <div className="mt-4 space-y-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Proposed title</div>
+                      <div className="mt-2 text-sm font-medium text-[var(--ink-strong)]">{thread.pendingProposal.proposedTitle ?? idea.title}</div>
+                    </div>
+
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Proposed summary</div>
+                      <p className="mt-2 m-0 text-sm leading-6 text-[var(--ink-soft)]">{thread.pendingProposal.proposedSummary ?? 'No summary change proposed.'}</p>
+                    </div>
+
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Proposed body</div>
+                      <p className="mt-2 m-0 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-soft)]">
+                        {thread.pendingProposal.proposedBody ?? 'No body change proposed.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => approveMutation.mutate(thread.pendingProposal!.proposalId)}
+                      disabled={approveMutation.isPending || rejectMutation.isPending}
+                      className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {approveMutation.isPending ? 'Applying...' : 'Approve proposal'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => rejectMutation.mutate(thread.pendingProposal!.proposalId)}
+                      disabled={approveMutation.isPending || rejectMutation.isPending}
+                      className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm font-semibold text-[var(--ink-strong)] transition hover:bg-[var(--panel)] disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {rejectMutation.isPending ? 'Rejecting...' : 'Reject proposal'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </section>
 
             <IdeaThreadHistory visibleEvents={thread.visibleEvents} />
           </div>

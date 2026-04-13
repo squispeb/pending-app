@@ -28,6 +28,38 @@ type CreateIdeaAndThreadDependencies = {
   }>
 }
 
+type ApproveIdeaProposalDependencies = {
+  resolveUser: () => Promise<{
+    user: { id: string }
+  }>
+  approveIdeaThreadProposal: (
+    ideaId: string,
+    input: {
+      proposalId: string
+      expectedSnapshotVersion: number
+    },
+  ) => Promise<{
+    thread: unknown
+    canonicalWritePayload: {
+      ideaId: string
+      expectedSnapshotVersion: number
+      title: string
+      body: string
+      threadSummary: string | null
+    }
+  }>
+  applyApprovedProposal: (
+    input: {
+      ideaId: string
+      expectedSnapshotVersion: number
+      title: string
+      body: string
+      threadSummary: string | null
+    },
+    userId: string,
+  ) => Promise<unknown>
+}
+
 export async function createIdeaAndBootstrapThread(
   data: Parameters<typeof ideaCreateSchema.parse>[0],
   dependencies: CreateIdeaAndThreadDependencies,
@@ -43,6 +75,25 @@ export async function createIdeaAndBootstrapThread(
     threadId: thread.threadId,
     initialSnapshotId: thread.initialSnapshotId,
   }
+}
+
+export async function approveIdeaProposalAndPersist(
+  input: {
+    ideaId: string
+    proposalId: string
+    expectedSnapshotVersion: number
+  },
+  dependencies: ApproveIdeaProposalDependencies,
+) {
+  const { user } = await dependencies.resolveUser()
+  const approval = await dependencies.approveIdeaThreadProposal(input.ideaId, {
+    proposalId: input.proposalId,
+    expectedSnapshotVersion: input.expectedSnapshotVersion,
+  })
+
+  await dependencies.applyApprovedProposal(approval.canonicalWritePayload, user.id)
+
+  return approval.thread
 }
 
 export const listIdeas = createServerFn({ method: 'GET' }).handler(async () => {
@@ -86,4 +137,59 @@ export const getIdeaThread = createServerFn({ method: 'GET' })
   .inputValidator((input: { id: string }) => input)
   .handler(async ({ data }) => {
     return assistantThreadService.getIdeaThread(data.id)
+  })
+
+export const elaborateIdea = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string; actionInput: string | null }) => input)
+  .handler(async ({ data }) => {
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    const idea = await ideasService.getIdea(data.id, user.id)
+
+    if (!idea) {
+      throw new Error('Idea not found')
+    }
+
+    const latestSnapshot = await ideasService.getLatestIdeaSnapshot(data.id, user.id)
+
+    if (!latestSnapshot) {
+      throw new Error('Accepted snapshot not found')
+    }
+
+    return assistantThreadService.requestIdeaThreadElaboration(data.id, {
+      actionInput: data.actionInput,
+      currentSnapshotVersion: latestSnapshot.version,
+      currentTitle: latestSnapshot.title,
+      currentBody: latestSnapshot.body,
+      currentSummary: latestSnapshot.threadSummary,
+    })
+  })
+
+export const approveIdeaProposal = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string; proposalId: string; expectedSnapshotVersion: number }) => input)
+  .handler(async ({ data }) => {
+    return approveIdeaProposalAndPersist(
+      {
+        ideaId: data.id,
+        proposalId: data.proposalId,
+        expectedSnapshotVersion: data.expectedSnapshotVersion,
+      },
+      {
+        resolveUser: async () => {
+          const { user } = await resolveAuthenticatedPlannerUser(db)
+          return { user }
+        },
+        approveIdeaThreadProposal: (ideaId, input) => assistantThreadService.approveIdeaThreadProposal(ideaId, input),
+        applyApprovedProposal: (input, userId) => ideasService.applyApprovedProposal(input, userId),
+      },
+    )
+  })
+
+export const rejectIdeaProposal = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string; proposalId: string }) => input)
+  .handler(async ({ data }) => {
+    const rejection = await assistantThreadService.rejectIdeaThreadProposal(data.id, {
+      proposalId: data.proposalId,
+    })
+
+    return rejection.thread
   })
