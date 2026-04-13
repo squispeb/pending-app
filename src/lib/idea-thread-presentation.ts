@@ -1,19 +1,19 @@
 import { AlertTriangle, CheckCircle2, Clock3, Lightbulb, MessageSquareText, XCircle } from 'lucide-react'
 
-export type ThreadEventType = 'thread_created' | 'user_request' | 'proposal_created' | 'proposal_approved' | 'proposal_rejected' | 'assistant_failed'
+export type ThreadEventType = 'thread_created' | 'user_turn_added' | 'assistant_question' | 'assistant_synthesis' | 'stage_changed' | 'assistant_failed'
 
 export function formatThreadEventLabel(type: ThreadEventType) {
   switch (type) {
     case 'thread_created':
       return 'Thread created'
-    case 'user_request':
-      return 'You asked'
-    case 'proposal_created':
-      return 'Proposal created'
-    case 'proposal_approved':
-      return 'Proposal approved'
-    case 'proposal_rejected':
-      return 'Proposal rejected'
+    case 'user_turn_added':
+      return 'You added context'
+    case 'assistant_question':
+      return 'Assistant asked'
+    case 'assistant_synthesis':
+      return 'Assistant synthesis'
+    case 'stage_changed':
+      return 'Stage changed'
     case 'assistant_failed':
       return 'Assistant failed'
   }
@@ -21,28 +21,28 @@ export function formatThreadEventLabel(type: ThreadEventType) {
 
 export function getThreadEventPresentation(type: ThreadEventType) {
   switch (type) {
-    case 'proposal_created':
+    case 'assistant_synthesis':
       return {
         label: formatThreadEventLabel(type),
         icon: Clock3,
         iconClassName: 'text-amber-500',
         cardClassName: 'border-amber-200 bg-amber-50/70 dark:border-amber-500/30 dark:bg-amber-500/10',
       }
-    case 'user_request':
+    case 'user_turn_added':
       return {
         label: formatThreadEventLabel(type),
         icon: MessageSquareText,
         iconClassName: 'text-sky-500',
         cardClassName: 'border-sky-200 bg-sky-50/70 dark:border-sky-500/30 dark:bg-sky-500/10',
       }
-    case 'proposal_approved':
+    case 'assistant_question':
       return {
         label: formatThreadEventLabel(type),
         icon: CheckCircle2,
         iconClassName: 'text-emerald-500',
         cardClassName: 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-500/30 dark:bg-emerald-500/10',
       }
-    case 'proposal_rejected':
+    case 'stage_changed':
       return {
         label: formatThreadEventLabel(type),
         icon: XCircle,
@@ -69,22 +69,22 @@ export function getThreadEventPresentation(type: ThreadEventType) {
 export function deriveThreadState(visibleEvents: Array<{ type: ThreadEventType }>) {
   const latestRelevantEvent = [...visibleEvents]
     .reverse()
-    .find((event) => event.type !== 'thread_created' && event.type !== 'user_request')
+    .find((event) => event.type !== 'thread_created' && event.type !== 'user_turn_added')
 
   switch (latestRelevantEvent?.type) {
-    case 'proposal_created':
+    case 'assistant_synthesis':
       return {
-        label: 'Proposal pending',
+        label: 'Assistant updated',
         badgeClassName: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300',
       }
-    case 'proposal_approved':
+    case 'assistant_question':
       return {
-        label: 'Proposal approved',
+        label: 'Assistant guiding',
         badgeClassName: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300',
       }
-    case 'proposal_rejected':
+    case 'stage_changed':
       return {
-        label: 'Proposal rejected',
+        label: 'Stage updated',
         badgeClassName: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300',
       }
     case 'assistant_failed':
@@ -94,7 +94,7 @@ export function deriveThreadState(visibleEvents: Array<{ type: ThreadEventType }
       }
     default:
       return {
-        label: 'Thread ready',
+        label: 'Discovery ready',
         badgeClassName: 'border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)]',
       }
   }

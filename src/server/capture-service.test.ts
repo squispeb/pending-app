@@ -333,6 +333,42 @@ describe('capture service', () => {
     expect(result.draft.targetCount).toBe(1)
   })
 
+  it('forces typed capture on the ideas route to stay in the idea lane', async () => {
+    const interpreter: CaptureInterpreter = {
+      async interpretTypedTask() {
+        return {
+          candidateType: 'task',
+          title: 'Prototype a better onboarding flow',
+          notes: 'Explore a more guided setup for new users.',
+          dueDate: '2026-04-09',
+          interpretationNotes: ['Model read this as an actionable task.'],
+        }
+      },
+    }
+    const service = createCaptureService(db, interpreter)
+
+    const result = await service.interpretTypedTaskInput(userId, {
+      rawInput: 'Prototype a better onboarding flow for first-time users.',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+      languageHint: 'en',
+      routeIntent: 'ideas',
+    })
+
+    expect(result.ok).toBe(true)
+
+    if (!result.ok) {
+      throw new Error('Expected idea-routed capture interpretation')
+    }
+
+    expect(result.draft).toMatchObject({
+      candidateType: 'idea',
+      title: 'Prototype a better onboarding flow',
+      notes: 'Explore a more guided setup for new users.',
+      dueDate: '2026-04-09',
+    })
+  })
+
   it('returns an explicit failure result when hosted interpretation fails', async () => {
     const interpreter: CaptureInterpreter = {
       async interpretTypedTask() {

@@ -11,12 +11,14 @@ const captureDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const captureTimeSchema = z.string().regex(/^\d{2}:\d{2}$/)
 
 export const captureLanguageHintSchema = z.enum(['es', 'en', 'mixed'])
+export const captureRouteIntentSchema = z.enum(['tasks', 'habits', 'ideas', 'auto'])
 
 export const interpretCaptureInputSchema = z.object({
   rawInput: z.string().max(4000),
   currentDate: captureDateSchema,
   timezone: z.string().trim().min(1).max(120),
   languageHint: captureLanguageHintSchema.optional(),
+  routeIntent: captureRouteIntentSchema.optional(),
 })
 
 export const candidateTypeSchema = z.enum(['task', 'habit', 'idea'])
@@ -154,6 +156,7 @@ export const confirmCapturedIdeaInputSchema = z.object({
 export const processVoiceCaptureInputSchema = transcribeAudioUploadInputSchema.extend({
   currentDate: captureDateSchema,
   timezone: z.string().trim().min(1).max(120),
+  routeIntent: captureRouteIntentSchema.optional(),
 })
 
 export const processVoiceCaptureAutoSavedSchema = z.object({
@@ -208,6 +211,7 @@ export const processVoiceCaptureResponseSchema = z.union([
 ])
 
 export type CaptureLanguageHint = z.infer<typeof captureLanguageHintSchema>
+export type CaptureRouteIntent = z.infer<typeof captureRouteIntentSchema>
 export type CandidateType = z.infer<typeof candidateTypeSchema>
 export type InterpretCaptureInput = z.infer<typeof interpretCaptureInputSchema>
 export type TypedTaskDraft = z.infer<typeof typedTaskDraftSchema>
@@ -625,6 +629,7 @@ export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCa
   const source = input.get('source')
   const currentDate = input.get('currentDate')
   const timezone = input.get('timezone')
+  const routeIntent = input.get('routeIntent')
 
   return processVoiceCaptureInputSchema.parse({
     audio,
@@ -632,5 +637,6 @@ export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCa
     source: typeof source === 'string' && source ? source : undefined,
     currentDate: typeof currentDate === 'string' ? currentDate : undefined,
     timezone: typeof timezone === 'string' ? timezone : undefined,
+    routeIntent: typeof routeIntent === 'string' && routeIntent ? routeIntent : undefined,
   })
 }

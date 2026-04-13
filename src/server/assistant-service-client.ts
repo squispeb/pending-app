@@ -3,41 +3,42 @@ import { env } from '../lib/env'
 
 const threadEventSchema = z.object({
   eventId: z.string().min(1),
-  type: z.enum(['thread_created', 'user_request', 'proposal_created', 'proposal_approved', 'proposal_rejected', 'assistant_failed']),
+  type: z.enum(['thread_created', 'user_turn_added', 'assistant_question', 'assistant_synthesis', 'stage_changed', 'assistant_failed']),
   createdAt: z.string().min(1),
   summary: z.string().min(1),
   visibleToUser: z.literal(true),
 })
 
-const proposalActionTypeSchema = z.enum(['elaborate'])
-
-const assistantProposalSchema = z.object({
-  proposalId: z.string().min(1),
-  actionType: proposalActionTypeSchema,
-  basedOnSnapshotVersion: z.number().int().positive(),
-  proposedTitle: z.string().min(1).nullable(),
-  proposedBody: z.string().min(1).nullable(),
-  proposedSummary: z.string().min(1).nullable(),
-  explanation: z.string().min(1),
-  createdAt: z.string().min(1),
+const workingIdeaSchema = z.object({
+  provisionalTitle: z.string().min(1).nullable(),
+  currentSummary: z.string().min(1).nullable(),
+  purpose: z.string().min(1).nullable(),
+  scope: z.string().min(1).nullable(),
+  targetUsers: z.array(z.string().min(1)),
+  expectedImpact: z.string().min(1).nullable(),
+  researchAreas: z.array(z.string().min(1)),
+  constraints: z.array(z.string().min(1)),
+  openQuestions: z.array(z.string().min(1)),
 })
 
 const ideaThreadViewSchema = z.object({
   threadId: z.string().min(1),
   ideaId: z.string().min(1),
   userId: z.string().min(1),
-  status: z.enum(['ready', 'awaiting_approval', 'failed']),
+  stage: z.enum(['discovery', 'framing', 'developed']),
+  status: z.enum(['idle', 'processing', 'streaming', 'failed']),
   visibleEvents: z.array(threadEventSchema),
-  pendingProposal: assistantProposalSchema.nullable(),
+  workingIdea: workingIdeaSchema,
 })
 
 const resolveIdeaThreadResponseSchema = z.object({
   threadId: z.string().min(1),
   ideaId: z.string().min(1),
   userId: z.string().min(1),
-  status: z.enum(['ready', 'awaiting_approval', 'failed']),
+  stage: z.enum(['discovery', 'framing', 'developed']),
+  status: z.enum(['idle', 'processing', 'streaming', 'failed']),
   visibleEvents: z.array(threadEventSchema),
-  pendingProposal: assistantProposalSchema.nullable(),
+  workingIdea: workingIdeaSchema,
 })
 
 const getIdeaThreadResponseSchema = ideaThreadViewSchema
@@ -46,7 +47,9 @@ const elaborateIdeaResponseSchema = z.object({
   ok: z.literal(true),
   outcome: z.literal('proposal_created'),
   thread: ideaThreadViewSchema,
-  proposal: assistantProposalSchema,
+  proposal: z.object({
+    explanation: z.string().min(1),
+  }),
 })
 
 const approveIdeaResponseSchema = z.object({

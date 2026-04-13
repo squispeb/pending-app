@@ -215,9 +215,17 @@ export function createCaptureService(
           calendarContext,
         })
 
+        const mergedDraft = mergeTypedTaskDrafts(heuristicDraft, providerDraft)
+
         return {
           ok: true,
-          draft: mergeTypedTaskDrafts(heuristicDraft, providerDraft),
+          draft:
+            parsed.routeIntent === 'ideas'
+              ? {
+                  ...mergedDraft,
+                  candidateType: 'idea',
+                }
+              : mergedDraft,
         }
       } catch (error) {
         if (error instanceof CaptureInterpreterError) {

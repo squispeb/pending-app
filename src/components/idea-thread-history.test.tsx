@@ -7,7 +7,7 @@ describe('IdeaThreadHistory', () => {
     const markup = renderToStaticMarkup(<IdeaThreadHistory visibleEvents={[]} />)
 
     expect(markup).toContain('No visible thread history yet.')
-    expect(markup).toContain('Thread ready')
+    expect(markup).toContain('Discovery ready')
   })
 
   it('renders distinct visible event labels and the latest thread status', () => {
@@ -22,27 +22,27 @@ describe('IdeaThreadHistory', () => {
           },
           {
             eventId: 'event-2',
-            type: 'user_request',
+            type: 'user_turn_added',
             createdAt: '2026-04-12T00:00:30.000Z',
-            summary: 'Please elaborate this idea toward a simple launch plan.',
+            summary: 'This could help new users understand the setup flow faster.',
           },
           {
             eventId: 'event-3',
-            type: 'proposal_created',
+            type: 'assistant_question',
             createdAt: '2026-04-12T00:01:00.000Z',
-            summary: 'Assistant generated a proposal.',
+            summary: 'Who is the main user for this onboarding improvement?',
           },
           {
             eventId: 'event-4',
-            type: 'proposal_approved',
+            type: 'assistant_synthesis',
             createdAt: '2026-04-12T00:02:00.000Z',
-            summary: 'User approved the proposal.',
+            summary: 'The assistant has identified onboarding clarity and activation speed as the main opportunity so far.',
           },
           {
             eventId: 'event-5',
-            type: 'proposal_rejected',
+            type: 'stage_changed',
             createdAt: '2026-04-12T00:03:00.000Z',
-            summary: 'User rejected a later proposal.',
+            summary: 'The idea moved from discovery to framing.',
           },
           {
             eventId: 'event-6',
@@ -55,11 +55,11 @@ describe('IdeaThreadHistory', () => {
     )
 
     expect(markup).toContain('Thread created')
-    expect(markup).toContain('You asked')
-    expect(markup).toContain('Please elaborate this idea toward a simple launch plan.')
-    expect(markup).toContain('Proposal created')
-    expect(markup).toContain('Proposal approved')
-    expect(markup).toContain('Proposal rejected')
+    expect(markup).toContain('You added context')
+    expect(markup).toContain('This could help new users understand the setup flow faster.')
+    expect(markup).toContain('Assistant asked')
+    expect(markup).toContain('Assistant synthesis')
+    expect(markup).toContain('Stage changed')
     expect(markup).toContain('Assistant failed')
     expect(markup).toContain('Assistant could not complete the request.')
   })

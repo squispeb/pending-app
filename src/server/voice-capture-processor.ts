@@ -69,6 +69,19 @@ export function createVoiceCaptureProcessor(
         transcription.transcript,
       )
 
+      if (data.routeIntent === 'ideas') {
+        return {
+          ok: true,
+          outcome: 'idea_confirmation',
+          transcript: transcription.transcript,
+          language: transcription.language,
+          draft: {
+            ...interpretation.draft,
+            candidateType: 'idea',
+          },
+        }
+      }
+
       if (confidence === 'high') {
         const draftTitle = interpretation.draft.title ?? transcription.transcript
 

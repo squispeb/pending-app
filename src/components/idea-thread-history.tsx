@@ -22,7 +22,7 @@ export function IdeaThreadHistory({ visibleEvents }: { visibleEvents: Array<Idea
           visibleEvents.map((event) => {
             const presentation = getThreadEventPresentation(event.type)
             const Icon = presentation.icon
-            const isUserRequest = event.type === 'user_request'
+            const isUserTurn = event.type === 'user_turn_added'
 
             return (
               <article key={event.eventId} className={`rounded-2xl border p-4 ${presentation.cardClassName}`}>
@@ -33,7 +33,7 @@ export function IdeaThreadHistory({ visibleEvents }: { visibleEvents: Array<Idea
                   </div>
                   <div className="text-xs text-[var(--ink-faint)]">{new Date(event.createdAt).toLocaleString()}</div>
                 </div>
-                <p className={`mt-2 m-0 text-sm leading-6 ${isUserRequest ? 'whitespace-pre-wrap font-medium text-[var(--ink-strong)]' : 'text-[var(--ink-soft)]'}`}>
+                <p className={`mt-2 m-0 text-sm leading-6 ${isUserTurn ? 'whitespace-pre-wrap font-medium text-[var(--ink-strong)]' : 'text-[var(--ink-soft)]'}`}>
                   {event.summary}
                 </p>
               </article>
