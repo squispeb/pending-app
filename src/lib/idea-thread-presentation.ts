@@ -1,11 +1,13 @@
-import { AlertTriangle, CheckCircle2, Clock3, Lightbulb, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Clock3, Lightbulb, MessageSquareText, XCircle } from 'lucide-react'
 
-export type ThreadEventType = 'thread_created' | 'proposal_created' | 'proposal_approved' | 'proposal_rejected' | 'assistant_failed'
+export type ThreadEventType = 'thread_created' | 'user_request' | 'proposal_created' | 'proposal_approved' | 'proposal_rejected' | 'assistant_failed'
 
 export function formatThreadEventLabel(type: ThreadEventType) {
   switch (type) {
     case 'thread_created':
       return 'Thread created'
+    case 'user_request':
+      return 'You asked'
     case 'proposal_created':
       return 'Proposal created'
     case 'proposal_approved':
@@ -25,6 +27,13 @@ export function getThreadEventPresentation(type: ThreadEventType) {
         icon: Clock3,
         iconClassName: 'text-amber-500',
         cardClassName: 'border-amber-200 bg-amber-50/70 dark:border-amber-500/30 dark:bg-amber-500/10',
+      }
+    case 'user_request':
+      return {
+        label: formatThreadEventLabel(type),
+        icon: MessageSquareText,
+        iconClassName: 'text-sky-500',
+        cardClassName: 'border-sky-200 bg-sky-50/70 dark:border-sky-500/30 dark:bg-sky-500/10',
       }
     case 'proposal_approved':
       return {
@@ -60,7 +69,7 @@ export function getThreadEventPresentation(type: ThreadEventType) {
 export function deriveThreadState(visibleEvents: Array<{ type: ThreadEventType }>) {
   const latestRelevantEvent = [...visibleEvents]
     .reverse()
-    .find((event) => event.type !== 'thread_created')
+    .find((event) => event.type !== 'thread_created' && event.type !== 'user_request')
 
   switch (latestRelevantEvent?.type) {
     case 'proposal_created':

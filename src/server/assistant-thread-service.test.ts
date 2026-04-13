@@ -427,7 +427,15 @@ describe('assistant thread service', () => {
             ideaId: 'idea-123',
             userId: 'user-1',
             status: 'awaiting_approval',
-            visibleEvents: [],
+            visibleEvents: [
+              {
+                eventId: 'event-1',
+                type: 'user_request',
+                createdAt: '2026-04-12T00:00:30.000Z',
+                summary: 'Please elaborate this idea into a clearer opportunity and suggest a useful next step.',
+                visibleToUser: true,
+              },
+            ],
             pendingProposal: {
               proposalId: 'proposal-1',
               actionType: 'elaborate',
@@ -507,7 +515,15 @@ describe('assistant thread service', () => {
             ideaId: 'idea-123',
             userId: 'user-1',
             status: 'ready',
-            visibleEvents: [],
+            visibleEvents: [
+              {
+                eventId: 'event-1',
+                type: 'user_request',
+                createdAt: '2026-04-12T00:00:30.000Z',
+                summary: 'Please elaborate this idea into a clearer opportunity and suggest a useful next step.',
+                visibleToUser: true,
+              },
+            ],
             pendingProposal: null,
           },
           canonicalWritePayload: {
@@ -573,7 +589,15 @@ describe('assistant thread service', () => {
             ideaId: 'idea-123',
             userId: 'user-1',
             status: 'ready',
-            visibleEvents: [],
+            visibleEvents: [
+              {
+                eventId: 'event-1',
+                type: 'user_request',
+                createdAt: '2026-04-12T00:00:30.000Z',
+                summary: 'Please elaborate this idea into a clearer opportunity and suggest a useful next step.',
+                visibleToUser: true,
+              },
+            ],
             pendingProposal: null,
           },
           threadEventId: 'event-2',

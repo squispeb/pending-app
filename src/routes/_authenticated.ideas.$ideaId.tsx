@@ -1,4 +1,5 @@
 import { Lightbulb, Quote, Sparkles, Star } from 'lucide-react'
+import { useState } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
 import { IdeaThreadHistory } from '../components/idea-thread-history'
@@ -32,6 +33,7 @@ function IdeaDetailPage() {
   const queryClient = useQueryClient()
   const { data: idea } = useSuspenseQuery(ideaDetailQueryOptions(ideaId))
   const { data: thread } = useSuspenseQuery(ideaThreadQueryOptions(ideaId))
+  const [threadPrompt, setThreadPrompt] = useState('')
 
   if (!idea) {
     throw notFound()
@@ -55,11 +57,18 @@ function IdeaDetailPage() {
     ])
 
   const elaborateMutation = useMutation({
-    mutationFn: async () => elaborateIdea({ data: { id: ideaId, actionInput: null } }),
+    mutationFn: async (actionInput: string | null) => elaborateIdea({ data: { id: ideaId, actionInput } }),
     onSuccess: async () => {
+      setThreadPrompt('')
       await invalidateIdeaThread()
     },
   })
+
+  const helperPrompts = [
+    'Elaborate this idea into a clearer opportunity and a next step.',
+    'Elaborate this idea with a stronger problem statement and target user.',
+    'Elaborate this idea into a simple launch plan I could test this week.',
+  ]
 
   const approveMutation = useMutation({
     mutationFn: async (proposalId: string) =>
@@ -131,27 +140,57 @@ function IdeaDetailPage() {
             </article>
 
             <section className="rounded-[28px] border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <div className="inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
-                    <Sparkles size={14} />
-                    Refinement
-                  </div>
-                  <h2 className="mt-3 text-lg font-semibold text-[var(--ink-strong)]">Elaborate this idea</h2>
-                  <p className="mt-2 text-sm text-[var(--ink-soft)]">
-                    Ask the assistant to expand this idea into a clearer opportunity without changing the accepted idea until you approve it.
-                  </p>
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
+                  <Sparkles size={14} />
+                  Thread composer
                 </div>
+                <h2 className="mt-3 text-lg font-semibold text-[var(--ink-strong)]">Continue the idea conversation</h2>
+                <p className="mt-2 text-sm text-[var(--ink-soft)]">
+                  Ask the assistant to elaborate this idea through the visible thread. Helper prompts are shortcuts, but your request becomes part of the thread history.
+                </p>
+              </div>
 
-                <button
-                  type="button"
-                  onClick={() => elaborateMutation.mutate()}
-                  disabled={elaborateMutation.isPending || thread.status === 'awaiting_approval'}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] px-4 py-3 font-semibold text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  <Sparkles size={16} />
-                  {elaborateMutation.isPending ? 'Generating proposal...' : 'Elaborate idea'}
-                </button>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {helperPrompts.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => setThreadPrompt(prompt)}
+                    disabled={elaborateMutation.isPending || thread.status === 'awaiting_approval'}
+                    className="rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-1.5 text-xs font-medium text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+                <label className="block text-sm font-medium text-[var(--ink-soft)]">
+                  Your next refinement request
+                  <textarea
+                    value={threadPrompt}
+                    onChange={(event) => setThreadPrompt(event.target.value)}
+                    placeholder="Example: Expand this idea into a clearer opportunity, what problem it solves, and one concrete next step."
+                    rows={4}
+                    className="mt-2 w-full rounded-2xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3 text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                  />
+                </label>
+
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                  <p className="m-0 text-sm text-[var(--ink-soft)]">
+                    This request will appear in the visible thread before any assistant proposal.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => elaborateMutation.mutate(threadPrompt.trim() || null)}
+                    disabled={elaborateMutation.isPending || thread.status === 'awaiting_approval'}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] px-4 py-3 font-semibold text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    <Sparkles size={16} />
+                    {elaborateMutation.isPending ? 'Generating proposal...' : 'Send refinement request'}
+                  </button>
+                </div>
               </div>
 
               {thread.pendingProposal ? (

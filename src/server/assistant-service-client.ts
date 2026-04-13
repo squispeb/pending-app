@@ -3,7 +3,7 @@ import { env } from '../lib/env'
 
 const threadEventSchema = z.object({
   eventId: z.string().min(1),
-  type: z.enum(['thread_created', 'proposal_created', 'proposal_approved', 'proposal_rejected', 'assistant_failed']),
+  type: z.enum(['thread_created', 'user_request', 'proposal_created', 'proposal_approved', 'proposal_rejected', 'assistant_failed']),
   createdAt: z.string().min(1),
   summary: z.string().min(1),
   visibleToUser: z.literal(true),

@@ -162,7 +162,15 @@ describe('assistant service client', () => {
           ideaId: 'idea-123',
           userId: 'local-user',
           status: 'awaiting_approval',
-          visibleEvents: [],
+          visibleEvents: [
+            {
+              eventId: 'event-1',
+              type: 'user_request',
+              createdAt: '2026-04-12T00:00:30.000Z',
+              summary: 'Please elaborate this idea into a clearer opportunity and suggest a useful next step.',
+              visibleToUser: true,
+            },
+          ],
           pendingProposal: {
             proposalId: 'proposal-1',
             actionType: 'elaborate',
@@ -209,14 +217,22 @@ describe('assistant service client', () => {
       new Response(JSON.stringify({
         ok: true,
         outcome: 'approved',
-        thread: {
-          threadId: 'thread-local-user:idea-123',
-          ideaId: 'idea-123',
-          userId: 'local-user',
-          status: 'ready',
-          visibleEvents: [],
-          pendingProposal: null,
-        },
+      thread: {
+        threadId: 'thread-local-user:idea-123',
+        ideaId: 'idea-123',
+        userId: 'local-user',
+        status: 'ready',
+        visibleEvents: [
+          {
+            eventId: 'event-1',
+            type: 'user_request',
+            createdAt: '2026-04-12T00:00:30.000Z',
+            summary: 'Please elaborate this idea into a clearer opportunity and suggest a useful next step.',
+            visibleToUser: true,
+          },
+        ],
+        pendingProposal: null,
+      },
         canonicalWritePayload: {
           ideaId: 'idea-123',
           expectedSnapshotVersion: 1,
@@ -252,7 +268,15 @@ describe('assistant service client', () => {
           ideaId: 'idea-123',
           userId: 'local-user',
           status: 'ready',
-          visibleEvents: [],
+          visibleEvents: [
+            {
+              eventId: 'event-1',
+              type: 'user_request',
+              createdAt: '2026-04-12T00:00:30.000Z',
+              summary: 'Please elaborate this idea into a clearer opportunity and suggest a useful next step.',
+              visibleToUser: true,
+            },
+          ],
           pendingProposal: null,
         },
         threadEventId: 'event-2',

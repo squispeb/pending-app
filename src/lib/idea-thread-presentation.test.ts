@@ -35,7 +35,20 @@ describe('idea thread presentation', () => {
     expect(state.label).toBe('Thread ready')
   })
 
+  it('ignores user request turns when deriving the thread status badge', () => {
+    const state = deriveThreadState([
+      { type: 'thread_created' },
+      { type: 'user_request' },
+    ])
+
+    expect(state.label).toBe('Thread ready')
+  })
+
   it('returns distinct event labels and treatments for each visible event family', () => {
+    expect(getThreadEventPresentation('user_request')).toMatchObject({
+      label: 'You asked',
+      iconClassName: 'text-sky-500',
+    })
     expect(getThreadEventPresentation('proposal_created')).toMatchObject({
       label: 'Proposal created',
       iconClassName: 'text-amber-500',
