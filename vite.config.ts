@@ -10,12 +10,15 @@ import tailwindcss from '@tailwindcss/vite'
 import { nitro } from 'nitro/vite'
 
 const config = defineConfig({
+  optimizeDeps: {
+    exclude: ['@tanstack/start-server-core'],
+  },
   plugins: [
     devtools(),
-    nitro({ rollupConfig: { external: [/^@sentry\//] } }),
     tsconfigPaths({ projects: ['./tsconfig.json'] }),
     tailwindcss(),
     tanstackStart(),
+    nitro({ rollupConfig: { external: [/^@sentry\//] } }),
     viteReact(),
     VitePWA({
       registerType: 'autoUpdate',
