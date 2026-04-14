@@ -19,6 +19,7 @@ import {
   type TaskFormValues,
 } from '../lib/tasks'
 import type { CandidateType, ProcessVoiceCaptureAutoSaved, TypedTaskDraft } from '../lib/capture'
+import { getIdeaThreadTarget, getRouteIntent, routeContext } from '../lib/capture-routing'
 import {
   confirmCapturedIdea as confirmCapturedIdeaFn,
   confirmCapturedHabit as confirmCapturedHabitFn,
@@ -26,30 +27,9 @@ import {
   interpretCaptureInput,
   processVoiceCapture,
 } from '../server/capture'
+import { submitIdeaThreadTurn } from '../server/ideas'
+import { transcribeCaptureAudio } from '../server/transcription'
 import { ideaFormSchema, toIdeaFormValues, type IdeaFormValues } from '../lib/ideas'
-
-// ---------------------------------------------------------------------------
-// Route → context mapping
-// ---------------------------------------------------------------------------
-type RouteContext = {
-  defaultType: CandidateType | 'auto'
-  allowed: Array<CandidateType>
-}
-
-function routeContext(pathname: string): RouteContext {
-  if (pathname === '/tasks') return { defaultType: 'task', allowed: ['task'] }
-  if (pathname === '/habits') return { defaultType: 'habit', allowed: ['habit'] }
-  if (pathname === '/ideas') return { defaultType: 'idea', allowed: ['idea'] }
-  if (pathname === '/') return { defaultType: 'auto', allowed: ['task', 'habit', 'idea'] }
-  return { defaultType: 'task', allowed: ['task'] }
-}
-
-function getRouteIntent(pathname: string): 'tasks' | 'habits' | 'ideas' | 'auto' {
-  if (pathname === '/tasks') return 'tasks'
-  if (pathname === '/habits') return 'habits'
-  if (pathname === '/ideas') return 'ideas'
-  return 'auto'
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -105,6 +85,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const ctx = routeContext(pathname)
   const routeIntent = getRouteIntent(pathname)
+  const currentIdeaThreadTarget = getIdeaThreadTarget(pathname)
 
   // Resolve effective candidate type (auto defers to 'task' by default, override on review)
   const [captureMode, setCaptureMode] = useState<CaptureMode>('closed')
@@ -134,6 +115,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   const [captureClarifyQuestions, setCaptureClarifyQuestions] = useState<string[]>([])
   const [captureClarifyReply, setCaptureClarifyReply] = useState('')
   const [captureShowAdvanced, setCaptureShowAdvanced] = useState(false)
+  const [captureThreadIdeaId, setCaptureThreadIdeaId] = useState<string | null>(null)
 
   // Voice
   const [isRecording, setIsRecording] = useState(false)
@@ -292,6 +274,72 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     },
   })
 
+  const submitThreadTurnMutation = useMutation({
+    mutationFn: async (message: string) => {
+      if (!captureThreadIdeaId) {
+        throw new Error('Thread target missing.')
+      }
+
+      return submitIdeaThreadTurn({
+        data: {
+          id: captureThreadIdeaId,
+          message,
+        },
+      })
+    },
+    onSuccess: async () => {
+      const ideaId = captureThreadIdeaId
+      resetCapture()
+
+      if (ideaId) {
+        await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
+      }
+    },
+    onError: (error) => {
+      setCaptureError(error instanceof Error ? error.message : 'Failed to send thread reply.')
+    },
+  })
+
+  const voiceThreadReplyMutation = useMutation({
+    mutationFn: async (audioBlob: Blob) => {
+      if (!captureThreadIdeaId) {
+        throw new Error('Thread target missing.')
+      }
+
+      const audioFile = new File([audioBlob], 'thread-reply.webm', { type: audioBlob.type || 'audio/webm' })
+      const formData = new FormData()
+      formData.set('audio', audioFile, audioFile.name)
+      formData.set('languageHint', 'auto')
+      formData.set('source', 'pending-app')
+
+      const transcription = await transcribeCaptureAudio({ data: formData })
+
+      if (!transcription.ok) {
+        throw new Error(transcription.message)
+      }
+
+      setCaptureMode('interpreting')
+
+      await submitIdeaThreadTurn({
+        data: {
+          id: captureThreadIdeaId,
+          message: transcription.transcript,
+        },
+      })
+
+      return {
+        ideaId: captureThreadIdeaId,
+      }
+    },
+    onSuccess: async ({ ideaId }) => {
+      resetCapture()
+      await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
+    },
+    onError: (error) => {
+      setTranscribeError(error instanceof Error ? error.message : 'Failed to add voice reply to the thread.')
+    },
+  })
+
   const voiceProcessMutation = useMutation({
     mutationFn: async (audioBlob: Blob) => {
       const audioFile = new File([audioBlob], 'recording.webm', { type: audioBlob.type || 'audio/webm' })
@@ -357,6 +405,11 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
         stream.getTracks().forEach((t) => t.stop())
         stopVisualizer()
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        if (captureThreadIdeaId) {
+          voiceThreadReplyMutation.mutate(blob)
+          return
+        }
+
         voiceProcessMutation.mutate(blob)
       }
       recorder.start()
@@ -426,6 +479,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureClarifyReply('')
     setCaptureNotes([])
     setCaptureShowAdvanced(false)
+    setCaptureThreadIdeaId(null)
     setTranscribeError(null)
   }
 
@@ -439,6 +493,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   }
 
   function openCapture() {
+    setCaptureThreadIdeaId(currentIdeaThreadTarget)
     const resolved: CandidateType = ctx.defaultType === 'auto' ? 'task' : ctx.defaultType
     setCaptureType(resolved)
     setCaptureMode('recording')
@@ -448,6 +503,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   }
 
   function openCaptureWithText(text: string) {
+    setCaptureThreadIdeaId(currentIdeaThreadTarget)
     const resolved: CandidateType = ctx.defaultType === 'auto' ? 'task' : ctx.defaultType
     setCaptureType(resolved)
     setCaptureRawInput(text)
@@ -493,6 +549,12 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     event.preventDefault()
     if (!captureRawInput.trim()) return
     setCaptureError(null)
+
+    if (captureThreadIdeaId) {
+      submitThreadTurnMutation.mutate(captureRawInput.trim())
+      return
+    }
+
     interpretMutation.mutate(captureRawInput)
   }
 
@@ -577,11 +639,15 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   const isOpen = captureMode !== 'closed'
   const isConfirming = confirmTaskMutation.isPending || confirmHabitMutation.isPending || confirmIdeaMutation.isPending
   const isVoiceStep = captureMode === 'recording' || captureMode === 'transcribing' || captureMode === 'interpreting'
+  const isThreadReplyCapture = captureThreadIdeaId !== null
+  const isSubmittingThreadReply = submitThreadTurnMutation.isPending || voiceThreadReplyMutation.isPending
 
   // Sheet title
   const sheetTitle =
     captureMode === 'recording' || captureMode === 'transcribing' || captureMode === 'interpreting'
-      ? 'Voice capture'
+      ? isThreadReplyCapture
+        ? 'Voice reply'
+        : 'Voice capture'
       : captureMode === 'success'
         ? captureAutoSaved?.candidateType === 'habit'
           ? 'Habit saved'
@@ -596,7 +662,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
             : 'Review task'
           : captureMode === 'clarify'
             ? 'Need a bit more detail'
-            : 'What do you need?'
+            : isThreadReplyCapture
+              ? 'Reply to idea'
+              : 'What do you need?'
 
   // Confirm button label
   const confirmLabel = isConfirming
@@ -699,9 +767,11 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                   <div className="flex flex-col items-center gap-1">
                     <p className="m-0 text-base font-semibold text-[var(--ink-strong)]">
                       {captureMode === 'recording'
-                        ? isRecording ? 'Listening…' : 'Starting…'
+                        ? isRecording
+                          ? isThreadReplyCapture ? 'Listening to your reply…' : 'Listening…'
+                          : 'Starting…'
                         : captureMode === 'interpreting'
-                          ? 'Interpreting…'
+                          ? isThreadReplyCapture ? 'Adding to thread…' : 'Interpreting…'
                           : 'Transcribing…'}
                     </p>
                     {captureMode === 'recording' && isRecording ? (
@@ -762,7 +832,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                       onClick={() => { cancelRecording(); setCaptureMode('input') }}
                       className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
                     >
-                      Type instead
+                      {isThreadReplyCapture ? 'Type a reply instead' : 'Type instead'}
                     </button>
                   ) : null}
                 </div>
@@ -792,7 +862,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                     <form className="space-y-4" onSubmit={handleInterpret}>
                       <label className="block">
                         <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
-                          {ctx.defaultType === 'habit'
+                          {isThreadReplyCapture
+                            ? 'Reply to this idea'
+                            : ctx.defaultType === 'habit'
                             ? 'Describe a habit'
                             : ctx.defaultType === 'task'
                               ? 'What do you need to do?'
@@ -806,7 +878,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                           onChange={(e) => setCaptureRawInput(e.target.value)}
                           rows={4}
                           placeholder={
-                            ctx.defaultType === 'habit'
+                            isThreadReplyCapture
+                              ? 'Answer the latest assistant question or add more context to this idea.'
+                              : ctx.defaultType === 'habit'
                               ? 'Exercise every morning, meditate for 10 min'
                               : ctx.defaultType === 'idea'
                                 ? 'An idea for improving onboarding, a product direction to explore, a creative concept'
@@ -823,10 +897,12 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                       <div className="flex items-center gap-3">
                         <button
                           type="submit"
-                          disabled={interpretMutation.isPending || !captureRawInput.trim()}
+                          disabled={(interpretMutation.isPending || isSubmittingThreadReply) || !captureRawInput.trim()}
                           className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          {interpretMutation.isPending ? 'Interpreting…' : 'Interpret'}
+                          {isThreadReplyCapture
+                            ? isSubmittingThreadReply ? 'Sending…' : 'Send reply'
+                            : interpretMutation.isPending ? 'Interpreting…' : 'Interpret'}
                         </button>
                         <button
                           type="button"

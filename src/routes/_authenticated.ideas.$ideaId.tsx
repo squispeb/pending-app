@@ -1,8 +1,9 @@
-import { Compass, Lightbulb, Quote, SendHorizonal, Star } from 'lucide-react'
+import { Compass, Lightbulb, Mic, Quote, SendHorizonal, Star } from 'lucide-react'
 import { useState } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
 import { IdeaThreadHistory } from '../components/idea-thread-history'
+import { useCaptureContext } from '../contexts/CaptureContext'
 import { getIdeaExcerpt, isIdeaStarred } from '../lib/ideas'
 import { getIdea, getIdeaThread, submitIdeaThreadTurn, toggleIdeaStar } from '../server/ideas'
 
@@ -33,6 +34,7 @@ function IdeaDetailPage() {
   const queryClient = useQueryClient()
   const { data: idea } = useSuspenseQuery(ideaDetailQueryOptions(ideaId))
   const { data: thread } = useSuspenseQuery(ideaThreadQueryOptions(ideaId))
+  const { openCapture } = useCaptureContext()
   const [discoveryMessage, setDiscoveryMessage] = useState('')
   const [discoveryError, setDiscoveryError] = useState<string | null>(null)
 
@@ -176,13 +178,19 @@ function IdeaDetailPage() {
 
               <form className="mt-4 space-y-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4" onSubmit={handleDiscoverySubmit}>
                 <label className="block text-sm font-medium text-[var(--ink-soft)]">
-                  Add context to the thread
+                  <span className="text-[var(--ink-strong)]">{latestAssistantQuestion ?? 'Add context to the thread'}</span>
                   <textarea
                     value={discoveryMessage}
                     onChange={(event) => setDiscoveryMessage(event.target.value)}
                     placeholder={latestAssistantQuestion ?? 'Describe the purpose, users, impact, scope, research needs, constraints, or open questions for this idea.'}
                     rows={4}
                     className="mt-2 w-full rounded-2xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3 text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                        event.preventDefault()
+                        handleDiscoverySubmit(event as unknown as React.FormEvent<HTMLFormElement>)
+                      }
+                    }}
                   />
                 </label>
 
@@ -194,16 +202,26 @@ function IdeaDetailPage() {
 
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <p className="m-0 text-sm text-[var(--ink-soft)]">
-                    Reply in your own words. Each turn updates the working idea and the next assistant question.
+                    Voice is preferred here, with typed reply as a fallback. Each turn updates the working idea and the next assistant question.
                   </p>
-                  <button
-                    type="submit"
-                    disabled={submitTurnMutation.isPending || discoveryMessage.trim().length === 0}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] px-4 py-3 font-semibold text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    <SendHorizonal size={16} />
-                    {submitTurnMutation.isPending ? 'Sending...' : 'Send reply'}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={openCapture}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3 font-semibold text-[var(--ink-strong)] transition hover:border-[var(--brand)] hover:text-[var(--brand)]"
+                    >
+                      <Mic size={16} />
+                      Voice reply
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={submitTurnMutation.isPending || discoveryMessage.trim().length === 0}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] px-4 py-3 font-semibold text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      <SendHorizonal size={16} />
+                      {submitTurnMutation.isPending ? 'Sending...' : 'Send reply'}
+                    </button>
+                  </div>
                 </div>
               </form>
             </section>
