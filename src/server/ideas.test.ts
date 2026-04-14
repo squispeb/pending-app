@@ -254,4 +254,40 @@ describe('ideas server flow', () => {
       stage: 'developed',
     })
   })
+
+  it('rejects refinement persistence when the thread is not developed yet', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const getIdea = vi.fn().mockResolvedValue({ id: 'idea-123', title: 'Original title' })
+    const getLatestIdeaSnapshot = vi.fn().mockResolvedValue({
+      version: 2,
+      title: 'Original title',
+      body: 'Canonical body',
+      threadSummary: 'Current summary',
+    })
+    const getIdeaThread = vi.fn().mockResolvedValue({
+      stage: 'framing',
+      workingIdea: {
+        provisionalTitle: 'Improved title',
+        currentSummary: 'Current summary',
+      },
+    })
+    const syncIdeaThreadCheckpoint = vi.fn()
+
+    await expect(
+      persistIdeaRefinementAndSync(
+        {
+          ideaId: 'idea-123',
+          kind: 'title',
+        },
+        {
+          resolveUser,
+          getIdea,
+          getLatestIdeaSnapshot,
+          getIdeaThread,
+          syncIdeaThreadCheckpoint,
+        },
+      ),
+    ).rejects.toThrow('Title and summary improvements are only available for developed ideas.')
+    expect(syncIdeaThreadCheckpoint).not.toHaveBeenCalled()
+  })
 })

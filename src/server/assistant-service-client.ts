@@ -57,6 +57,16 @@ const elaborateIdeaResponseSchema = z.object({
   }),
 })
 
+const improveIdeaResponseSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('proposal_created'),
+  action: z.enum(['title', 'summary']),
+  thread: ideaThreadViewSchema,
+  proposal: z.object({
+    explanation: z.string().min(1),
+  }),
+})
+
 const submitDiscoveryTurnResponseSchema = z.object({
   ok: z.literal(true),
   outcome: z.literal('accepted'),
@@ -182,6 +192,70 @@ export async function requestIdeaThreadElaboration(
   const payload = await parseAssistantResponse(response)
 
   return elaborateIdeaResponseSchema.parse(payload)
+}
+
+async function requestIdeaImprovement(
+  path: 'improve-title' | 'improve-summary',
+  input: {
+    ideaId: string
+    authHeaders: HeadersInit
+    currentSnapshotVersion: number
+    currentTitle: string
+    currentBody: string
+    currentSummary: string | null
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+
+  if (!baseUrl) {
+    throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  }
+
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/actions/${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      currentSnapshotVersion: input.currentSnapshotVersion,
+      currentTitle: input.currentTitle,
+      currentBody: input.currentBody,
+      currentSummary: input.currentSummary,
+    }),
+  })
+  const payload = await parseAssistantResponse(response)
+
+  return improveIdeaResponseSchema.parse(payload)
+}
+
+export async function requestIdeaThreadTitleImprovement(
+  input: {
+    ideaId: string
+    authHeaders: HeadersInit
+    currentSnapshotVersion: number
+    currentTitle: string
+    currentBody: string
+    currentSummary: string | null
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  return requestIdeaImprovement('improve-title', input, options)
+}
+
+export async function requestIdeaThreadSummaryImprovement(
+  input: {
+    ideaId: string
+    authHeaders: HeadersInit
+    currentSnapshotVersion: number
+    currentTitle: string
+    currentBody: string
+    currentSummary: string | null
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  return requestIdeaImprovement('improve-summary', input, options)
 }
 
 export async function submitIdeaDiscoveryTurn(

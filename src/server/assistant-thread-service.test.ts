@@ -479,6 +479,142 @@ describe('assistant thread service', () => {
     expect(init?.method).toBe('POST')
   })
 
+  it('requests a title improvement for the authenticated idea owner', async () => {
+    await db.insert(schema.users).values({
+      id: 'user-1',
+      email: 'user-1@example.com',
+      displayName: 'User One',
+      timezone: 'UTC',
+    })
+    await db.insert(schema.ideas).values({
+      id: 'idea-123',
+      userId: 'user-1',
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'manual',
+    })
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          session: { id: 'session-1', userId: 'user-1' },
+          user: { id: 'user-1', email: 'user-1@example.com', name: 'User One' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          ok: true,
+          outcome: 'proposal_created',
+          action: 'title',
+          thread: makeThread({
+            stage: 'developed',
+            visibleEvents: [
+              {
+                eventId: 'event-1',
+                type: 'user_turn_added',
+                createdAt: '2026-04-12T00:00:30.000Z',
+                summary: 'Please improve the title only and keep the underlying idea grounded in the current thread context.',
+                visibleToUser: true,
+              },
+            ],
+          }),
+          proposal: {
+            explanation: 'Suggested a clearer title grounded in the existing thread context.',
+          },
+        }),
+      )
+
+    const service = createAssistantThreadService(db)
+    const result = await service.requestIdeaThreadTitleImprovement(
+      'idea-123',
+      {
+        currentSnapshotVersion: 2,
+        currentTitle: 'Owned idea',
+        currentBody: 'Private idea body',
+        currentSummary: 'Current summary',
+      },
+      {
+        requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+        fetchImpl: fetchMock as unknown as typeof fetch,
+        assistantServiceBaseUrl: 'https://assistant.example',
+      },
+    )
+
+    expect(result.action).toBe('title')
+    const [url, init] = fetchMock.mock.calls[1] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/improve-title')
+    expect(init?.method).toBe('POST')
+  })
+
+  it('requests a summary improvement for the authenticated idea owner', async () => {
+    await db.insert(schema.users).values({
+      id: 'user-1',
+      email: 'user-1@example.com',
+      displayName: 'User One',
+      timezone: 'UTC',
+    })
+    await db.insert(schema.ideas).values({
+      id: 'idea-123',
+      userId: 'user-1',
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'manual',
+    })
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          session: { id: 'session-1', userId: 'user-1' },
+          user: { id: 'user-1', email: 'user-1@example.com', name: 'User One' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          ok: true,
+          outcome: 'proposal_created',
+          action: 'summary',
+          thread: makeThread({
+            stage: 'developed',
+            visibleEvents: [
+              {
+                eventId: 'event-1',
+                type: 'user_turn_added',
+                createdAt: '2026-04-12T00:00:30.000Z',
+                summary: 'Please improve the summary only and keep it concise, product-relevant, and grounded in the current thread context.',
+                visibleToUser: true,
+              },
+            ],
+          }),
+          proposal: {
+            explanation: 'Suggested a sharper summary grounded in the existing thread context.',
+          },
+        }),
+      )
+
+    const service = createAssistantThreadService(db)
+    const result = await service.requestIdeaThreadSummaryImprovement(
+      'idea-123',
+      {
+        currentSnapshotVersion: 2,
+        currentTitle: 'Owned idea',
+        currentBody: 'Private idea body',
+        currentSummary: 'Current summary',
+      },
+      {
+        requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+        fetchImpl: fetchMock as unknown as typeof fetch,
+        assistantServiceBaseUrl: 'https://assistant.example',
+      },
+    )
+
+    expect(result.action).toBe('summary')
+    const [url, init] = fetchMock.mock.calls[1] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/improve-summary')
+    expect(init?.method).toBe('POST')
+  })
+
   it('submits a discovery turn for the authenticated idea owner', async () => {
     await db.insert(schema.users).values({
       id: 'user-1',

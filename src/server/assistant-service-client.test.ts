@@ -219,6 +219,86 @@ describe('assistant service client', () => {
     expect(init?.method).toBe('POST')
   })
 
+  it('requests a title improvement through the dedicated action contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        outcome: 'proposal_created',
+        action: 'title',
+        thread: makeThread({
+          stage: 'developed',
+          visibleEvents: [
+            {
+              eventId: 'event-1',
+              type: 'user_turn_added',
+              createdAt: '2026-04-12T00:00:30.000Z',
+              summary: 'Please improve the title only and keep the underlying idea grounded in the current thread context.',
+              visibleToUser: true,
+            },
+          ],
+        }),
+        proposal: {
+          explanation: 'Suggested a clearer title grounded in the existing thread context.',
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const { requestIdeaThreadTitleImprovement } = await import('./assistant-service-client')
+    const result = await requestIdeaThreadTitleImprovement({
+      ideaId: 'idea-123',
+      authHeaders: { cookie: 'better-auth.session_token=test-session' },
+      currentSnapshotVersion: 2,
+      currentTitle: 'Idea title',
+      currentBody: 'Idea body',
+      currentSummary: 'Current summary',
+    }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
+
+    expect(result.action).toBe('title')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/improve-title')
+    expect(init?.method).toBe('POST')
+  })
+
+  it('requests a summary improvement through the dedicated action contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        outcome: 'proposal_created',
+        action: 'summary',
+        thread: makeThread({
+          stage: 'developed',
+          visibleEvents: [
+            {
+              eventId: 'event-1',
+              type: 'user_turn_added',
+              createdAt: '2026-04-12T00:00:30.000Z',
+              summary: 'Please improve the summary only and keep it concise, product-relevant, and grounded in the current thread context.',
+              visibleToUser: true,
+            },
+          ],
+        }),
+        proposal: {
+          explanation: 'Suggested a sharper summary grounded in the existing thread context.',
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const { requestIdeaThreadSummaryImprovement } = await import('./assistant-service-client')
+    const result = await requestIdeaThreadSummaryImprovement({
+      ideaId: 'idea-123',
+      authHeaders: { cookie: 'better-auth.session_token=test-session' },
+      currentSnapshotVersion: 2,
+      currentTitle: 'Idea title',
+      currentBody: 'Idea body',
+      currentSummary: 'Current summary',
+    }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
+
+    expect(result.action).toBe('summary')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/improve-summary')
+    expect(init?.method).toBe('POST')
+  })
+
   it('submits a discovery turn through the thread contract', async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({

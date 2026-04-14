@@ -1,6 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 import { db } from '../db/client'
+import { canUseIdeaRefinementActions } from '../lib/idea-structured-actions'
 import { ideaStageSchema, ideaCreateSchema, ideaToggleStarSchema, ideaVaultSearchSchema } from '../lib/ideas'
 import { createAssistantThreadService } from './assistant-thread-service'
 import { resolveAuthenticatedPlannerUser } from './authenticated-user'
@@ -153,6 +154,10 @@ export async function persistIdeaRefinementAndSync(
 
   const thread = await dependencies.getIdeaThread(input.ideaId)
 
+  if (!canUseIdeaRefinementActions(thread.stage)) {
+    throw new Error('Title and summary improvements are only available for developed ideas.')
+  }
+
   if (input.kind === 'title' && !thread.workingIdea.provisionalTitle) {
     throw new Error('No title suggestion available')
   }
@@ -270,6 +275,45 @@ export const elaborateIdea = createServerFn({ method: 'POST' })
 
     return assistantThreadService.requestIdeaThreadElaboration(data.id, {
       actionInput: data.actionInput,
+      currentSnapshotVersion: latestSnapshot.version,
+      currentTitle: latestSnapshot.title,
+      currentBody: latestSnapshot.body,
+      currentSummary: latestSnapshot.threadSummary,
+    })
+  })
+
+export const requestIdeaRefinement = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string; kind: 'title' | 'summary' }) => input)
+  .handler(async ({ data }) => {
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    const idea = await ideasService.getIdea(data.id, user.id)
+
+    if (!idea) {
+      throw new Error('Idea not found')
+    }
+
+    const latestSnapshot = await ideasService.getLatestIdeaSnapshot(data.id, user.id)
+
+    if (!latestSnapshot) {
+      throw new Error('Accepted snapshot not found')
+    }
+
+    const currentThread = await assistantThreadService.getIdeaThread(data.id)
+
+    if (!canUseIdeaRefinementActions(currentThread.stage)) {
+      throw new Error('Title and summary improvements are only available for developed ideas.')
+    }
+
+    if (data.kind === 'title') {
+      return assistantThreadService.requestIdeaThreadTitleImprovement(data.id, {
+        currentSnapshotVersion: latestSnapshot.version,
+        currentTitle: latestSnapshot.title,
+        currentBody: latestSnapshot.body,
+        currentSummary: latestSnapshot.threadSummary,
+      })
+    }
+
+    return assistantThreadService.requestIdeaThreadSummaryImprovement(data.id, {
       currentSnapshotVersion: latestSnapshot.version,
       currentTitle: latestSnapshot.title,
       currentBody: latestSnapshot.body,

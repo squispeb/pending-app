@@ -6,17 +6,16 @@ import { IdeaThreadHistory } from '../components/idea-thread-history'
 import { useCaptureContext } from '../contexts/CaptureContext'
 import {
   canUseIdeaRefinementActions,
-  getIdeaRefinementActionInput,
   getIdeaRefinementActionLabel,
   type IdeaRefinementAction,
 } from '../lib/idea-structured-actions'
 import { getIdeaExcerpt, isIdeaStarred } from '../lib/ideas'
 import { parseIdeaThreadStreamFrames } from '../lib/idea-thread-stream'
 import {
-  elaborateIdea,
   getIdea,
   getIdeaThread,
   persistIdeaRefinement,
+  requestIdeaRefinement,
   streamIdeaThread,
   submitIdeaThreadTurn,
   toggleIdeaStar,
@@ -58,6 +57,10 @@ function IdeaDetailPage() {
   const [discoveryError, setDiscoveryError] = useState<string | null>(null)
   const [discoveryNotice, setDiscoveryNotice] = useState<string | null>(null)
   const [streamingAssistantText, setStreamingAssistantText] = useState('')
+  const [dismissedRefinements, setDismissedRefinements] = useState<{ title: string | null; summary: string | null }>({
+    title: null,
+    summary: null,
+  })
   const threadEndRef = useRef<HTMLDivElement | null>(null)
   const lastStreamEventIdRef = useRef<string | null>(null)
   const isThreadBusy = thread.status === 'queued' || thread.status === 'processing' || thread.status === 'streaming'
@@ -69,16 +72,22 @@ function IdeaDetailPage() {
   }
 
   const canUseRefinementActions = canUseIdeaRefinementActions(thread.stage)
-  const suggestedTitle = thread.workingIdea.provisionalTitle && thread.workingIdea.provisionalTitle !== idea.title
+  const suggestedTitle = thread.workingIdea.provisionalTitle
+    && thread.workingIdea.provisionalTitle !== idea.title
+    && thread.workingIdea.provisionalTitle !== dismissedRefinements.title
     ? thread.workingIdea.provisionalTitle
     : null
-  const suggestedSummary = thread.workingIdea.currentSummary && thread.workingIdea.currentSummary !== idea.threadSummary
+  const suggestedSummary = thread.workingIdea.currentSummary
+    && thread.workingIdea.currentSummary !== idea.threadSummary
+    && thread.workingIdea.currentSummary !== dismissedRefinements.summary
     ? thread.workingIdea.currentSummary
     : null
 
-  const latestAssistantQuestion = [...thread.visibleEvents]
+  const latestAssistantEvent = [...thread.visibleEvents]
     .reverse()
-    .find((event) => event.type === 'assistant_question')?.summary ?? null
+    .find((event) => event.type === 'assistant_question' || event.type === 'assistant_synthesis') ?? null
+  const latestAssistantQuestion = latestAssistantEvent?.type === 'assistant_question' ? latestAssistantEvent.summary : null
+  const latestAssistantReply = latestAssistantEvent?.type === 'assistant_synthesis' ? latestAssistantEvent.summary : null
 
   const missingDiscoveryAreas = [
     !thread.workingIdea.purpose ? 'purpose' : null,
@@ -112,7 +121,7 @@ function IdeaDetailPage() {
 
   const submitTurnMutation = useMutation({
     mutationFn: async (message: string) => submitIdeaThreadTurn({ data: { id: ideaId, message } }),
-    onSuccess: async (result, message) => {
+    onSuccess: async (result) => {
       setDiscoveryMessage('')
       setDiscoveryError(null)
       setDiscoveryNotice(result.state === 'queued' ? `Reply queued behind ${result.queueDepth} ${result.queueDepth === 1 ? 'active turn' : 'active turns'}.` : null)
@@ -127,15 +136,19 @@ function IdeaDetailPage() {
   })
 
   const requestRefinementMutation = useMutation({
-    mutationFn: async (action: IdeaRefinementAction) => elaborateIdea({
+    mutationFn: async (action: IdeaRefinementAction) => requestIdeaRefinement({
       data: {
         id: ideaId,
-        actionInput: getIdeaRefinementActionInput(action),
+        kind: action,
       },
     }),
     onSuccess: async (result, action) => {
       setDiscoveryError(null)
       setDiscoveryNotice(action === 'title' ? 'Title suggestion ready to review.' : 'Summary suggestion ready to review.')
+      setDismissedRefinements((current) => ({
+        ...current,
+        [action]: null,
+      }))
       queryClient.setQueryData(['idea-thread', ideaId], result.thread)
       await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
     },
@@ -155,6 +168,10 @@ function IdeaDetailPage() {
     onSuccess: async (_, kind) => {
       setDiscoveryError(null)
       setDiscoveryNotice(kind === 'title' ? 'Saved suggested title.' : 'Saved suggested summary.')
+      setDismissedRefinements((current) => ({
+        ...current,
+        [kind]: null,
+      }))
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['ideas'] }),
         queryClient.invalidateQueries({ queryKey: ['ideas', ideaId] }),
@@ -318,11 +335,13 @@ function IdeaDetailPage() {
                         ? queuedTurnCount > 0
                           ? `${queuedTurnCount} replies are queued while the assistant finishes the current turn.`
                           : 'Your latest reply is queued behind the current turn.'
-                        : thread.status === 'streaming'
+                      : thread.status === 'streaming'
                           ? 'The assistant is writing back in this thread now.'
                           : 'The assistant is processing the latest turn now.'
                       : latestAssistantQuestion
                       ? latestAssistantQuestion
+                      : latestAssistantReply
+                        ? latestAssistantReply
                       : missingDiscoveryAreas.length > 0
                         ? `The biggest gaps right now are ${missingDiscoveryAreas.join(', ')}.`
                         : 'The working idea has enough context for a stronger framing pass.'}
@@ -399,9 +418,9 @@ function IdeaDetailPage() {
                           : 'Assistant is processing the latest reply.'
                         : thread.status === 'streaming'
                           ? 'Assistant is replying now. You can queue another follow-up if needed.'
-                          : latestAssistantQuestion ?? 'Add the next piece of context and the assistant will continue the conversation.'}
-                  </div>
-                </div>
+                          : latestAssistantQuestion ?? latestAssistantReply ?? 'Add the next piece of context and the assistant will continue the conversation.'}
+                   </div>
+                 </div>
                 <button
                   type="button"
                   onClick={openCapture}
@@ -534,6 +553,20 @@ function IdeaDetailPage() {
                       >
                         Save title
                       </button>
+                      <button
+                        type="button"
+                        disabled={persistRefinementMutation.isPending}
+                        onClick={() => {
+                          setDismissedRefinements((current) => ({
+                            ...current,
+                            title: suggestedTitle,
+                          }))
+                          setDiscoveryNotice('Kept the current title.')
+                        }}
+                        className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Keep current title
+                      </button>
                     </div>
                   ) : null}
 
@@ -555,6 +588,20 @@ function IdeaDetailPage() {
                         className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         Save summary
+                      </button>
+                      <button
+                        type="button"
+                        disabled={persistRefinementMutation.isPending}
+                        onClick={() => {
+                          setDismissedRefinements((current) => ({
+                            ...current,
+                            summary: suggestedSummary,
+                          }))
+                          setDiscoveryNotice('Kept the current summary.')
+                        }}
+                        className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Keep current summary
                       </button>
                     </div>
                   ) : null}
