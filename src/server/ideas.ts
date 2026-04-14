@@ -1,7 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 import { db } from '../db/client'
-import { canUseIdeaRefinementActions } from '../lib/idea-structured-actions'
+import { canUseIdeaRefinementActions, type IdeaStructuredAction } from '../lib/idea-structured-actions'
 import { ideaStageSchema, ideaCreateSchema, ideaToggleStarSchema, ideaVaultSearchSchema } from '../lib/ideas'
 import { createAssistantThreadService } from './assistant-thread-service'
 import { resolveAuthenticatedPlannerUser } from './authenticated-user'
@@ -329,6 +329,65 @@ export const requestIdeaRefinement = createServerFn({ method: 'POST' })
       currentBody: latestSnapshot.body,
       currentSummary: latestSnapshot.threadSummary,
     })
+  })
+
+export const requestIdeaStructuredAction = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string; kind: Extract<IdeaStructuredAction, 'restructure' | 'breakdown'> }) => input)
+  .handler(async ({ data }) => {
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    const idea = await ideasService.getIdea(data.id, user.id)
+
+    if (!idea) {
+      throw new Error('Idea not found')
+    }
+
+    const latestSnapshot = await ideasService.getLatestIdeaSnapshot(data.id, user.id)
+
+    if (!latestSnapshot) {
+      throw new Error('Accepted snapshot not found')
+    }
+
+    const currentThread = await assistantThreadService.getIdeaThread(data.id)
+
+    if (!canUseIdeaRefinementActions(currentThread.stage)) {
+      throw new Error('Restructure and breakdown actions are only available for developed ideas.')
+    }
+
+    if (data.kind === 'restructure') {
+      return assistantThreadService.requestIdeaThreadRestructure(data.id, {
+        currentSnapshotVersion: latestSnapshot.version,
+        currentTitle: latestSnapshot.title,
+        currentBody: latestSnapshot.body,
+        currentSummary: latestSnapshot.threadSummary,
+      })
+    }
+
+    return assistantThreadService.requestIdeaThreadBreakdown(data.id, {
+      currentSnapshotVersion: latestSnapshot.version,
+      currentTitle: latestSnapshot.title,
+      currentBody: latestSnapshot.body,
+      currentSummary: latestSnapshot.threadSummary,
+    })
+  })
+
+export const acceptIdeaStructuredAction = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string; proposalId: string }) => input)
+  .handler(async ({ data }) => {
+    const acceptance = await assistantThreadService.acceptIdeaThreadStructuredAction(data.id, {
+      proposalId: data.proposalId,
+    })
+
+    return acceptance.thread
+  })
+
+export const rejectIdeaStructuredAction = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string; proposalId: string }) => input)
+  .handler(async ({ data }) => {
+    const rejection = await assistantThreadService.rejectIdeaThreadStructuredAction(data.id, {
+      proposalId: data.proposalId,
+    })
+
+    return rejection.thread
   })
 
 export const approveIdeaProposal = createServerFn({ method: 'POST' })

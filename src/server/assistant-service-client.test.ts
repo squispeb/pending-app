@@ -299,6 +299,110 @@ describe('assistant service client', () => {
     expect(init?.method).toBe('POST')
   })
 
+  it('requests a restructure action through the dedicated action contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        outcome: 'proposal_created',
+        action: 'restructure',
+        thread: makeThread({ stage: 'developed' }),
+        proposal: {
+          explanation: 'Restructured the framing to make the idea easier to evaluate.',
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const { requestIdeaThreadRestructure } = await import('./assistant-service-client')
+    const result = await requestIdeaThreadRestructure({
+      ideaId: 'idea-123',
+      authHeaders: { cookie: 'better-auth.session_token=test-session' },
+      currentSnapshotVersion: 2,
+      currentTitle: 'Idea title',
+      currentBody: 'Idea body',
+      currentSummary: 'Current summary',
+    }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
+
+    expect(result.action).toBe('restructure')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/restructure')
+    expect(init?.method).toBe('POST')
+  })
+
+  it('requests a breakdown action through the dedicated action contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        outcome: 'proposal_created',
+        action: 'breakdown',
+        thread: makeThread({ stage: 'developed' }),
+        proposal: {
+          explanation: 'Broke the idea into concrete next steps without converting it yet.',
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const { requestIdeaThreadBreakdown } = await import('./assistant-service-client')
+    const result = await requestIdeaThreadBreakdown({
+      ideaId: 'idea-123',
+      authHeaders: { cookie: 'better-auth.session_token=test-session' },
+      currentSnapshotVersion: 2,
+      currentTitle: 'Idea title',
+      currentBody: 'Idea body',
+      currentSummary: 'Current summary',
+    }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
+
+    expect(result.action).toBe('breakdown')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/breakdown')
+    expect(init?.method).toBe('POST')
+  })
+
+  it('accepts a structured action through the dedicated review contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        outcome: 'accepted',
+        thread: makeThread({ stage: 'developed' }),
+        threadEventId: 'event-accept-1',
+      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const { acceptIdeaThreadStructuredAction } = await import('./assistant-service-client')
+    const result = await acceptIdeaThreadStructuredAction({
+      ideaId: 'idea-123',
+      authHeaders: { cookie: 'better-auth.session_token=test-session' },
+      proposalId: 'proposal-1',
+    }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
+
+    expect(result.outcome).toBe('accepted')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/accept-structured')
+    expect(init?.method).toBe('POST')
+  })
+
+  it('rejects a structured action through the dedicated review contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        outcome: 'rejected',
+        thread: makeThread({ stage: 'developed' }),
+        threadEventId: 'event-reject-1',
+      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const { rejectIdeaThreadStructuredAction } = await import('./assistant-service-client')
+    const result = await rejectIdeaThreadStructuredAction({
+      ideaId: 'idea-123',
+      authHeaders: { cookie: 'better-auth.session_token=test-session' },
+      proposalId: 'proposal-1',
+    }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
+
+    expect(result.outcome).toBe('rejected')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/reject-structured')
+    expect(init?.method).toBe('POST')
+  })
+
   it('submits a discovery turn through the thread contract', async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({

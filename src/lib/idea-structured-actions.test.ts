@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   canUseIdeaRefinementActions,
-  getIdeaRefinementActionLabel,
+  getIdeaStructuredActionLabel,
 } from './idea-structured-actions'
 
 describe('idea structured actions', () => {
@@ -12,7 +12,9 @@ describe('idea structured actions', () => {
   })
 
   it('exposes user-facing labels for both refinement actions', () => {
-    expect(getIdeaRefinementActionLabel('title')).toBe('Improve title')
-    expect(getIdeaRefinementActionLabel('summary')).toBe('Improve summary')
+    expect(getIdeaStructuredActionLabel('title')).toBe('Improve title')
+    expect(getIdeaStructuredActionLabel('summary')).toBe('Improve summary')
+    expect(getIdeaStructuredActionLabel('restructure')).toBe('Restructure idea')
+    expect(getIdeaStructuredActionLabel('breakdown')).toBe('Break into next steps')
   })
 })

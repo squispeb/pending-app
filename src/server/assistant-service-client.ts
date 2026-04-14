@@ -67,6 +67,16 @@ const improveIdeaResponseSchema = z.object({
   }),
 })
 
+const transformIdeaResponseSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('proposal_created'),
+  action: z.enum(['restructure', 'breakdown']),
+  thread: ideaThreadViewSchema,
+  proposal: z.object({
+    explanation: z.string().min(1),
+  }),
+})
+
 const submitDiscoveryTurnResponseSchema = z.object({
   ok: z.literal(true),
   outcome: z.literal('accepted'),
@@ -91,6 +101,20 @@ const approveIdeaResponseSchema = z.object({
 })
 
 const rejectIdeaResponseSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('rejected'),
+  thread: ideaThreadViewSchema,
+  threadEventId: z.string().min(1),
+})
+
+const acceptStructuredActionResponseSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('accepted'),
+  thread: ideaThreadViewSchema,
+  threadEventId: z.string().min(1),
+})
+
+const rejectStructuredActionResponseSchema = z.object({
   ok: z.literal(true),
   outcome: z.literal('rejected'),
   thread: ideaThreadViewSchema,
@@ -258,6 +282,70 @@ export async function requestIdeaThreadSummaryImprovement(
   return requestIdeaImprovement('improve-summary', input, options)
 }
 
+async function requestIdeaTransform(
+  path: 'restructure' | 'breakdown',
+  input: {
+    ideaId: string
+    authHeaders: HeadersInit
+    currentSnapshotVersion: number
+    currentTitle: string
+    currentBody: string
+    currentSummary: string | null
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+
+  if (!baseUrl) {
+    throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  }
+
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/actions/${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      currentSnapshotVersion: input.currentSnapshotVersion,
+      currentTitle: input.currentTitle,
+      currentBody: input.currentBody,
+      currentSummary: input.currentSummary,
+    }),
+  })
+  const payload = await parseAssistantResponse(response)
+
+  return transformIdeaResponseSchema.parse(payload)
+}
+
+export async function requestIdeaThreadRestructure(
+  input: {
+    ideaId: string
+    authHeaders: HeadersInit
+    currentSnapshotVersion: number
+    currentTitle: string
+    currentBody: string
+    currentSummary: string | null
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  return requestIdeaTransform('restructure', input, options)
+}
+
+export async function requestIdeaThreadBreakdown(
+  input: {
+    ideaId: string
+    authHeaders: HeadersInit
+    currentSnapshotVersion: number
+    currentTitle: string
+    currentBody: string
+    currentSummary: string | null
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  return requestIdeaTransform('breakdown', input, options)
+}
+
 export async function submitIdeaDiscoveryTurn(
   input: {
     ideaId: string
@@ -377,4 +465,58 @@ export async function rejectIdeaThreadProposal(
   const payload = await parseAssistantResponse(response)
 
   return rejectIdeaResponseSchema.parse(payload)
+}
+
+export async function acceptIdeaThreadStructuredAction(
+  input: {
+    ideaId: string
+    authHeaders: HeadersInit
+    proposalId: string
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+
+  if (!baseUrl) {
+    throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  }
+
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/actions/accept-structured`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ proposalId: input.proposalId }),
+  })
+  const payload = await parseAssistantResponse(response)
+
+  return acceptStructuredActionResponseSchema.parse(payload)
+}
+
+export async function rejectIdeaThreadStructuredAction(
+  input: {
+    ideaId: string
+    authHeaders: HeadersInit
+    proposalId: string
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+
+  if (!baseUrl) {
+    throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  }
+
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/actions/reject-structured`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ proposalId: input.proposalId }),
+  })
+  const payload = await parseAssistantResponse(response)
+
+  return rejectStructuredActionResponseSchema.parse(payload)
 }

@@ -6,16 +6,20 @@ import { IdeaThreadHistory } from '../components/idea-thread-history'
 import { useCaptureContext } from '../contexts/CaptureContext'
 import {
   canUseIdeaRefinementActions,
-  getIdeaRefinementActionLabel,
+  getIdeaStructuredActionLabel,
   type IdeaRefinementAction,
+  type IdeaRestructureAction,
 } from '../lib/idea-structured-actions'
 import { getIdeaExcerpt, isIdeaStarred } from '../lib/ideas'
 import { parseIdeaThreadStreamFrames } from '../lib/idea-thread-stream'
 import {
+  acceptIdeaStructuredAction,
   getIdea,
   getIdeaThread,
   persistIdeaRefinement,
+  rejectIdeaStructuredAction,
   requestIdeaRefinement,
+  requestIdeaStructuredAction,
   streamIdeaThread,
   submitIdeaThreadTurn,
   toggleIdeaStar,
@@ -82,6 +86,7 @@ function IdeaDetailPage() {
     && thread.workingIdea.currentSummary !== dismissedRefinements.summary
     ? thread.workingIdea.currentSummary
     : null
+  const pendingStructuredAction = thread.pendingStructuredAction ?? null
 
   const latestAssistantEvent = [...thread.visibleEvents]
     .reverse()
@@ -158,6 +163,25 @@ function IdeaDetailPage() {
     },
   })
 
+  const requestStructuredActionMutation = useMutation({
+    mutationFn: async (action: IdeaRestructureAction) => requestIdeaStructuredAction({
+      data: {
+        id: ideaId,
+        kind: action,
+      },
+    }),
+    onSuccess: async (result, action) => {
+      setDiscoveryError(null)
+      setDiscoveryNotice(action === 'restructure' ? 'Restructured view ready to review.' : 'Next-step breakdown ready to review.')
+      queryClient.setQueryData(['idea-thread', ideaId], result.thread)
+      await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
+    },
+    onError: (error) => {
+      setDiscoveryNotice(null)
+      setDiscoveryError(error instanceof Error ? error.message : 'Failed to request a structured action.')
+    },
+  })
+
   const persistRefinementMutation = useMutation({
     mutationFn: async (kind: IdeaRefinementAction) => persistIdeaRefinement({
       data: {
@@ -181,6 +205,44 @@ function IdeaDetailPage() {
     onError: (error) => {
       setDiscoveryNotice(null)
       setDiscoveryError(error instanceof Error ? error.message : 'Failed to save the refinement suggestion.')
+    },
+  })
+
+  const acceptStructuredActionMutation = useMutation({
+    mutationFn: async (proposalId: string) => acceptIdeaStructuredAction({
+      data: {
+        id: ideaId,
+        proposalId,
+      },
+    }),
+    onSuccess: async (thread) => {
+      setDiscoveryError(null)
+      setDiscoveryNotice('Accepted the structured output in this thread.')
+      queryClient.setQueryData(['idea-thread', ideaId], thread)
+      await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
+    },
+    onError: (error) => {
+      setDiscoveryNotice(null)
+      setDiscoveryError(error instanceof Error ? error.message : 'Failed to accept the structured output.')
+    },
+  })
+
+  const rejectStructuredActionMutation = useMutation({
+    mutationFn: async (proposalId: string) => rejectIdeaStructuredAction({
+      data: {
+        id: ideaId,
+        proposalId,
+      },
+    }),
+    onSuccess: async (thread) => {
+      setDiscoveryError(null)
+      setDiscoveryNotice('Rejected the structured output and kept the current thread state.')
+      queryClient.setQueryData(['idea-thread', ideaId], thread)
+      await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
+    },
+    onError: (error) => {
+      setDiscoveryNotice(null)
+      setDiscoveryError(error instanceof Error ? error.message : 'Failed to reject the structured output.')
     },
   })
 
@@ -373,7 +435,18 @@ function IdeaDetailPage() {
                           onClick={() => requestRefinementMutation.mutate(action)}
                           className="inline-flex items-center justify-center rounded-2xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-300 hover:text-sky-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200"
                         >
-                          {getIdeaRefinementActionLabel(action)}
+                          {getIdeaStructuredActionLabel(action)}
+                        </button>
+                      ))}
+                      {(['restructure', 'breakdown'] as const).map((action) => (
+                        <button
+                          key={action}
+                          type="button"
+                          disabled={isThreadBusy || requestRefinementMutation.isPending || requestStructuredActionMutation.isPending || persistRefinementMutation.isPending}
+                          onClick={() => requestStructuredActionMutation.mutate(action)}
+                          className="inline-flex items-center justify-center rounded-2xl border border-violet-200 bg-white px-4 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200"
+                        >
+                          {getIdeaStructuredActionLabel(action)}
                         </button>
                       ))}
                     </div>
@@ -602,6 +675,73 @@ function IdeaDetailPage() {
                         className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         Keep current summary
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {canUseRefinementActions && pendingStructuredAction ? (
+              <div className="rounded-2xl border border-violet-200 bg-violet-50/70 p-4 dark:border-violet-500/30 dark:bg-violet-500/10">
+                <div className="mb-2 text-sm font-semibold text-[var(--ink-strong)]">Structured outputs</div>
+                <div className="space-y-4 text-sm text-[var(--ink-soft)]">
+                  {pendingStructuredAction.action === 'restructure' ? (
+                    <div className="space-y-2">
+                      <div className="font-medium text-[var(--ink-strong)]">Restructured framing</div>
+                      <div className="rounded-2xl border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/30 dark:bg-violet-500/10">
+                        <div className="text-xs uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">Suggested</div>
+                        <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{pendingStructuredAction.proposedSummary}</div>
+                      </div>
+                      <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
+                        <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Why</div>
+                        <div className="mt-1 whitespace-pre-wrap">{pendingStructuredAction.explanation}</div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending}
+                        onClick={() => acceptStructuredActionMutation.mutate(pendingStructuredAction.proposalId)}
+                        className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Accept restructure
+                      </button>
+                      <button
+                        type="button"
+                        disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending}
+                        onClick={() => rejectStructuredActionMutation.mutate(pendingStructuredAction.proposalId)}
+                        className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Reject restructure
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {pendingStructuredAction.action === 'breakdown' ? (
+                    <div className="space-y-2">
+                      <div className="font-medium text-[var(--ink-strong)]">Next-step breakdown</div>
+                      <div className="rounded-2xl border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/30 dark:bg-violet-500/10">
+                        <div className="text-xs uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">Suggested</div>
+                        <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{pendingStructuredAction.proposedSummary}</div>
+                      </div>
+                      <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
+                        <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Why</div>
+                        <div className="mt-1 whitespace-pre-wrap">{pendingStructuredAction.explanation}</div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending}
+                        onClick={() => acceptStructuredActionMutation.mutate(pendingStructuredAction.proposalId)}
+                        className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Accept breakdown
+                      </button>
+                      <button
+                        type="button"
+                        disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending}
+                        onClick={() => rejectStructuredActionMutation.mutate(pendingStructuredAction.proposalId)}
+                        className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Reject breakdown
                       </button>
                     </div>
                   ) : null}
