@@ -11,6 +11,8 @@ export const ideaSourceTypeSchema = z.enum([
 
 export const ideaStatusSchema = z.enum(['active', 'archived'])
 
+export const ideaStageSchema = z.enum(['discovery', 'framing', 'developed'])
+
 const optionalTrimmedString = z
   .string()
   .trim()

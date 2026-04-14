@@ -34,6 +34,7 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
       source_type text DEFAULT 'manual' NOT NULL,
       source_input text,
       thread_summary text,
+      stage text DEFAULT 'discovery' NOT NULL,
       classification_confidence text,
       capture_language text,
       status text DEFAULT 'active' NOT NULL,
@@ -55,6 +56,7 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
       source_type text DEFAULT 'manual' NOT NULL,
       source_input text,
       thread_summary text,
+      stage text DEFAULT 'discovery' NOT NULL,
       created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
       updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
       FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE cascade
@@ -303,6 +305,7 @@ describe('assistant thread service', () => {
       version: 1,
       title: 'Owned idea',
       sourceInput: 'This should create a thread link.',
+      stage: 'discovery',
     })
   })
 
@@ -490,7 +493,6 @@ describe('assistant thread service', () => {
       body: 'Private idea body',
       sourceType: 'manual',
     })
-
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -517,6 +519,7 @@ describe('assistant thread service', () => {
               createdAt: '2026-04-12T00:00:30.000Z',
               completedAt: null,
             },
+            queuedTurns: [],
             lastTurn: {
               turnId: 'turn-1',
               source: 'text',
@@ -576,6 +579,120 @@ describe('assistant thread service', () => {
     const [url, init] = fetchMock.mock.calls[1] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123/turns')
     expect(init?.method).toBe('POST')
+  })
+
+  it('persists a canonical checkpoint when reading a completed thread state that advanced stage', async () => {
+    await db.insert(schema.users).values({
+      id: 'user-1',
+      email: 'user-1@example.com',
+      displayName: 'User One',
+      timezone: 'UTC',
+    })
+    await db.insert(schema.ideas).values({
+      id: 'idea-123',
+      userId: 'user-1',
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'manual',
+    })
+    await db.insert(schema.ideaSnapshots).values({
+      id: 'snapshot-1',
+      ideaId: 'idea-123',
+      version: 1,
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'manual',
+      threadSummary: null,
+      stage: 'discovery',
+    })
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          session: { id: 'session-1', userId: 'user-1' },
+          user: { id: 'user-1', email: 'user-1@example.com', name: 'User One' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json(makeThread({
+          stage: 'framing',
+          status: 'idle',
+          activeTurn: null,
+          queuedTurns: [],
+          lastTurn: {
+            turnId: 'turn-1',
+            source: 'text',
+            userMessage: 'Reduce onboarding drop-off for first-time users.',
+            transcriptLanguage: null,
+            state: 'completed',
+            createdAt: '2026-04-12T00:00:30.000Z',
+            completedAt: '2026-04-12T00:00:31.000Z',
+          },
+          visibleEvents: [
+            {
+              eventId: 'event-1',
+              type: 'thread_created',
+              createdAt: '2026-04-12T00:00:00.000Z',
+              summary: 'Idea discovery thread created and ready for context building.',
+              visibleToUser: true,
+            },
+            {
+              eventId: 'event-2',
+              type: 'assistant_synthesis',
+              createdAt: '2026-04-12T00:00:31.000Z',
+              summary: 'Captured purpose: Reduce onboarding drop-off for first-time users.',
+              visibleToUser: true,
+            },
+            {
+              eventId: 'event-3',
+              type: 'stage_changed',
+              createdAt: '2026-04-12T00:00:31.500Z',
+              summary: 'The idea has enough context to move from discovery into framing.',
+              visibleToUser: true,
+            },
+          ],
+          workingIdea: {
+            provisionalTitle: 'Owned idea',
+            currentSummary: 'Purpose: Reduce onboarding drop-off for first-time users.',
+            purpose: 'Reduce onboarding drop-off for first-time users.',
+            scope: 'Start with a guided onboarding checklist for first-time users.',
+            targetUsers: ['First-time users'],
+            expectedImpact: 'Improve activation and reduce early drop-off.',
+            researchAreas: [],
+            constraints: [],
+            openQuestions: [],
+          },
+        })),
+      )
+
+    const service = createAssistantThreadService(db)
+    const result = await service.getIdeaThread('idea-123', {
+      requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      assistantServiceBaseUrl: 'https://assistant.example',
+    })
+
+    expect(result.stage).toBe('framing')
+
+    const detail = await db.query.ideas.findFirst({
+      where: eq(schema.ideas.id, 'idea-123'),
+    })
+    const snapshots = await db.query.ideaSnapshots.findMany({
+      where: eq(schema.ideaSnapshots.ideaId, 'idea-123'),
+      orderBy: [schema.ideaSnapshots.version],
+    })
+
+    expect(detail).toMatchObject({
+      stage: 'framing',
+      threadSummary: 'Purpose: Reduce onboarding drop-off for first-time users.',
+    })
+    expect(snapshots).toHaveLength(2)
+    expect(snapshots[1]).toMatchObject({
+      version: 2,
+      stage: 'framing',
+      threadSummary: 'Purpose: Reduce onboarding drop-off for first-time users.',
+    })
   })
 
   it('approves a proposal through the authenticated assistant thread boundary', async () => {

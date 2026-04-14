@@ -4,24 +4,27 @@ import { parseIdeaThreadStreamFrames } from './idea-thread-stream'
 describe('idea thread stream parser', () => {
   it('parses assistant chunk and completion events from SSE frames', () => {
     const parsed = parseIdeaThreadStreamFrames([
+      'id: event-1',
       'data: {"type":"assistant_chunk","turnId":"turn-1","textDelta":"Hello "}',
       '',
+      'id: event-2',
       'data: {"type":"assistant_chunk","turnId":"turn-1","textDelta":"world"}',
       '',
+      'id: event-3',
       'data: {"type":"turn_completed","turnId":"turn-1","thread":{"status":"idle"}}',
       '',
     ].join('\n'))
 
-    expect(parsed.remainder).toBe('data: {"type":"turn_completed","turnId":"turn-1","thread":{"status":"idle"}}\n')
+    expect(parsed.remainder).toBe('id: event-3\ndata: {"type":"turn_completed","turnId":"turn-1","thread":{"status":"idle"}}\n')
     expect(parsed.events).toEqual([
-      { type: 'assistant_chunk', turnId: 'turn-1', textDelta: 'Hello ' },
-      { type: 'assistant_chunk', turnId: 'turn-1', textDelta: 'world' },
+      { streamEventId: 'event-1', type: 'assistant_chunk', turnId: 'turn-1', textDelta: 'Hello ' },
+      { streamEventId: 'event-2', type: 'assistant_chunk', turnId: 'turn-1', textDelta: 'world' },
     ])
 
     const completed = parseIdeaThreadStreamFrames(`${parsed.remainder}\n`)
     expect(completed.remainder).toBe('')
     expect(completed.events).toEqual([
-      { type: 'turn_completed', turnId: 'turn-1', thread: { status: 'idle' } },
+      { streamEventId: 'event-3', type: 'turn_completed', turnId: 'turn-1', thread: { status: 'idle' } },
     ])
   })
 

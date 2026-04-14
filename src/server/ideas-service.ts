@@ -3,6 +3,7 @@ import type { Database } from '../db/client'
 import { ideaSnapshots, ideaThreadRefs, ideas } from '../db/schema'
 import {
   ideaCreateSchema,
+  ideaStageSchema,
   normalizeIdeaValuesForStorage,
   sortIdeas,
   type CreateIdeaInput,
@@ -32,6 +33,7 @@ export function createIdeasService(database: Database) {
         id,
         userId,
         ...normalizeIdeaValuesForStorage(data),
+        stage: 'discovery',
         updatedAt: now,
         createdAt: now,
       })
@@ -65,6 +67,7 @@ export function createIdeasService(database: Database) {
         sourceType: idea.sourceType,
         sourceInput: idea.sourceInput,
         threadSummary: idea.threadSummary,
+        stage: idea.stage,
         createdAt: now,
         updatedAt: now,
       })
@@ -154,6 +157,7 @@ export function createIdeasService(database: Database) {
         sourceType: idea.sourceType,
         sourceInput: idea.sourceInput,
         threadSummary: input.threadSummary,
+        stage: idea.stage,
         createdAt: now,
         updatedAt: now,
       })
@@ -171,6 +175,84 @@ export function createIdeasService(database: Database) {
       return {
         snapshotId,
         version: nextVersion,
+      }
+    },
+    async syncIdeaThreadCheckpoint(
+      input: {
+        ideaId: string
+        expectedSnapshotVersion: number
+        title: string
+        body: string
+        threadSummary: string | null
+        stage: 'discovery' | 'framing' | 'developed'
+      },
+      userId: string,
+    ) {
+      const stage = ideaStageSchema.parse(input.stage)
+      const idea = await database.query.ideas.findFirst({
+        where: and(eq(ideas.id, input.ideaId), eq(ideas.userId, userId), isNull(ideas.archivedAt)),
+      })
+
+      if (!idea) {
+        throw new Error('Idea not found')
+      }
+
+      const latestSnapshot = await this.getLatestIdeaSnapshot(input.ideaId, userId)
+
+      if (!latestSnapshot) {
+        throw new Error('Accepted snapshot not found')
+      }
+
+      if (latestSnapshot.version !== input.expectedSnapshotVersion) {
+        throw new Error('Idea snapshot conflict')
+      }
+
+      const titleChanged = latestSnapshot.title !== input.title
+      const bodyChanged = latestSnapshot.body !== input.body
+      const summaryChanged = latestSnapshot.threadSummary !== input.threadSummary
+      const stageChanged = latestSnapshot.stage !== stage
+
+      if (!titleChanged && !bodyChanged && !summaryChanged && !stageChanged) {
+        return {
+          snapshotId: latestSnapshot.id,
+          version: latestSnapshot.version,
+          changed: false as const,
+        }
+      }
+
+      const now = new Date()
+      const nextVersion = latestSnapshot.version + 1
+      const snapshotId = crypto.randomUUID()
+
+      await database.insert(ideaSnapshots).values({
+        id: snapshotId,
+        ideaId: idea.id,
+        version: nextVersion,
+        title: input.title,
+        body: input.body,
+        sourceType: idea.sourceType,
+        sourceInput: idea.sourceInput,
+        threadSummary: input.threadSummary,
+        stage,
+        createdAt: now,
+        updatedAt: now,
+      })
+
+      await database
+        .update(ideas)
+        .set({
+          title: input.title,
+          body: input.body,
+          threadSummary: input.threadSummary,
+          stage,
+          updatedAt: now,
+        })
+        .where(and(eq(ideas.id, idea.id), eq(ideas.userId, userId), isNull(ideas.archivedAt)))
+
+      return {
+        snapshotId,
+        version: nextVersion,
+        changed: true as const,
       }
     },
     async toggleIdeaStar(id: string, userId: string) {

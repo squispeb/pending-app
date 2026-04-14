@@ -45,6 +45,7 @@ function IdeaDetailPage() {
   const [discoveryNotice, setDiscoveryNotice] = useState<string | null>(null)
   const [streamingAssistantText, setStreamingAssistantText] = useState('')
   const threadEndRef = useRef<HTMLDivElement | null>(null)
+  const lastStreamEventIdRef = useRef<string | null>(null)
   const isThreadBusy = thread.status === 'queued' || thread.status === 'processing' || thread.status === 'streaming'
   const queuedTurnCount = thread.queuedTurns.length
   const latestQueuedTurn = thread.queuedTurns.at(-1) ?? null
@@ -123,57 +124,88 @@ function IdeaDetailPage() {
   useEffect(() => {
     if (!isThreadBusy) {
       setStreamingAssistantText('')
+      lastStreamEventIdRef.current = null
       return
     }
 
     const abortController = new AbortController()
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
 
     void (async () => {
-      try {
-        const response = await streamIdeaThread({ data: { id: ideaId }, signal: abortController.signal as never })
+      while (!abortController.signal.aborted) {
+        try {
+          const response = await streamIdeaThread({
+            data: { id: ideaId, lastEventId: lastStreamEventIdRef.current },
+            signal: abortController.signal as never,
+          })
 
-        if (!response.body) {
-          return
-        }
-
-        const reader = response.body
-          .pipeThrough(new TextDecoderStream())
-          .getReader()
-        let buffer = ''
-
-        while (true) {
-          const { value, done } = await reader.read()
-
-          if (done) {
-            break
+          if (!response.body) {
+            return
           }
 
-          buffer += value
-          const parsed = parseIdeaThreadStreamFrames(buffer)
-          buffer = parsed.remainder
+          const reader = response.body
+            .pipeThrough(new TextDecoderStream())
+            .getReader()
+          let buffer = ''
 
-          for (const payload of parsed.events) {
-            if (payload.type === 'assistant_chunk') {
-              setStreamingAssistantText((current) => `${current}${payload.textDelta}`)
-              continue
+          while (true) {
+            const { value, done } = await reader.read()
+
+            if (done) {
+              break
             }
 
-            if (payload.type === 'turn_completed' || payload.type === 'turn_failed') {
-              setStreamingAssistantText('')
+            buffer += value
+            const parsed = parseIdeaThreadStreamFrames(buffer)
+            buffer = parsed.remainder
+
+            for (const payload of parsed.events) {
+              if (payload.streamEventId) {
+                lastStreamEventIdRef.current = payload.streamEventId
+              }
+
+              if (payload.type === 'assistant_chunk') {
+                setStreamingAssistantText((current) => `${current}${payload.textDelta}`)
+                continue
+              }
+
+              if (payload.type === 'turn_completed' || payload.type === 'turn_failed') {
+                setStreamingAssistantText('')
+              }
             }
           }
+        } catch (error) {
+          if (abortController.signal.aborted) {
+            return
+          }
+
+          setDiscoveryError(error instanceof Error ? error.message : 'Failed to subscribe to assistant stream.')
         }
-      } catch (error) {
+
         if (abortController.signal.aborted) {
           return
         }
 
-        setDiscoveryError(error instanceof Error ? error.message : 'Failed to subscribe to assistant stream.')
+        await new Promise<void>((resolve) => {
+          const finish = () => {
+            if (reconnectTimeout) {
+              clearTimeout(reconnectTimeout)
+              reconnectTimeout = null
+            }
+            resolve()
+          }
+
+          reconnectTimeout = setTimeout(finish, 1000)
+          abortController.signal.addEventListener('abort', finish, { once: true })
+        })
       }
     })()
 
     return () => {
       abortController.abort()
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout)
+      }
     }
   }, [ideaId, isThreadBusy])
 

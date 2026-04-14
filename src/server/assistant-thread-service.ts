@@ -20,6 +20,50 @@ type ResolveIdeaThreadOptions = {
 export function createAssistantThreadService(database: Database) {
   const ideasService = createIdeasService(database)
 
+  async function syncThreadCheckpointIfNeeded(
+    ideaId: string,
+    userId: string,
+    thread: {
+      stage: 'discovery' | 'framing' | 'developed'
+      lastTurn: { state: 'queued' | 'processing' | 'streaming' | 'completed' | 'failed' } | null
+      workingIdea: {
+        provisionalTitle: string | null
+        currentSummary: string | null
+      }
+      visibleEvents: Array<{ type: string }>
+    },
+  ) {
+    const latestSnapshot = await ideasService.getLatestIdeaSnapshot(ideaId, userId)
+
+    if (!latestSnapshot || thread.lastTurn?.state !== 'completed') {
+      return
+    }
+
+    const latestVisibleEvent = thread.visibleEvents.at(-1)?.type
+
+    if (latestVisibleEvent !== 'assistant_question' && latestVisibleEvent !== 'stage_changed') {
+      return
+    }
+
+    const idea = await ideasService.getIdea(ideaId, userId)
+
+    if (!idea) {
+      throw new Error('Idea not found')
+    }
+
+    await ideasService.syncIdeaThreadCheckpoint(
+      {
+        ideaId,
+        expectedSnapshotVersion: latestSnapshot.version,
+        title: thread.workingIdea.provisionalTitle ?? idea.title,
+        body: idea.body,
+        threadSummary: thread.workingIdea.currentSummary,
+        stage: thread.stage,
+      },
+      userId,
+    )
+  }
+
   return {
     async bootstrapIdeaThread(ideaId: string, options?: ResolveIdeaThreadOptions) {
       const { user, authHeaders } = await resolveAuthenticatedPlannerUser(database, {
@@ -103,7 +147,7 @@ export function createAssistantThreadService(database: Database) {
         throw new Error('Idea not found')
       }
 
-      return getAssistantIdeaThread(
+      const thread = await getAssistantIdeaThread(
         {
           ideaId,
           authHeaders,
@@ -113,8 +157,12 @@ export function createAssistantThreadService(database: Database) {
           baseUrl: options?.assistantServiceBaseUrl,
         },
       )
+
+      await syncThreadCheckpointIfNeeded(ideaId, user.id, thread)
+
+      return thread
     },
-    async streamIdeaThread(ideaId: string, options?: ResolveIdeaThreadOptions) {
+    async streamIdeaThread(ideaId: string, options?: ResolveIdeaThreadOptions & { lastEventId?: string | null }) {
       const { user, authHeaders } = await resolveAuthenticatedPlannerUser(database, {
         requestHeaders: options?.requestHeaders,
         fetchImpl: options?.fetchImpl,
@@ -130,6 +178,7 @@ export function createAssistantThreadService(database: Database) {
         {
           ideaId,
           authHeaders,
+          lastEventId: options?.lastEventId ?? null,
         },
         {
           fetchImpl: options?.fetchImpl,
@@ -189,7 +238,7 @@ export function createAssistantThreadService(database: Database) {
         throw new Error('Idea not found')
       }
 
-      return submitIdeaDiscoveryTurn(
+      const result = await submitIdeaDiscoveryTurn(
         {
           ideaId,
           authHeaders,
@@ -200,6 +249,8 @@ export function createAssistantThreadService(database: Database) {
           baseUrl: options?.assistantServiceBaseUrl,
         },
       )
+
+      return result
     },
     async approveIdeaThreadProposal(
       ideaId: string,

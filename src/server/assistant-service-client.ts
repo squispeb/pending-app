@@ -212,7 +212,7 @@ export async function submitIdeaDiscoveryTurn(
 }
 
 export async function streamAssistantIdeaThread(
-  input: { ideaId: string; authHeaders: HeadersInit },
+  input: { ideaId: string; authHeaders: HeadersInit; lastEventId?: string | null },
   options?: { fetchImpl?: typeof fetch; baseUrl?: string },
 ) {
   const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
@@ -223,6 +223,10 @@ export async function streamAssistantIdeaThread(
 
   const headers = new Headers(input.authHeaders)
   headers.set('accept', 'text/event-stream')
+
+  if (input.lastEventId) {
+    headers.set('last-event-id', input.lastEventId)
+  }
 
   const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/stream`, {
     method: 'GET',

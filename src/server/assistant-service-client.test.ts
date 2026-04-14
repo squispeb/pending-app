@@ -309,6 +309,28 @@ describe('assistant service client', () => {
     expect(init?.body).toBe(JSON.stringify({ message: 'Reduce onboarding drop-off for first-time users.' }))
   })
 
+  it('passes the last event id when reconnecting a thread stream', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response('id: event-1\ndata: {"streamEventId":"event-1","type":"assistant_chunk","turnId":"turn-1","textDelta":"Hello"}\n\n', {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    )
+
+    const { streamAssistantIdeaThread } = await import('./assistant-service-client')
+    const response = await streamAssistantIdeaThread({
+      ideaId: 'idea-123',
+      authHeaders: { cookie: 'better-auth.session_token=test-session' },
+      lastEventId: 'event-99',
+    }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
+
+    expect(response.headers.get('content-type')).toContain('text/event-stream')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/stream')
+    const headers = init?.headers as Headers
+    expect(headers.get('last-event-id')).toBe('event-99')
+  })
+
   it('approves a proposal through the approval contract', async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({

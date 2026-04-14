@@ -70,6 +70,7 @@ export const ideas = sqliteTable('ideas', {
   sourceType: text('source_type').notNull().default('manual'),
   sourceInput: text('source_input'),
   threadSummary: text('thread_summary'),
+  stage: text('stage').notNull().default('discovery'),
   classificationConfidence: text('classification_confidence'),
   captureLanguage: text('capture_language'),
   status: text('status').notNull().default('active'),
@@ -96,6 +97,7 @@ export const ideaSnapshots = sqliteTable(
     sourceType: text('source_type').notNull().default('manual'),
     sourceInput: text('source_input'),
     threadSummary: text('thread_summary'),
+    stage: text('stage').notNull().default('discovery'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .notNull()
       .default(sql`(unixepoch() * 1000)`),

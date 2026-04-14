@@ -34,6 +34,7 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
       source_type text DEFAULT 'manual' NOT NULL,
       source_input text,
       thread_summary text,
+      stage text DEFAULT 'discovery' NOT NULL,
       classification_confidence text,
       capture_language text,
       status text DEFAULT 'active' NOT NULL,
@@ -55,6 +56,7 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
       source_type text DEFAULT 'manual' NOT NULL,
       source_input text,
       thread_summary text,
+      stage text DEFAULT 'discovery' NOT NULL,
       created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
       updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
       FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE cascade
@@ -133,6 +135,7 @@ describe('ideas service', () => {
     expect(ideas).toHaveLength(1)
     expect(ideas[0]?.id).toBe(created.id)
     expect(ideas[0]?.sourceType).toBe('typed_capture')
+    expect(ideas[0]?.stage).toBe('discovery')
     expect(detail?.sourceInput).toBe('I want this app to become a place for my best ideas.')
   })
 
@@ -228,6 +231,7 @@ describe('ideas service', () => {
       title: 'Thread bootstrap idea',
       sourceType: 'typed_capture',
       sourceInput: 'This should become a real idea thread.',
+      stage: 'discovery',
     })
   })
 
@@ -288,6 +292,7 @@ describe('ideas service', () => {
       title: 'Expanded idea',
       body: 'Expanded body',
       threadSummary: 'Expanded summary',
+      stage: 'discovery',
     })
     expect(snapshots).toHaveLength(2)
     expect(snapshots[1]).toMatchObject({
@@ -297,7 +302,97 @@ describe('ideas service', () => {
       body: 'Expanded body',
       threadSummary: 'Expanded summary',
       sourceInput: 'Original source input',
+      stage: 'discovery',
     })
+  })
+
+  it('persists a new canonical checkpoint when the working idea meaningfully advances', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Original idea',
+      body: 'Original body',
+      sourceType: 'typed_capture',
+      sourceInput: 'Original source input',
+    })
+
+    await service.createInitialSnapshotAndThreadRef(
+      {
+        ideaId: created.id,
+        threadId: 'thread-user-1:idea-123',
+      },
+      primaryUserId,
+    )
+
+    const result = await service.syncIdeaThreadCheckpoint(
+      {
+        ideaId: created.id,
+        expectedSnapshotVersion: 1,
+        title: 'Original idea',
+        body: 'Original body',
+        threadSummary: 'Purpose: Reduce onboarding drop-off. Users: First-time users, trial teams.',
+        stage: 'framing',
+      },
+      primaryUserId,
+    )
+
+    const detail = await service.getIdea(created.id, primaryUserId)
+    const snapshots = await db.query.ideaSnapshots.findMany({
+      where: eq(schema.ideaSnapshots.ideaId, created.id),
+      orderBy: [schema.ideaSnapshots.version],
+    })
+
+    expect(result).toMatchObject({
+      version: 2,
+      changed: true,
+    })
+    expect(detail).toMatchObject({
+      threadSummary: 'Purpose: Reduce onboarding drop-off. Users: First-time users, trial teams.',
+      stage: 'framing',
+    })
+    expect(snapshots[1]).toMatchObject({
+      version: 2,
+      threadSummary: 'Purpose: Reduce onboarding drop-off. Users: First-time users, trial teams.',
+      stage: 'framing',
+    })
+  })
+
+  it('skips checkpoint writes when the canonical idea state is unchanged', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Original idea',
+      body: 'Original body',
+      sourceType: 'typed_capture',
+      sourceInput: 'Original source input',
+    })
+
+    await service.createInitialSnapshotAndThreadRef(
+      {
+        ideaId: created.id,
+        threadId: 'thread-user-1:idea-123',
+      },
+      primaryUserId,
+    )
+
+    const result = await service.syncIdeaThreadCheckpoint(
+      {
+        ideaId: created.id,
+        expectedSnapshotVersion: 1,
+        title: 'Original idea',
+        body: 'Original body',
+        threadSummary: null,
+        stage: 'discovery',
+      },
+      primaryUserId,
+    )
+
+    const snapshots = await db.query.ideaSnapshots.findMany({
+      where: eq(schema.ideaSnapshots.ideaId, created.id),
+      orderBy: [schema.ideaSnapshots.version],
+    })
+
+    expect(result).toMatchObject({
+      version: 1,
+      changed: false,
+    })
+    expect(snapshots).toHaveLength(1)
   })
 
   it('rejects approved proposal writes when the snapshot version is stale', async () => {

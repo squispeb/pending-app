@@ -148,9 +148,11 @@ export const submitIdeaThreadTurn = createServerFn({ method: 'POST' })
   })
 
 export const streamIdeaThread = createServerFn({ method: 'GET' })
-  .inputValidator((input: { id: string }) => input)
+  .inputValidator((input: { id: string; lastEventId?: string | null }) => input)
   .handler(async ({ data }) => {
-    const response = await assistantThreadService.streamIdeaThread(data.id)
+    const response = await assistantThreadService.streamIdeaThread(data.id, {
+      lastEventId: data.lastEventId ?? null,
+    })
     response.headers.set('x-tss-raw', 'true')
     return response
   })
