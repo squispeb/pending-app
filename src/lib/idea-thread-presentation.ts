@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Clock3, Lightbulb, MessageSquareText, XCircle } from 'lucide-react'
+import { AlertTriangle, HelpCircle, Lightbulb, MessageSquareText, Sparkles, TrendingUp } from 'lucide-react'
 
 export type ThreadEventType = 'thread_created' | 'user_turn_added' | 'assistant_question' | 'assistant_synthesis' | 'stage_changed' | 'assistant_failed'
 
@@ -24,9 +24,9 @@ export function getThreadEventPresentation(type: ThreadEventType) {
     case 'assistant_synthesis':
       return {
         label: formatThreadEventLabel(type),
-        icon: Clock3,
-        iconClassName: 'text-amber-500',
-        cardClassName: 'border-amber-200 bg-amber-50/70 dark:border-amber-500/30 dark:bg-amber-500/10',
+        icon: Sparkles,
+        iconClassName: 'text-violet-500',
+        cardClassName: 'border-violet-200 bg-violet-50/70 dark:border-violet-500/30 dark:bg-violet-500/10',
       }
     case 'user_turn_added':
       return {
@@ -38,16 +38,16 @@ export function getThreadEventPresentation(type: ThreadEventType) {
     case 'assistant_question':
       return {
         label: formatThreadEventLabel(type),
-        icon: CheckCircle2,
+        icon: HelpCircle,
         iconClassName: 'text-emerald-500',
         cardClassName: 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-500/30 dark:bg-emerald-500/10',
       }
     case 'stage_changed':
       return {
         label: formatThreadEventLabel(type),
-        icon: XCircle,
-        iconClassName: 'text-rose-500',
-        cardClassName: 'border-rose-200 bg-rose-50/70 dark:border-rose-500/30 dark:bg-rose-500/10',
+        icon: TrendingUp,
+        iconClassName: 'text-sky-500',
+        cardClassName: 'border-sky-200 bg-sky-50/70 dark:border-sky-500/30 dark:bg-sky-500/10',
       }
     case 'assistant_failed':
       return {
@@ -85,7 +85,7 @@ export function deriveThreadState(visibleEvents: Array<{ type: ThreadEventType }
     case 'stage_changed':
       return {
         label: 'Stage updated',
-        badgeClassName: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300',
+        badgeClassName: 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300',
       }
     case 'assistant_failed':
       return {

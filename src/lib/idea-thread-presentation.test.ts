@@ -20,7 +20,7 @@ describe('idea thread presentation', () => {
     ])
 
     expect(state.label).toBe('Stage updated')
-    expect(state.badgeClassName).toContain('rose')
+    expect(state.badgeClassName).toContain('sky')
   })
 
   it('derives discovery guidance and failure states distinctly', () => {
@@ -51,7 +51,7 @@ describe('idea thread presentation', () => {
     })
     expect(getThreadEventPresentation('assistant_synthesis')).toMatchObject({
       label: 'Assistant synthesis',
-      iconClassName: 'text-amber-500',
+      iconClassName: 'text-violet-500',
     })
     expect(getThreadEventPresentation('assistant_question')).toMatchObject({
       label: 'Assistant asked',
@@ -59,7 +59,7 @@ describe('idea thread presentation', () => {
     })
     expect(getThreadEventPresentation('stage_changed')).toMatchObject({
       label: 'Stage changed',
-      iconClassName: 'text-rose-500',
+      iconClassName: 'text-sky-500',
     })
     expect(getThreadEventPresentation('assistant_failed')).toMatchObject({
       label: 'Assistant failed',

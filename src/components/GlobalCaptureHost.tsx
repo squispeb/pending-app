@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { CalendarDays, CheckCircle, ChevronDown, Mic, RotateCcw, SendHorizonal, Square, X } from 'lucide-react'
+import { CalendarDays, CheckCircle, ChevronDown, Lightbulb, Mic, RotateCcw, SendHorizonal, Square, X } from 'lucide-react'
 import {
   useMutation,
   useQueryClient,
@@ -409,7 +409,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   // ---------------------------------------------------------------------------
   // Recording
   // ---------------------------------------------------------------------------
-  async function startRecording() {
+  async function startRecording(threadIdeaId: string | null = captureThreadIdeaId) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const recorder = new MediaRecorder(stream)
@@ -421,7 +421,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
         stream.getTracks().forEach((t) => t.stop())
         stopVisualizer()
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-        if (captureThreadIdeaId) {
+        if (threadIdeaId) {
           voiceThreadReplyMutation.mutate(blob)
           return
         }
@@ -516,7 +516,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureMode('recording')
     registerEscapeHandler()
     // Auto-start recording when the sheet opens — no extra tap required
-    void startRecording()
+    void startRecording(currentIdeaThreadTarget)
   }
 
   function openCaptureWithText(text: string) {

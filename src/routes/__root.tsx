@@ -123,9 +123,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body className="font-sans antialiased [overflow-wrap:anywhere] selection:bg-[rgba(79,184,178,0.24)]">
         <Header />
-        <div className="min-h-screen lg:min-h-[calc(100vh-4rem)]">{children}</div>
-        <Footer />
         <GlobalCaptureHost>
+          <div className="min-h-screen lg:min-h-[calc(100vh-4rem)]">{children}</div>
+          <Footer />
           <BottomTabBar />
         </GlobalCaptureHost>
         <PwaLifecycle />

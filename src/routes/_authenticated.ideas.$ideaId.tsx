@@ -1,5 +1,5 @@
-import { Compass, Lightbulb, Mic, Quote, SendHorizonal, Star } from 'lucide-react'
-import { useState } from 'react'
+import { Lightbulb, Mic, Quote, SendHorizonal, Star } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
 import { IdeaThreadHistory } from '../components/idea-thread-history'
@@ -37,6 +37,7 @@ function IdeaDetailPage() {
   const { openCapture } = useCaptureContext()
   const [discoveryMessage, setDiscoveryMessage] = useState('')
   const [discoveryError, setDiscoveryError] = useState<string | null>(null)
+  const threadEndRef = useRef<HTMLDivElement | null>(null)
 
   if (!idea) {
     throw notFound()
@@ -55,6 +56,16 @@ function IdeaDetailPage() {
     thread.workingIdea.constraints.length === 0 ? 'constraints' : null,
     thread.workingIdea.openQuestions.length === 0 ? 'open questions' : null,
   ].filter((value): value is string => value !== null)
+
+  const populatedWorkingIdeaEntries = [
+    thread.workingIdea.purpose ? ['Purpose', thread.workingIdea.purpose] : null,
+    thread.workingIdea.scope ? ['Scope', thread.workingIdea.scope] : null,
+    thread.workingIdea.expectedImpact ? ['Expected impact', thread.workingIdea.expectedImpact] : null,
+    thread.workingIdea.targetUsers.length > 0 ? ['Target users', thread.workingIdea.targetUsers.join(', ')] : null,
+    thread.workingIdea.researchAreas.length > 0 ? ['Research areas', thread.workingIdea.researchAreas.join(', ')] : null,
+    thread.workingIdea.constraints.length > 0 ? ['Constraints', thread.workingIdea.constraints.join(', ')] : null,
+    thread.workingIdea.openQuestions.length > 0 ? ['Open questions', thread.workingIdea.openQuestions.join(', ')] : null,
+  ].filter((entry): entry is [string, string] => entry !== null)
 
   const toggleStarMutation = useMutation({
     mutationFn: async () => toggleIdeaStar({ data: { id: idea.id } }),
@@ -90,15 +101,21 @@ function IdeaDetailPage() {
     submitTurnMutation.mutate(message)
   }
 
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [thread.visibleEvents.length])
+
   return (
-    <main className="page-wrap pb-28 pt-8 lg:pb-16">
+    <main className="page-wrap pb-32 pt-8 lg:pb-16">
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <Link to="/ideas" className="text-sm font-medium text-[var(--brand)] no-underline hover:underline">
               Back to ideas
             </Link>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[var(--ink-strong)]">{thread.workingIdea.provisionalTitle ?? idea.title}</h1>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[var(--ink-strong)]">
+              {thread.workingIdea.provisionalTitle ?? idea.title}
+            </h1>
             <p className="mt-2 max-w-2xl text-sm text-[var(--ink-soft)]">
               {thread.workingIdea.currentSummary ?? (getIdeaExcerpt(idea, 260) || 'This idea is still in discovery.')}
             </p>
@@ -111,7 +128,7 @@ function IdeaDetailPage() {
             className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition ${
               isIdeaStarred(idea)
                 ? 'border-amber-300 bg-amber-100/70 text-amber-700 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-300'
-                : 'border-[var(--line)] bg-[var(--panel)] text-[var(--ink-soft)] hover:text-[var(--ink-strong)]'
+                : 'border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)] hover:text-[var(--ink-strong)]'
             }`}
           >
             <Star size={16} className={isIdeaStarred(idea) ? 'fill-current' : ''} />
@@ -119,124 +136,96 @@ function IdeaDetailPage() {
           </button>
         </div>
 
-        <section className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_320px]">
-          <div className="space-y-6">
-            <article className="rounded-[28px] border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
-                <Lightbulb size={14} />
-                Working idea
-              </div>
-
-              <div className="space-y-4 text-sm leading-7 text-[var(--ink-soft)]">
-                {idea.body ? (
-                  idea.body.split(/\n{2,}/).map((paragraph, index) => (
-                    <p key={index} className="m-0 whitespace-pre-wrap">
-                      {paragraph}
-                    </p>
-                  ))
-                ) : (
-                  <p className="m-0">This idea is still in discovery. The thread and working idea panel should accumulate the missing context over time.</p>
-                )}
-              </div>
-            </article>
-
-            <section className="rounded-[28px] border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
-              <div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
-                  <Compass size={14} />
-                  Discovery guidance
-                </div>
-                <h2 className="mt-3 text-lg font-semibold text-[var(--ink-strong)]">Develop the idea through discovery</h2>
-                <p className="mt-2 text-sm text-[var(--ink-soft)]">
-                  This thread is now the primary workspace for building context. The assistant should help uncover the purpose, scope, users, impact, research areas, constraints, and open questions behind the idea.
-                </p>
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
-                <div className="text-sm font-medium text-[var(--ink-strong)]">Current stage</div>
-                <p className="mt-2 m-0 text-sm leading-6 text-[var(--ink-soft)]">
-                  {thread.stage === 'discovery'
-                    ? 'The assistant should ask focused questions and help collect missing context before any later structured actions are introduced.'
-                    : thread.stage === 'framing'
-                      ? 'The assistant has enough context to organize and frame the idea more clearly.'
-                      : 'The idea has enough context for later structured actions and conversions if needed.'}
-                </p>
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
-                <div className="text-sm font-medium text-[var(--ink-strong)]">
-                  {latestAssistantQuestion ? 'Latest assistant question' : 'Next discovery focus'}
-                </div>
-                <p className="mt-2 m-0 text-sm leading-6 text-[var(--ink-soft)]">
-                  {latestAssistantQuestion
-                    ? latestAssistantQuestion
-                    : missingDiscoveryAreas.length > 0
-                      ? `The biggest gaps right now are ${missingDiscoveryAreas.join(', ')}.`
-                      : 'The working idea has enough context for a stronger framing pass.'}
-                </p>
-              </div>
-
-              <form className="mt-4 space-y-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4" onSubmit={handleDiscoverySubmit}>
-                <label className="block text-sm font-medium text-[var(--ink-soft)]">
-                  <span className="text-[var(--ink-strong)]">{latestAssistantQuestion ?? 'Add context to the thread'}</span>
-                  <textarea
-                    value={discoveryMessage}
-                    onChange={(event) => setDiscoveryMessage(event.target.value)}
-                    placeholder={latestAssistantQuestion ?? 'Describe the purpose, users, impact, scope, research needs, constraints, or open questions for this idea.'}
-                    rows={4}
-                    className="mt-2 w-full rounded-2xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3 text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                        event.preventDefault()
-                        handleDiscoverySubmit(event as unknown as React.FormEvent<HTMLFormElement>)
-                      }
-                    }}
-                  />
-                </label>
-
-                {discoveryError ? (
-                  <p className="m-0 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">
-                    {discoveryError}
+        <section className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_320px]">
+          <div className="space-y-4">
+            <div className="panel rounded-[28px] p-5">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
+                    <Lightbulb size={14} />
+                    Discovery thread
+                  </div>
+                  <p className="mt-3 mb-0 text-sm leading-6 text-[var(--ink-soft)]">
+                    {latestAssistantQuestion
+                      ? latestAssistantQuestion
+                      : missingDiscoveryAreas.length > 0
+                        ? `The biggest gaps right now are ${missingDiscoveryAreas.join(', ')}.`
+                        : 'The working idea has enough context for a stronger framing pass.'}
                   </p>
-                ) : null}
+                </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="m-0 text-sm text-[var(--ink-soft)]">
-                    Voice is preferred here, with typed reply as a fallback. Each turn updates the working idea and the next assistant question.
-                  </p>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={openCapture}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3 font-semibold text-[var(--ink-strong)] transition hover:border-[var(--brand)] hover:text-[var(--brand)]"
-                    >
-                      <Mic size={16} />
-                      Voice reply
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={submitTurnMutation.isPending || discoveryMessage.trim().length === 0}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] px-4 py-3 font-semibold text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      <SendHorizonal size={16} />
-                      {submitTurnMutation.isPending ? 'Sending...' : 'Send reply'}
-                    </button>
+                <div className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-medium capitalize text-[var(--ink-soft)]">
+                  Stage: {thread.stage}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 pb-36 lg:pb-40">
+              <IdeaThreadHistory visibleEvents={thread.visibleEvents} />
+              <div ref={threadEndRef} />
+            </div>
+
+            <form
+              className="panel sticky bottom-24 z-10 space-y-4 rounded-[28px] p-4 lg:bottom-6"
+              onSubmit={handleDiscoverySubmit}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Reply in thread</div>
+                  <div className="mt-1 text-sm text-[var(--ink-soft)]">
+                    {latestAssistantQuestion ?? 'Add the next piece of context and the assistant will continue the conversation.'}
                   </div>
                 </div>
-              </form>
-            </section>
+                <button
+                  type="button"
+                  onClick={openCapture}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 font-semibold text-[var(--ink-strong)] transition hover:border-[var(--brand)] hover:text-[var(--brand)]"
+                >
+                  <Mic size={16} />
+                  Voice reply
+                </button>
+              </div>
 
-            <IdeaThreadHistory visibleEvents={thread.visibleEvents} />
+              <label className="block">
+                <textarea
+                  value={discoveryMessage}
+                  onChange={(event) => setDiscoveryMessage(event.target.value)}
+                  placeholder={latestAssistantQuestion ?? 'Add more context to this idea.'}
+                  rows={3}
+                  className="w-full rounded-[24px] border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                      event.preventDefault()
+                      handleDiscoverySubmit(event as unknown as React.FormEvent<HTMLFormElement>)
+                    }
+                  }}
+                />
+              </label>
+
+              {discoveryError ? (
+                <p className="m-0 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">
+                  {discoveryError}
+                </p>
+              ) : null}
+
+              <div className="flex items-center justify-between gap-3">
+                <p className="m-0 text-sm text-[var(--ink-soft)]">Voice is preferred. Use `Cmd/Ctrl+Enter` to send typed replies.</p>
+                <button
+                  type="submit"
+                  disabled={submitTurnMutation.isPending || discoveryMessage.trim().length === 0}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] px-4 py-3 font-semibold text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  <SendHorizonal size={16} />
+                  {submitTurnMutation.isPending ? 'Sending...' : 'Send reply'}
+                </button>
+              </div>
+            </form>
           </div>
 
-          <aside className="space-y-4 rounded-[28px] border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
+          <aside className="panel space-y-4 rounded-[28px] p-6">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Metadata</div>
               <dl className="mt-3 space-y-3 text-sm text-[var(--ink-soft)]">
-                <div className="flex items-start justify-between gap-4">
-                  <dt className="font-medium text-[var(--ink-strong)]">Stage</dt>
-                  <dd className="capitalize">{thread.stage}</dd>
-                </div>
                 <div className="flex items-start justify-between gap-4">
                   <dt className="font-medium text-[var(--ink-strong)]">Source type</dt>
                   <dd>{idea.sourceType.replace('_', ' ')}</dd>
@@ -249,10 +238,12 @@ function IdeaDetailPage() {
                   <dt className="font-medium text-[var(--ink-strong)]">Updated</dt>
                   <dd>{idea.updatedAt.toLocaleString()}</dd>
                 </div>
-                <div className="flex items-start justify-between gap-4">
-                  <dt className="font-medium text-[var(--ink-strong)]">Thread summary</dt>
-                  <dd>{thread.workingIdea.currentSummary ?? idea.threadSummary ?? 'Not available yet'}</dd>
-                </div>
+                {idea.threadSummary ? (
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="font-medium text-[var(--ink-strong)]">Saved summary</dt>
+                    <dd>{idea.threadSummary}</dd>
+                  </div>
+                ) : null}
               </dl>
             </div>
 
@@ -263,33 +254,27 @@ function IdeaDetailPage() {
                   <dt className="font-medium text-[var(--ink-strong)]">Provisional title</dt>
                   <dd className="mt-1">{thread.workingIdea.provisionalTitle ?? idea.title}</dd>
                 </div>
+                {populatedWorkingIdeaEntries.map(([label, value]) => (
+                  <div key={label}>
+                    <dt className="font-medium text-[var(--ink-strong)]">{label}</dt>
+                    <dd className="mt-1">{value}</dd>
+                  </div>
+                ))}
                 <div>
-                  <dt className="font-medium text-[var(--ink-strong)]">Purpose</dt>
-                  <dd className="mt-1">{thread.workingIdea.purpose ?? 'Still being discovered.'}</dd>
-                </div>
-                <div>
-                  <dt className="font-medium text-[var(--ink-strong)]">Scope</dt>
-                  <dd className="mt-1">{thread.workingIdea.scope ?? 'Still being discovered.'}</dd>
-                </div>
-                <div>
-                  <dt className="font-medium text-[var(--ink-strong)]">Expected impact</dt>
-                  <dd className="mt-1">{thread.workingIdea.expectedImpact ?? 'Still being discovered.'}</dd>
-                </div>
-                <div>
-                  <dt className="font-medium text-[var(--ink-strong)]">Target users</dt>
-                  <dd className="mt-1">{thread.workingIdea.targetUsers.length > 0 ? thread.workingIdea.targetUsers.join(', ') : 'Still being discovered.'}</dd>
-                </div>
-                <div>
-                  <dt className="font-medium text-[var(--ink-strong)]">Research areas</dt>
-                  <dd className="mt-1">{thread.workingIdea.researchAreas.length > 0 ? thread.workingIdea.researchAreas.join(', ') : 'None identified yet.'}</dd>
-                </div>
-                <div>
-                  <dt className="font-medium text-[var(--ink-strong)]">Constraints</dt>
-                  <dd className="mt-1">{thread.workingIdea.constraints.length > 0 ? thread.workingIdea.constraints.join(', ') : 'No constraints captured yet.'}</dd>
-                </div>
-                <div>
-                  <dt className="font-medium text-[var(--ink-strong)]">Open questions</dt>
-                  <dd className="mt-1">{thread.workingIdea.openQuestions.length > 0 ? thread.workingIdea.openQuestions.join(', ') : 'No open questions captured yet.'}</dd>
+                  <dt className="font-medium text-[var(--ink-strong)]">Discovery progress</dt>
+                  <dd className="mt-2">
+                    <div className="h-2 rounded-full bg-[var(--surface-strong)]">
+                      <div
+                        className="h-2 rounded-full bg-[var(--brand)]"
+                        style={{ width: `${Math.max(12, (populatedWorkingIdeaEntries.length / 7) * 100)}%` }}
+                      />
+                    </div>
+                    <p className="m-0 mt-2 text-sm text-[var(--ink-soft)]">
+                      {missingDiscoveryAreas.length === 0
+                        ? 'All tracked discovery areas have initial context.'
+                        : `${missingDiscoveryAreas.length} areas still need more context: ${missingDiscoveryAreas.join(', ')}.`}
+                    </p>
+                  </dd>
                 </div>
               </dl>
             </div>

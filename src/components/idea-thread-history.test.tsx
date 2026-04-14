@@ -7,6 +7,7 @@ describe('IdeaThreadHistory', () => {
     const markup = renderToStaticMarkup(<IdeaThreadHistory visibleEvents={[]} />)
 
     expect(markup).toContain('No visible thread history yet.')
+    expect(markup).toContain('Reply to this idea and the assistant will start building context with you here.')
     expect(markup).toContain('Discovery ready')
   })
 
