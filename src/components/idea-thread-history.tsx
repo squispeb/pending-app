@@ -19,12 +19,14 @@ export function IdeaThreadHistory({
   activeTurn = null,
   queuedTurns = [],
   lastTurn = null,
+  streamingAssistantText = '',
 }: {
   visibleEvents: Array<IdeaThreadVisibleEvent>
   threadStatus?: ThreadStatus
   activeTurn?: ThreadTurnPresentation | null
   queuedTurns?: Array<ThreadTurnPresentation>
   lastTurn?: ThreadTurnPresentation | null
+  streamingAssistantText?: string
 }) {
   const threadState = deriveThreadState({
     status: threadStatus,
@@ -35,7 +37,7 @@ export function IdeaThreadHistory({
   const showQueuePanel = threadStatus === 'queued' || threadStatus === 'processing' || threadStatus === 'streaming' || threadStatus === 'failed'
 
   return (
-    <section className="panel rounded-[28px] p-6 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
+    <section className="panel rounded-[28px] p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] sm:p-6">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Thread history</div>
         <div className={`rounded-full border px-3 py-1 text-xs font-medium ${threadState.badgeClassName}`}>{threadState.label}</div>
@@ -63,6 +65,20 @@ export function IdeaThreadHistory({
       ) : null}
 
       <div className="space-y-3">
+        {streamingAssistantText ? (
+          <article className="flex justify-start">
+            <div className="max-w-[92%] rounded-[24px] border border-violet-200 bg-violet-50/70 px-4 py-3 shadow-sm dark:border-violet-500/30 dark:bg-violet-500/10 sm:max-w-[85%]">
+              <div className="flex items-center gap-2 text-xs font-semibold text-[var(--ink-soft)]">
+                <span className="text-violet-500">●</span>
+                <span>Assistant replying</span>
+              </div>
+              <p className="m-0 mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">
+                {streamingAssistantText}
+              </p>
+            </div>
+          </article>
+        ) : null}
+
         {visibleEvents.length > 0 ? (
           visibleEvents.map((event) => {
             const presentation = getThreadEventPresentation(event.type)
@@ -80,7 +96,7 @@ export function IdeaThreadHistory({
                     <span>{event.summary}</span>
                   </div>
                 ) : (
-                  <div className={`max-w-[85%] rounded-[24px] px-4 py-3 shadow-sm ${isUserTurn ? 'bg-[var(--brand)] text-white' : `border ${presentation.cardClassName}`}`}>
+                  <div className={`max-w-[92%] rounded-[24px] px-4 py-3 shadow-sm sm:max-w-[85%] ${isUserTurn ? 'bg-[var(--brand)] text-white' : `border ${presentation.cardClassName}`}`}>
                     <div className={`flex items-center gap-2 text-xs font-semibold ${isUserTurn ? 'text-white/80' : 'text-[var(--ink-soft)]'}`}>
                       {!isUserTurn ? <Icon size={14} className={presentation.iconClassName} /> : null}
                       <span>{presentation.label}</span>

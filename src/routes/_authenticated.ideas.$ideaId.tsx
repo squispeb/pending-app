@@ -1,4 +1,4 @@
-import { Lightbulb, Mic, Quote, SendHorizonal, Star } from 'lucide-react'
+import { Lightbulb, Mic, Quote, SendHorizonal, Sparkles, Star } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
@@ -67,6 +67,8 @@ function IdeaDetailPage() {
   })
   const threadEndRef = useRef<HTMLDivElement | null>(null)
   const lastStreamEventIdRef = useRef<string | null>(null)
+  const streamedEventIdsRef = useRef(new Set<string>())
+  const activeStreamingTurnIdRef = useRef<string | null>(null)
   const isThreadBusy = thread.status === 'queued' || thread.status === 'processing' || thread.status === 'streaming'
   const queuedTurnCount = thread.queuedTurns.length
   const latestQueuedTurn = thread.queuedTurns.at(-1) ?? null
@@ -92,7 +94,17 @@ function IdeaDetailPage() {
     .reverse()
     .find((event) => event.type === 'assistant_question' || event.type === 'assistant_synthesis') ?? null
   const latestAssistantQuestion = latestAssistantEvent?.type === 'assistant_question' ? latestAssistantEvent.summary : null
-  const latestAssistantReply = latestAssistantEvent?.type === 'assistant_synthesis' ? latestAssistantEvent.summary : null
+  const composerStatusText = thread.status === 'queued'
+    ? latestQueuedTurn
+      ? `Queued after the current turn: ${latestQueuedTurn.userMessage}`
+      : 'Your next reply will queue after the current turn.'
+    : thread.status === 'processing'
+      ? thread.activeTurn
+        ? `Assistant is working on: ${thread.activeTurn.userMessage}`
+        : 'Assistant is processing the latest reply.'
+      : thread.status === 'streaming'
+        ? 'Assistant is replying now. You can queue another follow-up if needed.'
+        : 'Add the next piece of context and the assistant will continue the conversation.'
 
   const missingDiscoveryAreas = [
     !thread.workingIdea.purpose ? 'purpose' : null,
@@ -267,6 +279,8 @@ function IdeaDetailPage() {
     if (!isThreadBusy) {
       setStreamingAssistantText('')
       lastStreamEventIdRef.current = null
+      activeStreamingTurnIdRef.current = null
+      streamedEventIdsRef.current.clear()
       return
     }
 
@@ -303,16 +317,34 @@ function IdeaDetailPage() {
 
             for (const payload of parsed.events) {
               if (payload.streamEventId) {
+                if (streamedEventIdsRef.current.has(payload.streamEventId)) {
+                  continue
+                }
+
+                streamedEventIdsRef.current.add(payload.streamEventId)
                 lastStreamEventIdRef.current = payload.streamEventId
               }
 
+              if (payload.type === 'turn_started') {
+                activeStreamingTurnIdRef.current = payload.turnId
+                setStreamingAssistantText('')
+                continue
+              }
+
               if (payload.type === 'assistant_chunk') {
+                if (activeStreamingTurnIdRef.current !== payload.turnId) {
+                  activeStreamingTurnIdRef.current = payload.turnId
+                  setStreamingAssistantText(payload.textDelta)
+                  continue
+                }
+
                 setStreamingAssistantText((current) => `${current}${payload.textDelta}`)
                 continue
               }
 
               if (payload.type === 'turn_completed' || payload.type === 'turn_failed') {
                 setStreamingAssistantText('')
+                activeStreamingTurnIdRef.current = null
               }
             }
           }
@@ -321,7 +353,7 @@ function IdeaDetailPage() {
             return
           }
 
-          setDiscoveryError(error instanceof Error ? error.message : 'Failed to subscribe to assistant stream.')
+          setDiscoveryError((current) => current ?? (error instanceof Error ? error.message : 'Failed to subscribe to assistant stream.'))
         }
 
         if (abortController.signal.aborted) {
@@ -352,17 +384,17 @@ function IdeaDetailPage() {
   }, [ideaId, isThreadBusy])
 
   return (
-    <main className="page-wrap pb-32 pt-8 lg:pb-16">
+    <main className="page-wrap px-4 pb-28 pt-6 sm:pt-8 lg:pb-16">
       <div className="space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
             <Link to="/ideas" className="text-sm font-medium text-[var(--brand)] no-underline hover:underline">
               Back to ideas
             </Link>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[var(--ink-strong)]">
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-[var(--ink-strong)] sm:text-3xl">
               {thread.workingIdea.provisionalTitle ?? idea.title}
             </h1>
-            <p className="mt-2 max-w-2xl text-sm text-[var(--ink-soft)]">
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--ink-soft)]">
               {thread.workingIdea.currentSummary ?? (getIdeaExcerpt(idea, 260) || 'This idea is still in discovery.')}
             </p>
           </div>
@@ -371,7 +403,7 @@ function IdeaDetailPage() {
             type="button"
             onClick={() => toggleStarMutation.mutate()}
             aria-label={isIdeaStarred(idea) ? 'Remove star from idea' : 'Star idea'}
-            className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition ${
+            className={`inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-3 text-sm font-semibold transition sm:w-auto ${
               isIdeaStarred(idea)
                 ? 'border-amber-300 bg-amber-100/70 text-amber-700 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-300'
                 : 'border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)] hover:text-[var(--ink-strong)]'
@@ -384,8 +416,8 @@ function IdeaDetailPage() {
 
         <section className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_320px]">
           <div className="space-y-4">
-            <div className="panel rounded-[28px] p-5">
-              <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="panel rounded-[28px] p-4 sm:p-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
                     <Lightbulb size={14} />
@@ -399,41 +431,55 @@ function IdeaDetailPage() {
                           : 'Your latest reply is queued behind the current turn.'
                       : thread.status === 'streaming'
                           ? 'The assistant is writing back in this thread now.'
-                          : 'The assistant is processing the latest turn now.'
-                      : latestAssistantQuestion
-                      ? latestAssistantQuestion
-                      : latestAssistantReply
-                        ? latestAssistantReply
+                        : 'The assistant is processing the latest turn now.'
                       : missingDiscoveryAreas.length > 0
                         ? `The biggest gaps right now are ${missingDiscoveryAreas.join(', ')}.`
                         : 'The working idea has enough context for a stronger framing pass.'}
                   </p>
                 </div>
 
-                <div className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-medium capitalize text-[var(--ink-soft)]">
+                <div className="w-fit rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-medium capitalize text-[var(--ink-soft)]">
                   Stage: {thread.stage}
                 </div>
               </div>
             </div>
 
-            <div className="space-y-4 pb-36 lg:pb-40">
+            {latestAssistantEvent && !streamingAssistantText ? (
+              <section className="panel rounded-[28px] border p-4 sm:p-5">
+                <div className="flex items-start gap-3">
+                  <div className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-2xl ${latestAssistantEvent.type === 'assistant_question' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'bg-violet-100 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300'}`}>
+                    <Sparkles size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">
+                      {latestAssistantEvent.type === 'assistant_question' ? 'Latest prompt' : 'Latest synthesis'}
+                    </div>
+                    <p className="m-0 mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">
+                      {latestAssistantEvent.summary}
+                    </p>
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
+            <div className="space-y-4 pb-40 lg:pb-40">
               {canUseRefinementActions ? (
-                <section className="panel rounded-[28px] border border-sky-200 bg-sky-50/70 p-5 dark:border-sky-500/30 dark:bg-sky-500/10">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+                <section className="panel rounded-[28px] border border-sky-200 bg-sky-50/70 p-4 dark:border-sky-500/30 dark:bg-sky-500/10 sm:p-5">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700 dark:text-sky-300">Later structured actions</div>
                       <p className="m-0 mt-2 text-sm leading-6 text-[var(--ink-soft)]">
                         This idea is developed enough for targeted wording refinements. Keep using the thread as the main workspace, then save only the suggestions you want to keep canonically.
                       </p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:flex xl:flex-wrap">
                       {(['title', 'summary'] as const).map((action) => (
                         <button
                           key={action}
                           type="button"
                           disabled={isThreadBusy || requestRefinementMutation.isPending || persistRefinementMutation.isPending}
                           onClick={() => requestRefinementMutation.mutate(action)}
-                          className="inline-flex items-center justify-center rounded-2xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-300 hover:text-sky-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200"
+                          className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-300 hover:text-sky-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200"
                         >
                           {getIdeaStructuredActionLabel(action)}
                         </button>
@@ -444,7 +490,7 @@ function IdeaDetailPage() {
                           type="button"
                           disabled={isThreadBusy || requestRefinementMutation.isPending || requestStructuredActionMutation.isPending || persistRefinementMutation.isPending}
                           onClick={() => requestStructuredActionMutation.mutate(action)}
-                          className="inline-flex items-center justify-center rounded-2xl border border-violet-200 bg-white px-4 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200"
+                          className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-violet-200 bg-white px-4 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200"
                         >
                           {getIdeaStructuredActionLabel(action)}
                         </button>
@@ -454,63 +500,46 @@ function IdeaDetailPage() {
                 </section>
               ) : null}
 
-              <IdeaThreadHistory
-                visibleEvents={thread.visibleEvents}
-                threadStatus={thread.status}
-                activeTurn={thread.activeTurn}
-                queuedTurns={thread.queuedTurns}
-                lastTurn={thread.lastTurn}
-              />
-              {streamingAssistantText ? (
-                <section className="panel rounded-[28px] border border-violet-200 bg-violet-50/70 p-5 dark:border-violet-500/30 dark:bg-violet-500/10">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-violet-700 dark:text-violet-300">
-                    <Lightbulb size={14} />
-                    Assistant reply streaming
-                  </div>
-                  <p className="m-0 mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">{streamingAssistantText}</p>
-                </section>
-              ) : null}
-              <div ref={threadEndRef} />
-            </div>
+                <IdeaThreadHistory
+                  visibleEvents={thread.visibleEvents}
+                  threadStatus={thread.status}
+                  activeTurn={thread.activeTurn}
+                  queuedTurns={thread.queuedTurns}
+                  lastTurn={thread.lastTurn}
+                  streamingAssistantText={streamingAssistantText}
+                />
+                <div ref={threadEndRef} />
+              </div>
 
             <form
-              className="panel sticky bottom-24 z-10 space-y-4 rounded-[28px] p-4 lg:bottom-6"
+              className="panel sticky bottom-20 z-10 space-y-4 rounded-[28px] border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_84%,white_16%)] p-4 shadow-[0_22px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl lg:bottom-6"
+              style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
               onSubmit={handleDiscoverySubmit}
             >
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
                   <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Reply in thread</div>
-                  <div className="mt-1 text-sm text-[var(--ink-soft)]">
-                    {thread.status === 'queued'
-                      ? latestQueuedTurn
-                        ? `Queued after the current turn: ${latestQueuedTurn.userMessage}`
-                        : 'Your next reply will queue after the current turn.'
-                      : thread.status === 'processing'
-                        ? thread.activeTurn
-                          ? `Assistant is working on: ${thread.activeTurn.userMessage}`
-                          : 'Assistant is processing the latest reply.'
-                        : thread.status === 'streaming'
-                          ? 'Assistant is replying now. You can queue another follow-up if needed.'
-                          : latestAssistantQuestion ?? latestAssistantReply ?? 'Add the next piece of context and the assistant will continue the conversation.'}
-                   </div>
-                 </div>
+                  <div className="mt-1 text-sm leading-6 text-[var(--ink-soft)]">{composerStatusText}</div>
+                </div>
                 <button
                   type="button"
                   onClick={openCapture}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 font-semibold text-[var(--ink-strong)] transition hover:border-[var(--brand)] hover:text-[var(--brand)]"
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 font-semibold text-[var(--ink-strong)] transition hover:border-[var(--brand)] hover:text-[var(--brand)] sm:w-auto"
                 >
                   <Mic size={16} />
                   Voice reply
                 </button>
               </div>
 
-              <label className="block">
+              <label className="block" htmlFor="idea-thread-reply">
+                <span className="sr-only">Reply in thread</span>
                 <textarea
+                  id="idea-thread-reply"
                   value={discoveryMessage}
                   onChange={(event) => setDiscoveryMessage(event.target.value)}
                   placeholder={latestAssistantQuestion ?? 'Add more context to this idea.'}
                   rows={3}
-                  className="w-full rounded-[24px] border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                  className="w-full resize-none rounded-[24px] border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                       event.preventDefault()
@@ -532,12 +561,12 @@ function IdeaDetailPage() {
                 </p>
               ) : null}
 
-              <div className="flex items-center justify-between gap-3">
-                <p className="m-0 text-sm text-[var(--ink-soft)]">Voice is preferred. Use `Cmd/Ctrl+Enter` to send typed replies.</p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="m-0 text-sm leading-6 text-[var(--ink-soft)]">Voice is preferred. Use `Cmd/Ctrl+Enter` to send typed replies.</p>
                 <button
                   type="submit"
                   disabled={submitTurnMutation.isPending || discoveryMessage.trim().length === 0}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] px-4 py-3 font-semibold text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] px-4 py-3 font-semibold text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
                 >
                   <SendHorizonal size={16} />
                   {submitTurnMutation.isPending ? 'Sending...' : isThreadBusy ? 'Queue reply' : 'Send reply'}
@@ -546,7 +575,7 @@ function IdeaDetailPage() {
             </form>
           </div>
 
-          <aside className="panel space-y-4 rounded-[28px] p-6">
+          <aside className="panel space-y-4 rounded-[28px] p-5 sm:p-6">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Metadata</div>
               <dl className="mt-3 space-y-3 text-sm text-[var(--ink-soft)]">
