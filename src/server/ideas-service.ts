@@ -1,9 +1,10 @@
-import { and, desc, eq, isNull } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, isNull, like, or } from 'drizzle-orm'
 import type { Database } from '../db/client'
 import { ideaSnapshots, ideaThreadRefs, ideas } from '../db/schema'
 import {
   ideaCreateSchema,
   ideaStageSchema,
+  ideaVaultSearchSchema,
   normalizeIdeaValuesForStorage,
   sortIdeas,
   type CreateIdeaInput,
@@ -11,9 +12,26 @@ import {
 
 export function createIdeasService(database: Database) {
   return {
-    async listIdeas(userId: string) {
+    async listIdeas(userId: string, input?: { query?: string; stage?: 'discovery' | 'framing' | 'developed'; view?: 'recent' | 'starred' }) {
+      const filters = ideaVaultSearchSchema.parse(input ?? {})
+      const queryValue = filters.query?.trim()
+      const searchPattern = queryValue ? `%${queryValue}%` : null
+      const conditions = [eq(ideas.userId, userId), isNull(ideas.archivedAt)]
+
+      if (filters.stage) {
+        conditions.push(eq(ideas.stage, filters.stage))
+      }
+
+      if (filters.view === 'starred') {
+        conditions.push(isNotNull(ideas.starredAt))
+      }
+
+      if (searchPattern) {
+        conditions.push(or(like(ideas.title, searchPattern), like(ideas.body, searchPattern), like(ideas.sourceInput, searchPattern))!)
+      }
+
       const rows = await database.query.ideas.findMany({
-        where: and(eq(ideas.userId, userId), isNull(ideas.archivedAt)),
+        where: and(...conditions),
         orderBy: [desc(ideas.starredAt), desc(ideas.updatedAt)],
       })
 

@@ -33,8 +33,15 @@ export const ideaToggleStarSchema = z.object({
   id: z.string().min(1),
 })
 
+export const ideaVaultSearchSchema = z.object({
+  query: z.string().trim().max(160).optional().catch(undefined),
+  stage: ideaStageSchema.optional().catch(undefined),
+  view: z.enum(['recent', 'starred']).default('recent').catch('recent'),
+})
+
 export type IdeaFormValues = z.infer<typeof ideaFormSchema>
 export type CreateIdeaInput = z.infer<typeof ideaCreateSchema>
+export type IdeaVaultSearch = z.infer<typeof ideaVaultSearchSchema>
 
 export function toIdeaFormValues(idea: Idea | null): IdeaFormValues {
   if (!idea) {
@@ -82,6 +89,28 @@ export function sortIdeas(ideas: Array<Idea>) {
 
     return right.updatedAt.getTime() - left.updatedAt.getTime()
   })
+}
+
+export function getIdeaStageLabel(stage: z.infer<typeof ideaStageSchema>) {
+  switch (stage) {
+    case 'discovery':
+      return 'Discovery'
+    case 'framing':
+      return 'Framing'
+    case 'developed':
+      return 'Developed'
+  }
+}
+
+export function getIdeaStageBadgeClassName(stage: z.infer<typeof ideaStageSchema>) {
+  switch (stage) {
+    case 'discovery':
+      return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300'
+    case 'framing':
+      return 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300'
+    case 'developed':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300'
+  }
 }
 
 export function getIdeaExcerpt(idea: Pick<Idea, 'body' | 'sourceInput'>, maxLength = 180) {

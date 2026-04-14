@@ -1,6 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import { db } from '../db/client'
-import { ideaCreateSchema, ideaToggleStarSchema } from '../lib/ideas'
+import { ideaCreateSchema, ideaToggleStarSchema, ideaVaultSearchSchema } from '../lib/ideas'
 import { createAssistantThreadService } from './assistant-thread-service'
 import { resolveAuthenticatedPlannerUser } from './authenticated-user'
 import { createIdeasService } from './ideas-service'
@@ -96,10 +96,12 @@ export async function approveIdeaProposalAndPersist(
   return approval.thread
 }
 
-export const listIdeas = createServerFn({ method: 'GET' }).handler(async () => {
-  const { user } = await resolveAuthenticatedPlannerUser(db)
-  return ideasService.listIdeas(user.id)
-})
+export const listIdeas = createServerFn({ method: 'GET' })
+  .inputValidator((input) => ideaVaultSearchSchema.parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    return ideasService.listIdeas(user.id, data)
+  })
 
 export const getIdea = createServerFn({ method: 'GET' })
   .inputValidator((input: { id: string }) => input)

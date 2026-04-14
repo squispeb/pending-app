@@ -166,6 +166,127 @@ describe('ideas service', () => {
     expect(ideas[0]?.starredAt).toBeInstanceOf(Date)
   })
 
+  it('filters ideas by search query across title, body, and source input', async () => {
+    const titleMatch = await service.createIdea(primaryUserId, {
+      title: 'Onboarding research vault',
+      body: 'A place to collect findings.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+    const bodyMatch = await service.createIdea(primaryUserId, {
+      title: 'Activation experiments',
+      body: 'Research how trial teams experience onboarding drop-off.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+    const sourceMatch = await service.createIdea(primaryUserId, {
+      title: 'Interview workflow',
+      body: 'Follow-up notes.',
+      sourceType: 'voice_capture',
+      sourceInput: 'Research plan for onboarding interviews.',
+    })
+    await service.createIdea(primaryUserId, {
+      title: 'Weekly planning',
+      body: 'Nothing to do with this query.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    const results = await service.listIdeas(primaryUserId, { query: 'research' })
+
+    expect(results.map((idea) => idea.id).sort()).toEqual([
+      bodyMatch.id,
+      sourceMatch.id,
+      titleMatch.id,
+    ].sort())
+  })
+
+  it('filters ideas by stage without exposing archived records', async () => {
+    const discoveryIdea = await service.createIdea(primaryUserId, {
+      title: 'Discovery idea',
+      body: 'Still rough.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+    const framingIdea = await service.createIdea(primaryUserId, {
+      title: 'Framing idea',
+      body: 'Narrowing the scope.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    await service.createInitialSnapshotAndThreadRef(
+      {
+        ideaId: discoveryIdea.id,
+        threadId: 'thread-user-1:idea-discovery',
+      },
+      primaryUserId,
+    )
+
+    await service.createInitialSnapshotAndThreadRef(
+      {
+        ideaId: framingIdea.id,
+        threadId: 'thread-user-1:idea-framing',
+      },
+      primaryUserId,
+    )
+
+    await service.syncIdeaThreadCheckpoint(
+      {
+        ideaId: framingIdea.id,
+        expectedSnapshotVersion: 1,
+        title: 'Framing idea',
+        body: 'Narrowing the scope.',
+        threadSummary: 'A clearer framing summary.',
+        stage: 'framing',
+      },
+      primaryUserId,
+    )
+
+    const results = await service.listIdeas(primaryUserId, { stage: 'framing' })
+
+    expect(results).toHaveLength(1)
+    expect(results[0]).toMatchObject({
+      id: framingIdea.id,
+      stage: 'framing',
+    })
+  })
+
+  it('returns only starred ideas in the starred view and keeps recency ordering within that view', async () => {
+    const first = await service.createIdea(primaryUserId, {
+      title: 'First starred idea',
+      body: 'Earlier starred record.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    const second = await service.createIdea(primaryUserId, {
+      title: 'Second starred idea',
+      body: 'Later starred record.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    await service.createIdea(primaryUserId, {
+      title: 'Unstarred idea',
+      body: 'Should not appear in the starred view.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    await service.toggleIdeaStar(first.id, primaryUserId)
+    await service.toggleIdeaStar(second.id, primaryUserId)
+
+    const results = await service.listIdeas(primaryUserId, { view: 'starred' })
+
+    expect(results.map((idea) => idea.id)).toEqual([first.id, second.id])
+    expect(results.every((idea) => idea.starredAt instanceof Date)).toBe(true)
+  })
+
   it('toggles star state off when an already starred idea is toggled again', async () => {
     const created = await service.createIdea(primaryUserId, {
       title: 'Star toggling',
