@@ -19,6 +19,7 @@ import {
   type TaskFormValues,
 } from '../lib/tasks'
 import type { CandidateType, ProcessVoiceCaptureAutoSaved, TypedTaskDraft } from '../lib/capture'
+import { shouldAutoCreateIdeaCapture } from '../lib/capture-flow'
 import { getIdeaThreadTarget, getRouteIntent, routeContext } from '../lib/capture-routing'
 import {
   confirmCapturedIdea as confirmCapturedIdeaFn,
@@ -116,6 +117,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   const [captureClarifyReply, setCaptureClarifyReply] = useState('')
   const [captureShowAdvanced, setCaptureShowAdvanced] = useState(false)
   const [captureThreadIdeaId, setCaptureThreadIdeaId] = useState<string | null>(null)
+  const [isOpeningIdea, setIsOpeningIdea] = useState(false)
 
   // Voice
   const [isRecording, setIsRecording] = useState(false)
@@ -247,7 +249,19 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   })
 
   const confirmIdeaMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (immediateInput?: {
+      title: string
+      body?: string
+      rawInput: string
+      sourceType: 'typed_capture' | 'voice_capture'
+      sourceInput: string
+    }) => {
+      if (immediateInput) {
+        return confirmCapturedIdeaFn({
+          data: immediateInput,
+        })
+      }
+
       const parsed = ideaFormSchema.parse(ideaForm)
       const rawInput = captureDraft?.rawInput ?? captureRawInput
 
@@ -262,6 +276,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
       })
     },
     onSuccess: async (createdIdea) => {
+      setIsOpeningIdea(false)
       resetCapture()
       await queryClient.invalidateQueries({ queryKey: ['ideas'] })
       await navigate({
@@ -270,6 +285,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
       })
     },
     onError: (error) => {
+      setIsOpeningIdea(false)
       setCaptureError(error instanceof Error ? error.message : 'Failed to save idea.')
     },
   })
@@ -480,6 +496,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureNotes([])
     setCaptureShowAdvanced(false)
     setCaptureThreadIdeaId(null)
+    setIsOpeningIdea(false)
     setTranscribeError(null)
   }
 
@@ -558,6 +575,38 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     interpretMutation.mutate(captureRawInput)
   }
 
+  function createIdeaImmediately(
+    draft: TypedTaskDraft,
+    rawInput: string,
+    sourceType: 'typed_capture' | 'voice_capture',
+  ) {
+    setCaptureRawInput(rawInput)
+    setCaptureDraft(draft)
+    setCaptureNotes(draft.interpretationNotes)
+    setCaptureReviewBackMode(sourceType === 'voice_capture' ? 'recording' : 'input')
+    setCaptureType('idea')
+    setIdeaFieldErrors({})
+    setIdeaForm({
+      title: draft.title ?? rawInput,
+      body: draft.notes ?? rawInput,
+      sourceType: 'manual',
+      sourceInput: rawInput,
+    })
+    setCaptureShowAdvanced(false)
+    setCaptureClarifyMessage(null)
+    setCaptureClarifyQuestions([])
+    setCaptureError(null)
+    setIsOpeningIdea(true)
+    setCaptureMode('input')
+    confirmIdeaMutation.mutate({
+      title: draft.title ?? rawInput,
+      body: draft.notes ?? rawInput,
+      rawInput,
+      sourceType,
+      sourceInput: rawInput,
+    })
+  }
+
   function handleConfirm(event: React.FormEvent) {
     event.preventDefault()
     setCaptureError(null)
@@ -615,14 +664,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     if (resolvedType === 'habit') {
       setHabitForm(draftToHabitForm(draft))
       setHabitFieldErrors({})
-    } else if (resolvedType === 'idea') {
-      setIdeaForm({
-        title: draft.title ?? draft.rawInput,
-        body: draft.notes ?? draft.rawInput,
-        sourceType: 'manual',
-        sourceInput: draft.rawInput,
-      })
-      setIdeaFieldErrors({})
+    } else if (shouldAutoCreateIdeaCapture({ resolvedType, isThreadReplyCapture: captureThreadIdeaId !== null })) {
+      createIdeaImmediately(draft, rawInput, backTo === 'recording' ? 'voice_capture' : 'typed_capture')
+      return
     } else {
       setTaskForm(draftToTaskForm(draft))
       setTaskFieldErrors({})
@@ -664,6 +708,8 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
             ? 'Need a bit more detail'
             : isThreadReplyCapture
               ? 'Reply to idea'
+              : isOpeningIdea
+                ? 'Opening your idea'
               : 'What do you need?'
 
   // Confirm button label
@@ -857,8 +903,37 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                 </div>
 
                 <div className="max-h-[70vh] overflow-y-auto overscroll-contain" style={{ scrollbarWidth: 'none' }}>
+                  {isOpeningIdea ? (
+                    <div className="space-y-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-5">
+                      <div className="flex items-center gap-3">
+                        <div className="flex size-10 items-center justify-center rounded-full bg-[var(--brand)]/10">
+                          <Lightbulb size={18} className="text-[var(--brand)]" />
+                        </div>
+                        <div>
+                          <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">Opening your idea...</p>
+                          <p className="m-0 mt-1 text-sm text-[var(--ink-soft)]">
+                            Creating the idea shell and loading the discovery thread.
+                          </p>
+                        </div>
+                      </div>
+
+                      {captureRawInput ? (
+                        <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
+                          <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                            Captured input
+                          </span>
+                          <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureRawInput}</p>
+                        </div>
+                      ) : null}
+
+                      {captureError ? (
+                        <p className="m-0 text-sm font-medium text-red-500">{captureError}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   {/* ── Input step ── */}
-                  {captureMode === 'input' ? (
+                  {captureMode === 'input' && !isOpeningIdea ? (
                     <form className="space-y-4" onSubmit={handleInterpret}>
                       <label className="block">
                         <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
@@ -916,7 +991,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                   ) : null}
 
                   {/* ── Review step ── */}
-                  {captureMode === 'review' ? (
+                  {captureMode === 'review' && !isOpeningIdea ? (
                     <form className="space-y-4" onSubmit={handleConfirm}>
                       {/* Type switcher — only on auto routes where both types are allowed */}
                       {ctx.allowed.length > 1 ? (
