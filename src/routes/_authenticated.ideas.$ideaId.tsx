@@ -5,6 +5,7 @@ import { Link, createFileRoute, notFound } from '@tanstack/react-router'
 import { IdeaThreadHistory } from '../components/idea-thread-history'
 import { useCaptureContext } from '../contexts/CaptureContext'
 import { getIdeaExcerpt, isIdeaStarred } from '../lib/ideas'
+import { parseIdeaThreadStreamFrames } from '../lib/idea-thread-stream'
 import { getIdea, getIdeaThread, streamIdeaThread, submitIdeaThreadTurn, toggleIdeaStar } from '../server/ideas'
 
 const ideaDetailQueryOptions = (ideaId: string) =>
@@ -148,22 +149,10 @@ function IdeaDetailPage() {
           }
 
           buffer += value
-          const frames = buffer.split('\n\n')
-          buffer = frames.pop() ?? ''
+          const parsed = parseIdeaThreadStreamFrames(buffer)
+          buffer = parsed.remainder
 
-          for (const frame of frames) {
-            const dataLine = frame
-              .split('\n')
-              .find((line) => line.startsWith('data: '))
-
-            if (!dataLine) {
-              continue
-            }
-
-            const payload = JSON.parse(dataLine.slice(6)) as
-              | { type: 'assistant_chunk'; textDelta: string }
-              | { type: 'working_idea_updated' | 'turn_completed' | 'turn_failed' }
-
+          for (const payload of parsed.events) {
             if (payload.type === 'assistant_chunk') {
               setStreamingAssistantText((current) => `${current}${payload.textDelta}`)
               continue
