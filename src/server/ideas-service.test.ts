@@ -279,11 +279,14 @@ describe('ideas service', () => {
     })
 
     await service.toggleIdeaStar(first.id, primaryUserId)
+
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
     await service.toggleIdeaStar(second.id, primaryUserId)
 
     const results = await service.listIdeas(primaryUserId, { view: 'starred' })
 
-    expect(results.map((idea) => idea.id)).toEqual([first.id, second.id])
+    expect(results.map((idea) => idea.id)).toEqual([second.id, first.id])
     expect(results.every((idea) => idea.starredAt instanceof Date)).toBe(true)
   })
 

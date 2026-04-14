@@ -1,6 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
+import { z } from 'zod'
 import { db } from '../db/client'
-import { ideaCreateSchema, ideaToggleStarSchema, ideaVaultSearchSchema } from '../lib/ideas'
+import { ideaStageSchema, ideaCreateSchema, ideaToggleStarSchema, ideaVaultSearchSchema } from '../lib/ideas'
 import { createAssistantThreadService } from './assistant-thread-service'
 import { resolveAuthenticatedPlannerUser } from './authenticated-user'
 import { createIdeasService } from './ideas-service'
@@ -60,6 +61,40 @@ type ApproveIdeaProposalDependencies = {
   ) => Promise<unknown>
 }
 
+type PersistIdeaRefinementDependencies = {
+  resolveUser: () => Promise<{
+    user: { id: string }
+  }>
+  getIdea: (ideaId: string, userId: string) => Promise<{
+    id: string
+    title: string
+  } | undefined>
+  getLatestIdeaSnapshot: (ideaId: string, userId: string) => Promise<{
+    version: number
+    title: string
+    body: string
+    threadSummary: string | null
+  } | undefined>
+  getIdeaThread: (ideaId: string) => Promise<{
+    stage: z.infer<typeof ideaStageSchema>
+    workingIdea: {
+      provisionalTitle: string | null
+      currentSummary: string | null
+    }
+  }>
+  syncIdeaThreadCheckpoint: (
+    input: {
+      ideaId: string
+      expectedSnapshotVersion: number
+      title: string
+      body: string
+      threadSummary: string | null
+      stage: z.infer<typeof ideaStageSchema>
+    },
+    userId: string,
+  ) => Promise<unknown>
+}
+
 export async function createIdeaAndBootstrapThread(
   data: Parameters<typeof ideaCreateSchema.parse>[0],
   dependencies: CreateIdeaAndThreadDependencies,
@@ -94,6 +129,64 @@ export async function approveIdeaProposalAndPersist(
   await dependencies.applyApprovedProposal(approval.canonicalWritePayload, user.id)
 
   return approval.thread
+}
+
+export async function persistIdeaRefinementAndSync(
+  input: {
+    ideaId: string
+    kind: 'title' | 'summary'
+  },
+  dependencies: PersistIdeaRefinementDependencies,
+) {
+  const { user } = await dependencies.resolveUser()
+  const idea = await dependencies.getIdea(input.ideaId, user.id)
+
+  if (!idea) {
+    throw new Error('Idea not found')
+  }
+
+  const latestSnapshot = await dependencies.getLatestIdeaSnapshot(input.ideaId, user.id)
+
+  if (!latestSnapshot) {
+    throw new Error('Accepted snapshot not found')
+  }
+
+  const thread = await dependencies.getIdeaThread(input.ideaId)
+
+  if (input.kind === 'title' && !thread.workingIdea.provisionalTitle) {
+    throw new Error('No title suggestion available')
+  }
+
+  if (input.kind === 'summary' && !thread.workingIdea.currentSummary) {
+    throw new Error('No summary suggestion available')
+  }
+
+  const nextTitle = input.kind === 'title'
+    ? thread.workingIdea.provisionalTitle ?? latestSnapshot.title
+    : latestSnapshot.title
+  const nextSummary = input.kind === 'summary'
+    ? thread.workingIdea.currentSummary
+    : latestSnapshot.threadSummary
+
+  await dependencies.syncIdeaThreadCheckpoint(
+    {
+      ideaId: input.ideaId,
+      expectedSnapshotVersion: latestSnapshot.version,
+      title: nextTitle,
+      body: latestSnapshot.body,
+      threadSummary: nextSummary,
+      stage: thread.stage,
+    },
+    user.id,
+  )
+
+  return {
+    ok: true as const,
+    kind: input.kind,
+    title: nextTitle,
+    threadSummary: nextSummary,
+    stage: thread.stage,
+  }
 }
 
 export const listIdeas = createServerFn({ method: 'GET' })
@@ -212,4 +305,25 @@ export const rejectIdeaProposal = createServerFn({ method: 'POST' })
     })
 
     return rejection.thread
+  })
+
+export const persistIdeaRefinement = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string; kind: 'title' | 'summary' }) => input)
+  .handler(async ({ data }) => {
+    return persistIdeaRefinementAndSync(
+      {
+        ideaId: data.id,
+        kind: data.kind,
+      },
+      {
+        resolveUser: async () => {
+          const { user } = await resolveAuthenticatedPlannerUser(db)
+          return { user }
+        },
+        getIdea: (ideaId, userId) => ideasService.getIdea(ideaId, userId),
+        getLatestIdeaSnapshot: (ideaId, userId) => ideasService.getLatestIdeaSnapshot(ideaId, userId),
+        getIdeaThread: (ideaId) => assistantThreadService.getIdeaThread(ideaId),
+        syncIdeaThreadCheckpoint: (input, userId) => ideasService.syncIdeaThreadCheckpoint(input, userId),
+      },
+    )
   })

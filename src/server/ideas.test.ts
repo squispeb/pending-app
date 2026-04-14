@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { approveIdeaProposalAndPersist, createIdeaAndBootstrapThread } from './ideas'
+import { approveIdeaProposalAndPersist, createIdeaAndBootstrapThread, persistIdeaRefinementAndSync } from './ideas'
 
 describe('ideas server flow', () => {
   it('creates the canonical idea and bootstraps the assistant thread in one app-side path', async () => {
@@ -148,6 +148,110 @@ describe('ideas server flow', () => {
       status: 'ready',
       visibleEvents: [],
       pendingProposal: null,
+    })
+  })
+
+  it('persists a title refinement from the current developed thread state', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const getIdea = vi.fn().mockResolvedValue({ id: 'idea-123', title: 'Original title' })
+    const getLatestIdeaSnapshot = vi.fn().mockResolvedValue({
+      version: 2,
+      title: 'Original title',
+      body: 'Canonical body',
+      threadSummary: 'Current summary',
+    })
+    const getIdeaThread = vi.fn().mockResolvedValue({
+      stage: 'developed',
+      workingIdea: {
+        provisionalTitle: 'Improved title',
+        currentSummary: 'Current summary',
+      },
+    })
+    const syncIdeaThreadCheckpoint = vi.fn().mockResolvedValue({ changed: true, version: 3 })
+
+    const result = await persistIdeaRefinementAndSync(
+      {
+        ideaId: 'idea-123',
+        kind: 'title',
+      },
+      {
+        resolveUser,
+        getIdea,
+        getLatestIdeaSnapshot,
+        getIdeaThread,
+        syncIdeaThreadCheckpoint,
+      },
+    )
+
+    expect(syncIdeaThreadCheckpoint).toHaveBeenCalledWith(
+      {
+        ideaId: 'idea-123',
+        expectedSnapshotVersion: 2,
+        title: 'Improved title',
+        body: 'Canonical body',
+        threadSummary: 'Current summary',
+        stage: 'developed',
+      },
+      'user-1',
+    )
+    expect(result).toEqual({
+      ok: true,
+      kind: 'title',
+      title: 'Improved title',
+      threadSummary: 'Current summary',
+      stage: 'developed',
+    })
+  })
+
+  it('persists a summary refinement from the current developed thread state', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const getIdea = vi.fn().mockResolvedValue({ id: 'idea-123', title: 'Original title' })
+    const getLatestIdeaSnapshot = vi.fn().mockResolvedValue({
+      version: 4,
+      title: 'Original title',
+      body: 'Canonical body',
+      threadSummary: 'Current summary',
+    })
+    const getIdeaThread = vi.fn().mockResolvedValue({
+      stage: 'developed',
+      workingIdea: {
+        provisionalTitle: 'Original title',
+        currentSummary: 'Sharper summary grounded in the thread.',
+      },
+    })
+    const syncIdeaThreadCheckpoint = vi.fn().mockResolvedValue({ changed: true, version: 5 })
+
+    const result = await persistIdeaRefinementAndSync(
+      {
+        ideaId: 'idea-123',
+        kind: 'summary',
+      },
+      {
+        resolveUser,
+        getIdea,
+        getLatestIdeaSnapshot,
+        getIdeaThread,
+        syncIdeaThreadCheckpoint,
+      },
+    )
+
+    expect(syncIdeaThreadCheckpoint).toHaveBeenCalledWith(
+      {
+        ideaId: 'idea-123',
+        expectedSnapshotVersion: 4,
+        title: 'Original title',
+        body: 'Canonical body',
+        threadSummary: 'Sharper summary grounded in the thread.',
+        stage: 'developed',
+      },
+      'user-1',
+    )
+    expect(result).toEqual({
+      ok: true,
+      kind: 'summary',
+      title: 'Original title',
+      threadSummary: 'Sharper summary grounded in the thread.',
+      stage: 'developed',
     })
   })
 })

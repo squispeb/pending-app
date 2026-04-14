@@ -4,9 +4,23 @@ import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@ta
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
 import { IdeaThreadHistory } from '../components/idea-thread-history'
 import { useCaptureContext } from '../contexts/CaptureContext'
+import {
+  canUseIdeaRefinementActions,
+  getIdeaRefinementActionInput,
+  getIdeaRefinementActionLabel,
+  type IdeaRefinementAction,
+} from '../lib/idea-structured-actions'
 import { getIdeaExcerpt, isIdeaStarred } from '../lib/ideas'
 import { parseIdeaThreadStreamFrames } from '../lib/idea-thread-stream'
-import { getIdea, getIdeaThread, streamIdeaThread, submitIdeaThreadTurn, toggleIdeaStar } from '../server/ideas'
+import {
+  elaborateIdea,
+  getIdea,
+  getIdeaThread,
+  persistIdeaRefinement,
+  streamIdeaThread,
+  submitIdeaThreadTurn,
+  toggleIdeaStar,
+} from '../server/ideas'
 
 const ideaDetailQueryOptions = (ideaId: string) =>
   queryOptions({
@@ -53,6 +67,14 @@ function IdeaDetailPage() {
   if (!idea) {
     throw notFound()
   }
+
+  const canUseRefinementActions = canUseIdeaRefinementActions(thread.stage)
+  const suggestedTitle = thread.workingIdea.provisionalTitle && thread.workingIdea.provisionalTitle !== idea.title
+    ? thread.workingIdea.provisionalTitle
+    : null
+  const suggestedSummary = thread.workingIdea.currentSummary && thread.workingIdea.currentSummary !== idea.threadSummary
+    ? thread.workingIdea.currentSummary
+    : null
 
   const latestAssistantQuestion = [...thread.visibleEvents]
     .reverse()
@@ -101,6 +123,47 @@ function IdeaDetailPage() {
     onError: (error) => {
       setDiscoveryNotice(null)
       setDiscoveryError(error instanceof Error ? error.message : 'Failed to submit discovery turn.')
+    },
+  })
+
+  const requestRefinementMutation = useMutation({
+    mutationFn: async (action: IdeaRefinementAction) => elaborateIdea({
+      data: {
+        id: ideaId,
+        actionInput: getIdeaRefinementActionInput(action),
+      },
+    }),
+    onSuccess: async (result, action) => {
+      setDiscoveryError(null)
+      setDiscoveryNotice(action === 'title' ? 'Title suggestion ready to review.' : 'Summary suggestion ready to review.')
+      queryClient.setQueryData(['idea-thread', ideaId], result.thread)
+      await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
+    },
+    onError: (error) => {
+      setDiscoveryNotice(null)
+      setDiscoveryError(error instanceof Error ? error.message : 'Failed to request a refinement action.')
+    },
+  })
+
+  const persistRefinementMutation = useMutation({
+    mutationFn: async (kind: IdeaRefinementAction) => persistIdeaRefinement({
+      data: {
+        id: ideaId,
+        kind,
+      },
+    }),
+    onSuccess: async (_, kind) => {
+      setDiscoveryError(null)
+      setDiscoveryNotice(kind === 'title' ? 'Saved suggested title.' : 'Saved suggested summary.')
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['ideas'] }),
+        queryClient.invalidateQueries({ queryKey: ['ideas', ideaId] }),
+        queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] }),
+      ])
+    },
+    onError: (error) => {
+      setDiscoveryNotice(null)
+      setDiscoveryError(error instanceof Error ? error.message : 'Failed to save the refinement suggestion.')
     },
   })
 
@@ -273,6 +336,32 @@ function IdeaDetailPage() {
             </div>
 
             <div className="space-y-4 pb-36 lg:pb-40">
+              {canUseRefinementActions ? (
+                <section className="panel rounded-[28px] border border-sky-200 bg-sky-50/70 p-5 dark:border-sky-500/30 dark:bg-sky-500/10">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700 dark:text-sky-300">Later structured actions</div>
+                      <p className="m-0 mt-2 text-sm leading-6 text-[var(--ink-soft)]">
+                        This idea is developed enough for targeted wording refinements. Keep using the thread as the main workspace, then save only the suggestions you want to keep canonically.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {(['title', 'summary'] as const).map((action) => (
+                        <button
+                          key={action}
+                          type="button"
+                          disabled={isThreadBusy || requestRefinementMutation.isPending || persistRefinementMutation.isPending}
+                          onClick={() => requestRefinementMutation.mutate(action)}
+                          className="inline-flex items-center justify-center rounded-2xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-300 hover:text-sky-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200"
+                        >
+                          {getIdeaRefinementActionLabel(action)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+              ) : null}
+
               <IdeaThreadHistory
                 visibleEvents={thread.visibleEvents}
                 threadStatus={thread.status}
@@ -421,6 +510,57 @@ function IdeaDetailPage() {
                 </div>
               </dl>
             </div>
+
+            {canUseRefinementActions && (suggestedTitle || suggestedSummary) ? (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                <div className="mb-2 text-sm font-semibold text-[var(--ink-strong)]">Suggested refinements</div>
+                <div className="space-y-4 text-sm text-[var(--ink-soft)]">
+                  {suggestedTitle ? (
+                    <div className="space-y-2">
+                      <div className="font-medium text-[var(--ink-strong)]">Title suggestion</div>
+                      <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
+                        <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Current</div>
+                        <div className="mt-1">{idea.title}</div>
+                      </div>
+                      <div className="rounded-2xl border border-emerald-200 bg-white px-3 py-2 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                        <div className="text-xs uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">Suggested</div>
+                        <div className="mt-1 text-[var(--ink-strong)]">{suggestedTitle}</div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isThreadBusy || persistRefinementMutation.isPending}
+                        onClick={() => persistRefinementMutation.mutate('title')}
+                        className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Save title
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {suggestedSummary ? (
+                    <div className="space-y-2">
+                      <div className="font-medium text-[var(--ink-strong)]">Summary suggestion</div>
+                      <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
+                        <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Current</div>
+                        <div className="mt-1 whitespace-pre-wrap">{idea.threadSummary ?? 'No saved summary yet.'}</div>
+                      </div>
+                      <div className="rounded-2xl border border-emerald-200 bg-white px-3 py-2 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                        <div className="text-xs uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">Suggested</div>
+                        <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{suggestedSummary}</div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isThreadBusy || persistRefinementMutation.isPending}
+                        onClick={() => persistRefinementMutation.mutate('summary')}
+                        className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Save summary
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
 
             <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
               <div className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-[var(--ink-strong)]">
