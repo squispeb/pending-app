@@ -94,6 +94,40 @@ describe('assistant thread service', () => {
   let client: ReturnType<typeof createClient>
   let db: ReturnType<typeof drizzle<typeof schema>>
 
+  function makeThread(overrides: Record<string, unknown> = {}) {
+    return {
+      threadId: 'thread-user-1:idea-123',
+      ideaId: 'idea-123',
+      userId: 'user-1',
+      stage: 'discovery',
+      status: 'idle',
+      activeTurn: null,
+      queuedTurns: [],
+      lastTurn: null,
+      visibleEvents: [
+        {
+          eventId: 'event-1',
+          type: 'thread_created',
+          createdAt: '2026-04-12T00:00:00.000Z',
+          summary: 'Idea discovery thread created and ready for context building.',
+          visibleToUser: true,
+        },
+      ],
+      workingIdea: {
+        provisionalTitle: null,
+        currentSummary: null,
+        purpose: null,
+        scope: null,
+        targetUsers: [],
+        expectedImpact: null,
+        researchAreas: [],
+        constraints: [],
+        openQuestions: [],
+      },
+      ...overrides,
+    }
+  }
+
   beforeEach(async () => {
     const database = makeDatabase()
     client = database.client
@@ -125,33 +159,7 @@ describe('assistant thread service', () => {
         }),
       )
       .mockResolvedValueOnce(
-        Response.json({
-          threadId: 'thread-user-1:idea-123',
-          ideaId: 'idea-123',
-          userId: 'user-1',
-          stage: 'discovery',
-          status: 'idle',
-          visibleEvents: [
-            {
-              eventId: 'event-1',
-              type: 'thread_created',
-              createdAt: '2026-04-12T00:00:00.000Z',
-              summary: 'Idea discovery thread created and ready for context building.',
-              visibleToUser: true,
-            },
-          ],
-          workingIdea: {
-            provisionalTitle: null,
-            currentSummary: null,
-            purpose: null,
-            scope: null,
-            targetUsers: [],
-            expectedImpact: null,
-            researchAreas: [],
-            constraints: [],
-            openQuestions: [],
-          },
-        }),
+        Response.json(makeThread()),
       )
 
     const service = createAssistantThreadService(db)
@@ -167,6 +175,9 @@ describe('assistant thread service', () => {
       userId: 'user-1',
       stage: 'discovery',
       status: 'idle',
+      activeTurn: null,
+      queuedTurns: [],
+      lastTurn: null,
       visibleEvents: [
         {
           eventId: 'event-1',
@@ -261,33 +272,7 @@ describe('assistant thread service', () => {
         }),
       )
       .mockResolvedValueOnce(
-        Response.json({
-          threadId: 'thread-user-1:idea-123',
-          ideaId: 'idea-123',
-          userId: 'user-1',
-          stage: 'discovery',
-          status: 'idle',
-          visibleEvents: [
-            {
-              eventId: 'event-1',
-              type: 'thread_created',
-              createdAt: '2026-04-12T00:00:00.000Z',
-              summary: 'Idea discovery thread created and ready for context building.',
-              visibleToUser: true,
-            },
-          ],
-          workingIdea: {
-            provisionalTitle: null,
-            currentSummary: null,
-            purpose: null,
-            scope: null,
-            targetUsers: [],
-            expectedImpact: null,
-            researchAreas: [],
-            constraints: [],
-            openQuestions: [],
-          },
-        }),
+        Response.json(makeThread()),
       )
 
     const service = createAssistantThreadService(db)
@@ -396,33 +381,7 @@ describe('assistant thread service', () => {
         }),
       )
       .mockResolvedValueOnce(
-        Response.json({
-          threadId: 'thread-user-1:idea-123',
-          ideaId: 'idea-123',
-          userId: 'user-1',
-          stage: 'discovery',
-          status: 'idle',
-          visibleEvents: [
-            {
-              eventId: 'event-1',
-              type: 'thread_created',
-              createdAt: '2026-04-12T00:00:00.000Z',
-              summary: 'Idea discovery thread created and ready for context building.',
-              visibleToUser: true,
-            },
-          ],
-          workingIdea: {
-            provisionalTitle: null,
-            currentSummary: null,
-            purpose: null,
-            scope: null,
-            targetUsers: [],
-            expectedImpact: null,
-            researchAreas: [],
-            constraints: [],
-            openQuestions: [],
-          },
-        }),
+        Response.json(makeThread()),
       )
 
     const service = createAssistantThreadService(db)
@@ -466,12 +425,7 @@ describe('assistant thread service', () => {
         Response.json({
           ok: true,
           outcome: 'proposal_created',
-          thread: {
-            threadId: 'thread-user-1:idea-123',
-            ideaId: 'idea-123',
-            userId: 'user-1',
-            stage: 'discovery',
-            status: 'idle',
+          thread: makeThread({
             visibleEvents: [
               {
                 eventId: 'event-1',
@@ -492,7 +446,7 @@ describe('assistant thread service', () => {
               constraints: [],
               openQuestions: [],
             },
-          },
+          }),
           proposal: {
             explanation: 'Generated a richer version of the idea.',
           },
@@ -548,12 +502,30 @@ describe('assistant thread service', () => {
       .mockResolvedValueOnce(
         Response.json({
           ok: true,
-          thread: {
-            threadId: 'thread-user-1:idea-123',
-            ideaId: 'idea-123',
-            userId: 'user-1',
-            stage: 'discovery',
-            status: 'idle',
+          outcome: 'accepted',
+          turnId: 'turn-1',
+          state: 'processing',
+          queueDepth: 0,
+          thread: makeThread({
+            status: 'processing',
+            activeTurn: {
+              turnId: 'turn-1',
+              source: 'text',
+              userMessage: 'Reduce onboarding drop-off for first-time users.',
+              transcriptLanguage: null,
+              state: 'processing',
+              createdAt: '2026-04-12T00:00:30.000Z',
+              completedAt: null,
+            },
+            lastTurn: {
+              turnId: 'turn-1',
+              source: 'text',
+              userMessage: 'Reduce onboarding drop-off for first-time users.',
+              transcriptLanguage: null,
+              state: 'processing',
+              createdAt: '2026-04-12T00:00:30.000Z',
+              completedAt: null,
+            },
             visibleEvents: [
               {
                 eventId: 'event-1',
@@ -581,7 +553,7 @@ describe('assistant thread service', () => {
               constraints: [],
               openQuestions: [],
             },
-          },
+          }),
         }),
       )
 
@@ -599,6 +571,8 @@ describe('assistant thread service', () => {
     )
 
     expect(result.thread.workingIdea.purpose).toBe('Reduce onboarding drop-off for first-time users.')
+    expect(result.outcome).toBe('accepted')
+    expect(result.state).toBe('processing')
     const [url, init] = fetchMock.mock.calls[1] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123/turns')
     expect(init?.method).toBe('POST')
@@ -631,12 +605,7 @@ describe('assistant thread service', () => {
         Response.json({
           ok: true,
           outcome: 'approved',
-          thread: {
-            threadId: 'thread-user-1:idea-123',
-            ideaId: 'idea-123',
-            userId: 'user-1',
-            stage: 'discovery',
-            status: 'idle',
+          thread: makeThread({
             visibleEvents: [
               {
                 eventId: 'event-1',
@@ -657,7 +626,7 @@ describe('assistant thread service', () => {
               constraints: [],
               openQuestions: [],
             },
-          },
+          }),
           canonicalWritePayload: {
             ideaId: 'idea-123',
             expectedSnapshotVersion: 1,
@@ -716,12 +685,7 @@ describe('assistant thread service', () => {
         Response.json({
           ok: true,
           outcome: 'rejected',
-          thread: {
-            threadId: 'thread-user-1:idea-123',
-            ideaId: 'idea-123',
-            userId: 'user-1',
-            stage: 'discovery',
-            status: 'idle',
+          thread: makeThread({
             visibleEvents: [
               {
                 eventId: 'event-1',
@@ -742,7 +706,7 @@ describe('assistant thread service', () => {
               constraints: [],
               openQuestions: [],
             },
-          },
+          }),
           threadEventId: 'event-2',
         }),
       )

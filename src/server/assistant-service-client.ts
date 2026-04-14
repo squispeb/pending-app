@@ -21,25 +21,30 @@ const workingIdeaSchema = z.object({
   openQuestions: z.array(z.string().min(1)),
 })
 
+const threadTurnSchema = z.object({
+  turnId: z.string().min(1),
+  source: z.literal('text'),
+  userMessage: z.string().min(1),
+  transcriptLanguage: z.null(),
+  state: z.enum(['queued', 'processing', 'streaming', 'completed', 'failed']),
+  createdAt: z.string().min(1),
+  completedAt: z.string().min(1).nullable(),
+})
+
 const ideaThreadViewSchema = z.object({
   threadId: z.string().min(1),
   ideaId: z.string().min(1),
   userId: z.string().min(1),
   stage: z.enum(['discovery', 'framing', 'developed']),
-  status: z.enum(['idle', 'processing', 'streaming', 'failed']),
+  status: z.enum(['idle', 'queued', 'processing', 'streaming', 'failed']),
+  activeTurn: threadTurnSchema.nullable(),
+  queuedTurns: z.array(threadTurnSchema),
+  lastTurn: threadTurnSchema.nullable(),
   visibleEvents: z.array(threadEventSchema),
   workingIdea: workingIdeaSchema,
 })
 
-const resolveIdeaThreadResponseSchema = z.object({
-  threadId: z.string().min(1),
-  ideaId: z.string().min(1),
-  userId: z.string().min(1),
-  stage: z.enum(['discovery', 'framing', 'developed']),
-  status: z.enum(['idle', 'processing', 'streaming', 'failed']),
-  visibleEvents: z.array(threadEventSchema),
-  workingIdea: workingIdeaSchema,
-})
+const resolveIdeaThreadResponseSchema = ideaThreadViewSchema
 
 const getIdeaThreadResponseSchema = ideaThreadViewSchema
 
@@ -54,6 +59,10 @@ const elaborateIdeaResponseSchema = z.object({
 
 const submitDiscoveryTurnResponseSchema = z.object({
   ok: z.literal(true),
+  outcome: z.literal('accepted'),
+  turnId: z.string().min(1),
+  state: z.enum(['processing', 'queued']),
+  queueDepth: z.number().int().nonnegative(),
   thread: ideaThreadViewSchema,
 })
 
@@ -200,6 +209,36 @@ export async function submitIdeaDiscoveryTurn(
   const payload = await parseAssistantResponse(response)
 
   return submitDiscoveryTurnResponseSchema.parse(payload)
+}
+
+export async function streamAssistantIdeaThread(
+  input: { ideaId: string; authHeaders: HeadersInit },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+
+  if (!baseUrl) {
+    throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  }
+
+  const headers = new Headers(input.authHeaders)
+  headers.set('accept', 'text/event-stream')
+
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/stream`, {
+    method: 'GET',
+    headers,
+  })
+
+  if (!response.ok) {
+    const payload = await parseAssistantResponse(response)
+    throw new Error(typeof payload === 'object' && payload && 'message' in payload ? String(payload.message) : 'Assistant stream request failed')
+  }
+
+  if (!response.body) {
+    throw new Error('Assistant stream did not return a response body')
+  }
+
+  return response
 }
 
 export async function approveIdeaThreadProposal(

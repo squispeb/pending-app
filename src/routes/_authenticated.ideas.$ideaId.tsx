@@ -5,7 +5,7 @@ import { Link, createFileRoute, notFound } from '@tanstack/react-router'
 import { IdeaThreadHistory } from '../components/idea-thread-history'
 import { useCaptureContext } from '../contexts/CaptureContext'
 import { getIdeaExcerpt, isIdeaStarred } from '../lib/ideas'
-import { getIdea, getIdeaThread, submitIdeaThreadTurn, toggleIdeaStar } from '../server/ideas'
+import { getIdea, getIdeaThread, streamIdeaThread, submitIdeaThreadTurn, toggleIdeaStar } from '../server/ideas'
 
 const ideaDetailQueryOptions = (ideaId: string) =>
   queryOptions({
@@ -17,6 +17,10 @@ const ideaThreadQueryOptions = (ideaId: string) =>
   queryOptions({
     queryKey: ['idea-thread', ideaId],
     queryFn: () => getIdeaThread({ data: { id: ideaId } }),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status && status !== 'idle' ? 1500 : false
+    },
   })
 
 export const Route = createFileRoute('/_authenticated/ideas/$ideaId')({
@@ -37,7 +41,12 @@ function IdeaDetailPage() {
   const { openCapture } = useCaptureContext()
   const [discoveryMessage, setDiscoveryMessage] = useState('')
   const [discoveryError, setDiscoveryError] = useState<string | null>(null)
+  const [discoveryNotice, setDiscoveryNotice] = useState<string | null>(null)
+  const [streamingAssistantText, setStreamingAssistantText] = useState('')
   const threadEndRef = useRef<HTMLDivElement | null>(null)
+  const isThreadBusy = thread.status === 'queued' || thread.status === 'processing' || thread.status === 'streaming'
+  const queuedTurnCount = thread.queuedTurns.length
+  const latestQueuedTurn = thread.queuedTurns.at(-1) ?? null
 
   if (!idea) {
     throw notFound()
@@ -79,12 +88,16 @@ function IdeaDetailPage() {
 
   const submitTurnMutation = useMutation({
     mutationFn: async (message: string) => submitIdeaThreadTurn({ data: { id: ideaId, message } }),
-    onSuccess: async () => {
+    onSuccess: async (result, message) => {
       setDiscoveryMessage('')
       setDiscoveryError(null)
+      setDiscoveryNotice(result.state === 'queued' ? `Reply queued behind ${result.queueDepth} ${result.queueDepth === 1 ? 'active turn' : 'active turns'}.` : null)
+      queryClient.setQueryData(['idea-thread', ideaId], result.thread)
+
       await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
     },
     onError: (error) => {
+      setDiscoveryNotice(null)
       setDiscoveryError(error instanceof Error ? error.message : 'Failed to submit discovery turn.')
     },
   })
@@ -98,12 +111,82 @@ function IdeaDetailPage() {
     }
 
     setDiscoveryError(null)
+    setDiscoveryNotice(null)
     submitTurnMutation.mutate(message)
   }
 
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [thread.visibleEvents.length])
+  }, [thread.visibleEvents.length, streamingAssistantText])
+
+  useEffect(() => {
+    if (!isThreadBusy) {
+      setStreamingAssistantText('')
+      return
+    }
+
+    const abortController = new AbortController()
+
+    void (async () => {
+      try {
+        const response = await streamIdeaThread({ data: { id: ideaId }, signal: abortController.signal as never })
+
+        if (!response.body) {
+          return
+        }
+
+        const reader = response.body
+          .pipeThrough(new TextDecoderStream())
+          .getReader()
+        let buffer = ''
+
+        while (true) {
+          const { value, done } = await reader.read()
+
+          if (done) {
+            break
+          }
+
+          buffer += value
+          const frames = buffer.split('\n\n')
+          buffer = frames.pop() ?? ''
+
+          for (const frame of frames) {
+            const dataLine = frame
+              .split('\n')
+              .find((line) => line.startsWith('data: '))
+
+            if (!dataLine) {
+              continue
+            }
+
+            const payload = JSON.parse(dataLine.slice(6)) as
+              | { type: 'assistant_chunk'; textDelta: string }
+              | { type: 'working_idea_updated' | 'turn_completed' | 'turn_failed' }
+
+            if (payload.type === 'assistant_chunk') {
+              setStreamingAssistantText((current) => `${current}${payload.textDelta}`)
+              continue
+            }
+
+            if (payload.type === 'turn_completed' || payload.type === 'turn_failed') {
+              setStreamingAssistantText('')
+            }
+          }
+        }
+      } catch (error) {
+        if (abortController.signal.aborted) {
+          return
+        }
+
+        setDiscoveryError(error instanceof Error ? error.message : 'Failed to subscribe to assistant stream.')
+      }
+    })()
+
+    return () => {
+      abortController.abort()
+    }
+  }, [ideaId, isThreadBusy])
 
   return (
     <main className="page-wrap pb-32 pt-8 lg:pb-16">
@@ -146,7 +229,15 @@ function IdeaDetailPage() {
                     Discovery thread
                   </div>
                   <p className="mt-3 mb-0 text-sm leading-6 text-[var(--ink-soft)]">
-                    {latestAssistantQuestion
+                    {isThreadBusy
+                      ? thread.status === 'queued'
+                        ? queuedTurnCount > 0
+                          ? `${queuedTurnCount} replies are queued while the assistant finishes the current turn.`
+                          : 'Your latest reply is queued behind the current turn.'
+                        : thread.status === 'streaming'
+                          ? 'The assistant is writing back in this thread now.'
+                          : 'The assistant is processing the latest turn now.'
+                      : latestAssistantQuestion
                       ? latestAssistantQuestion
                       : missingDiscoveryAreas.length > 0
                         ? `The biggest gaps right now are ${missingDiscoveryAreas.join(', ')}.`
@@ -161,7 +252,22 @@ function IdeaDetailPage() {
             </div>
 
             <div className="space-y-4 pb-36 lg:pb-40">
-              <IdeaThreadHistory visibleEvents={thread.visibleEvents} />
+              <IdeaThreadHistory
+                visibleEvents={thread.visibleEvents}
+                threadStatus={thread.status}
+                activeTurn={thread.activeTurn}
+                queuedTurns={thread.queuedTurns}
+                lastTurn={thread.lastTurn}
+              />
+              {streamingAssistantText ? (
+                <section className="panel rounded-[28px] border border-violet-200 bg-violet-50/70 p-5 dark:border-violet-500/30 dark:bg-violet-500/10">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-violet-700 dark:text-violet-300">
+                    <Lightbulb size={14} />
+                    Assistant reply streaming
+                  </div>
+                  <p className="m-0 mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">{streamingAssistantText}</p>
+                </section>
+              ) : null}
               <div ref={threadEndRef} />
             </div>
 
@@ -173,7 +279,17 @@ function IdeaDetailPage() {
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Reply in thread</div>
                   <div className="mt-1 text-sm text-[var(--ink-soft)]">
-                    {latestAssistantQuestion ?? 'Add the next piece of context and the assistant will continue the conversation.'}
+                    {thread.status === 'queued'
+                      ? latestQueuedTurn
+                        ? `Queued after the current turn: ${latestQueuedTurn.userMessage}`
+                        : 'Your next reply will queue after the current turn.'
+                      : thread.status === 'processing'
+                        ? thread.activeTurn
+                          ? `Assistant is working on: ${thread.activeTurn.userMessage}`
+                          : 'Assistant is processing the latest reply.'
+                        : thread.status === 'streaming'
+                          ? 'Assistant is replying now. You can queue another follow-up if needed.'
+                          : latestAssistantQuestion ?? 'Add the next piece of context and the assistant will continue the conversation.'}
                   </div>
                 </div>
                 <button
@@ -208,6 +324,12 @@ function IdeaDetailPage() {
                 </p>
               ) : null}
 
+              {!discoveryError && discoveryNotice ? (
+                <p className="m-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+                  {discoveryNotice}
+                </p>
+              ) : null}
+
               <div className="flex items-center justify-between gap-3">
                 <p className="m-0 text-sm text-[var(--ink-soft)]">Voice is preferred. Use `Cmd/Ctrl+Enter` to send typed replies.</p>
                 <button
@@ -216,7 +338,7 @@ function IdeaDetailPage() {
                   className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] px-4 py-3 font-semibold text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   <SendHorizonal size={16} />
-                  {submitTurnMutation.isPending ? 'Sending...' : 'Send reply'}
+                  {submitTurnMutation.isPending ? 'Sending...' : isThreadBusy ? 'Queue reply' : 'Send reply'}
                 </button>
               </div>
             </form>

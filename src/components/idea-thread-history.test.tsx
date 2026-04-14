@@ -11,6 +11,47 @@ describe('IdeaThreadHistory', () => {
     expect(markup).toContain('Discovery ready')
   })
 
+  it('renders queue-aware thread status details when the thread is busy', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[
+          {
+            eventId: 'event-1',
+            type: 'thread_created',
+            createdAt: '2026-04-12T00:00:00.000Z',
+            summary: 'Thread bootstrapped.',
+          },
+        ]}
+        threadStatus="queued"
+        activeTurn={{
+          turnId: 'turn-1',
+          source: 'text',
+          userMessage: 'Clarify the target user for the onboarding flow.',
+          transcriptLanguage: null,
+          state: 'processing',
+          createdAt: '2026-04-12T00:00:30.000Z',
+          completedAt: null,
+        }}
+        queuedTurns={[
+          {
+            turnId: 'turn-2',
+            source: 'text',
+            userMessage: 'Also capture where drop-off happens now.',
+            transcriptLanguage: null,
+            state: 'queued',
+            createdAt: '2026-04-12T00:01:00.000Z',
+            completedAt: null,
+          },
+        ]}
+      />,
+    )
+
+    expect(markup).toContain('Queued (1)')
+    expect(markup).toContain('The assistant is finishing an earlier turn first.')
+    expect(markup).toContain('Active turn: Clarify the target user for the onboarding flow.')
+    expect(markup).toContain('1 later reply is queued.')
+  })
+
   it('renders distinct visible event labels and the latest thread status', () => {
     const markup = renderToStaticMarkup(
       <IdeaThreadHistory

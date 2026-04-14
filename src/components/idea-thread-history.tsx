@@ -1,4 +1,10 @@
-import { deriveThreadState, getThreadEventPresentation, type ThreadEventType } from '../lib/idea-thread-presentation'
+import {
+  deriveThreadState,
+  getThreadEventPresentation,
+  type ThreadEventType,
+  type ThreadStatus,
+  type ThreadTurnPresentation,
+} from '../lib/idea-thread-presentation'
 
 type IdeaThreadVisibleEvent = {
   eventId: string
@@ -7,8 +13,26 @@ type IdeaThreadVisibleEvent = {
   summary: string
 }
 
-export function IdeaThreadHistory({ visibleEvents }: { visibleEvents: Array<IdeaThreadVisibleEvent> }) {
-  const threadState = deriveThreadState(visibleEvents)
+export function IdeaThreadHistory({
+  visibleEvents,
+  threadStatus = 'idle',
+  activeTurn = null,
+  queuedTurns = [],
+  lastTurn = null,
+}: {
+  visibleEvents: Array<IdeaThreadVisibleEvent>
+  threadStatus?: ThreadStatus
+  activeTurn?: ThreadTurnPresentation | null
+  queuedTurns?: Array<ThreadTurnPresentation>
+  lastTurn?: ThreadTurnPresentation | null
+}) {
+  const threadState = deriveThreadState({
+    status: threadStatus,
+    visibleEvents,
+    activeTurn,
+    queuedTurns,
+  })
+  const showQueuePanel = threadStatus === 'queued' || threadStatus === 'processing' || threadStatus === 'streaming' || threadStatus === 'failed'
 
   return (
     <section className="panel rounded-[28px] p-6 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
@@ -16,6 +40,27 @@ export function IdeaThreadHistory({ visibleEvents }: { visibleEvents: Array<Idea
         <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Thread history</div>
         <div className={`rounded-full border px-3 py-1 text-xs font-medium ${threadState.badgeClassName}`}>{threadState.label}</div>
       </div>
+
+      {showQueuePanel ? (
+        <div className="mb-4 rounded-[24px] border border-[var(--line)] bg-[var(--surface)] px-4 py-3">
+          <p className="m-0 text-sm font-medium text-[var(--ink-strong)]">{threadState.helperText}</p>
+          {activeTurn ? (
+            <p className="m-0 mt-2 text-sm text-[var(--ink-soft)]">
+              Active turn: {activeTurn.userMessage}
+            </p>
+          ) : null}
+          {queuedTurns.length > 0 ? (
+            <p className="m-0 mt-2 text-sm text-[var(--ink-soft)]">
+              {queuedTurns.length === 1 ? '1 later reply is queued.' : `${queuedTurns.length} later replies are queued.`}
+            </p>
+          ) : null}
+          {threadStatus === 'failed' && lastTurn ? (
+            <p className="m-0 mt-2 text-sm text-[var(--ink-soft)]">
+              Last failed turn: {lastTurn.userMessage}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="space-y-3">
         {visibleEvents.length > 0 ? (

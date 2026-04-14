@@ -147,6 +147,14 @@ export const submitIdeaThreadTurn = createServerFn({ method: 'POST' })
     })
   })
 
+export const streamIdeaThread = createServerFn({ method: 'GET' })
+  .inputValidator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    const response = await assistantThreadService.streamIdeaThread(data.id)
+    response.headers.set('x-tss-raw', 'true')
+    return response
+  })
+
 export const elaborateIdea = createServerFn({ method: 'POST' })
   .inputValidator((input: { id: string; actionInput: string | null }) => input)
   .handler(async ({ data }) => {

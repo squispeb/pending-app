@@ -29,6 +29,46 @@ describe('idea thread presentation', () => {
     expect(deriveThreadState([{ type: 'assistant_failed' }]).label).toBe('Assistant failed')
   })
 
+  it('prefers queue-aware status over event-derived readiness', () => {
+    const state = deriveThreadState({
+      status: 'queued',
+      visibleEvents: [{ type: 'thread_created' }],
+      queuedTurns: [
+        {
+          turnId: 'turn-2',
+          source: 'text',
+          userMessage: 'Add notes about activation metrics too.',
+          transcriptLanguage: null,
+          state: 'queued',
+          createdAt: '2026-04-12T00:00:30.000Z',
+          completedAt: null,
+        },
+      ],
+    })
+
+    expect(state.label).toBe('Queued (1)')
+    expect(state.badgeClassName).toContain('indigo')
+  })
+
+  it('surfaces processing helper text from the active turn', () => {
+    const state = deriveThreadState({
+      status: 'processing',
+      visibleEvents: [{ type: 'assistant_question' }],
+      activeTurn: {
+        turnId: 'turn-1',
+        source: 'text',
+        userMessage: 'Reduce onboarding drop-off for first-time users.',
+        transcriptLanguage: null,
+        state: 'processing',
+        createdAt: '2026-04-12T00:00:00.000Z',
+        completedAt: null,
+      },
+    })
+
+    expect(state.label).toBe('Assistant thinking')
+    expect(state.helperText).toContain('Reduce onboarding drop-off')
+  })
+
   it('falls back to a ready state when only thread creation is visible', () => {
     const state = deriveThreadState([{ type: 'thread_created' }])
 

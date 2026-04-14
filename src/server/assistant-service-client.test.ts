@@ -3,39 +3,46 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 describe('assistant service client', () => {
   beforeEach(() => {
     process.env.ASSISTANT_SERVICE_URL = 'https://assistant.example'
-    vi.resetModules()
   })
+
+  function makeThread(overrides: Record<string, unknown> = {}) {
+    return {
+      threadId: 'thread-local-user:idea-123',
+      ideaId: 'idea-123',
+      userId: 'local-user',
+      stage: 'discovery',
+      status: 'idle',
+      activeTurn: null,
+      queuedTurns: [],
+      lastTurn: null,
+      visibleEvents: [
+        {
+          eventId: 'event-1',
+          type: 'thread_created',
+          createdAt: '2026-04-12T00:00:00.000Z',
+          summary: 'Idea discovery thread created and ready for context building.',
+          visibleToUser: true,
+        },
+      ],
+      workingIdea: {
+        provisionalTitle: null,
+        currentSummary: null,
+        purpose: null,
+        scope: null,
+        targetUsers: [],
+        expectedImpact: null,
+        researchAreas: [],
+        constraints: [],
+        openQuestions: [],
+      },
+      ...overrides,
+    }
+  }
 
   it('forwards authenticated headers and sends the resolve thread contract', async () => {
     const fetchMock = vi.fn(async () =>
       new Response(
-        JSON.stringify({
-          threadId: 'thread-local-user:idea-123',
-          ideaId: 'idea-123',
-          userId: 'local-user',
-          stage: 'discovery',
-          status: 'idle',
-          visibleEvents: [
-            {
-              eventId: 'event-1',
-              type: 'thread_created',
-              createdAt: '2026-04-12T00:00:00.000Z',
-              summary: 'Idea discovery thread created and ready for context building.',
-              visibleToUser: true,
-            },
-          ],
-          workingIdea: {
-            provisionalTitle: null,
-            currentSummary: null,
-            purpose: null,
-            scope: null,
-            targetUsers: [],
-            expectedImpact: null,
-            researchAreas: [],
-            constraints: [],
-            openQuestions: [],
-          },
-        }),
+        JSON.stringify(makeThread()),
         {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -52,7 +59,7 @@ describe('assistant service client', () => {
           cookie: 'better-auth.session_token=test-session',
         },
       },
-      { fetchImpl: fetchMock as unknown as typeof fetch },
+      { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' },
     )
 
     expect(result).toEqual({
@@ -61,6 +68,9 @@ describe('assistant service client', () => {
       userId: 'local-user',
       stage: 'discovery',
       status: 'idle',
+      activeTurn: null,
+      queuedTurns: [],
+      lastTurn: null,
       visibleEvents: [
         {
           eventId: 'event-1',
@@ -107,7 +117,7 @@ describe('assistant service client', () => {
     await expect(
       resolveAssistantIdeaThread(
         { ideaId: 'idea-123', authHeaders: { authorization: 'Bearer invalid' } },
-        { fetchImpl: fetchMock as unknown as typeof fetch },
+        { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' },
       ),
     ).rejects.toThrow('Unauthorized thread access')
   })
@@ -115,33 +125,7 @@ describe('assistant service client', () => {
   it('retrieves visible thread history through the read contract', async () => {
     const fetchMock = vi.fn(async () =>
       new Response(
-        JSON.stringify({
-          threadId: 'thread-local-user:idea-123',
-          ideaId: 'idea-123',
-          userId: 'local-user',
-          stage: 'discovery',
-          status: 'idle',
-          visibleEvents: [
-            {
-              eventId: 'event-1',
-              type: 'thread_created',
-              createdAt: '2026-04-12T00:00:00.000Z',
-              summary: 'Idea discovery thread created and ready for context building.',
-              visibleToUser: true,
-            },
-          ],
-          workingIdea: {
-            provisionalTitle: null,
-            currentSummary: null,
-            purpose: null,
-            scope: null,
-            targetUsers: [],
-            expectedImpact: null,
-            researchAreas: [],
-            constraints: [],
-            openQuestions: [],
-          },
-        }),
+        JSON.stringify(makeThread()),
         {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -158,7 +142,7 @@ describe('assistant service client', () => {
           cookie: 'better-auth.session_token=test-session',
         },
       },
-      { fetchImpl: fetchMock as unknown as typeof fetch },
+      { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' },
     )
 
     expect(result.visibleEvents).toHaveLength(1)
@@ -180,7 +164,7 @@ describe('assistant service client', () => {
     await expect(
       getAssistantIdeaThread(
         { ideaId: 'idea-123', authHeaders: { authorization: 'Bearer invalid' } },
-        { fetchImpl: fetchMock as unknown as typeof fetch },
+        { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' },
       ),
     ).rejects.toThrow('Failed to read thread state')
   })
@@ -190,12 +174,7 @@ describe('assistant service client', () => {
       new Response(JSON.stringify({
         ok: true,
         outcome: 'proposal_created',
-        thread: {
-          threadId: 'thread-local-user:idea-123',
-          ideaId: 'idea-123',
-          userId: 'local-user',
-          stage: 'discovery',
-          status: 'idle',
+        thread: makeThread({
           visibleEvents: [
             {
               eventId: 'event-1',
@@ -216,7 +195,7 @@ describe('assistant service client', () => {
             constraints: [],
             openQuestions: [],
           },
-        },
+        }),
         proposal: {
           explanation: 'Generated a richer version of the idea.',
         },
@@ -232,7 +211,7 @@ describe('assistant service client', () => {
       currentTitle: 'Idea title',
       currentBody: 'Idea body',
       currentSummary: null,
-    }, { fetchImpl: fetchMock as unknown as typeof fetch })
+    }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
 
     expect(result.outcome).toBe('proposal_created')
     const [url, init] = fetchMock.mock.calls[0] ?? []
@@ -244,12 +223,30 @@ describe('assistant service client', () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
         ok: true,
-        thread: {
-          threadId: 'thread-local-user:idea-123',
-          ideaId: 'idea-123',
-          userId: 'local-user',
-          stage: 'discovery',
-          status: 'idle',
+        outcome: 'accepted',
+        turnId: 'turn-1',
+        state: 'processing',
+        queueDepth: 0,
+        thread: makeThread({
+          status: 'processing',
+          activeTurn: {
+            turnId: 'turn-1',
+            source: 'text',
+            userMessage: 'Reduce onboarding drop-off for first-time users.',
+            transcriptLanguage: null,
+            state: 'processing',
+            createdAt: '2026-04-12T00:01:00.000Z',
+            completedAt: null,
+          },
+          lastTurn: {
+            turnId: 'turn-1',
+            source: 'text',
+            userMessage: 'Reduce onboarding drop-off for first-time users.',
+            transcriptLanguage: null,
+            state: 'processing',
+            createdAt: '2026-04-12T00:01:00.000Z',
+            completedAt: null,
+          },
           visibleEvents: [
             {
               eventId: 'event-1',
@@ -291,7 +288,7 @@ describe('assistant service client', () => {
             constraints: [],
             openQuestions: [],
           },
-        },
+        }),
       }), { status: 200, headers: { 'content-type': 'application/json' } }),
     )
 
@@ -300,9 +297,12 @@ describe('assistant service client', () => {
       ideaId: 'idea-123',
       authHeaders: { cookie: 'better-auth.session_token=test-session' },
       message: 'Reduce onboarding drop-off for first-time users.',
-    }, { fetchImpl: fetchMock as unknown as typeof fetch })
+    }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
 
     expect(result.thread.workingIdea.purpose).toBe('Reduce onboarding drop-off for first-time users.')
+    expect(result.outcome).toBe('accepted')
+    expect(result.state).toBe('processing')
+    expect(result.turnId).toBe('turn-1')
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123/turns')
     expect(init?.method).toBe('POST')
@@ -314,12 +314,7 @@ describe('assistant service client', () => {
       new Response(JSON.stringify({
         ok: true,
         outcome: 'approved',
-        thread: {
-          threadId: 'thread-local-user:idea-123',
-          ideaId: 'idea-123',
-          userId: 'local-user',
-          stage: 'discovery',
-          status: 'idle',
+        thread: makeThread({
           visibleEvents: [
             {
               eventId: 'event-1',
@@ -340,7 +335,7 @@ describe('assistant service client', () => {
             constraints: [],
             openQuestions: [],
           },
-        },
+        }),
         canonicalWritePayload: {
           ideaId: 'idea-123',
           expectedSnapshotVersion: 1,
@@ -358,7 +353,7 @@ describe('assistant service client', () => {
       authHeaders: { cookie: 'better-auth.session_token=test-session' },
       proposalId: 'proposal-1',
       expectedSnapshotVersion: 1,
-    }, { fetchImpl: fetchMock as unknown as typeof fetch })
+    }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
 
     expect(result.outcome).toBe('approved')
     const [url, init] = fetchMock.mock.calls[0] ?? []
@@ -371,12 +366,7 @@ describe('assistant service client', () => {
       new Response(JSON.stringify({
         ok: true,
         outcome: 'rejected',
-        thread: {
-          threadId: 'thread-local-user:idea-123',
-          ideaId: 'idea-123',
-          userId: 'local-user',
-          stage: 'discovery',
-          status: 'idle',
+        thread: makeThread({
           visibleEvents: [
             {
               eventId: 'event-1',
@@ -397,7 +387,7 @@ describe('assistant service client', () => {
             constraints: [],
             openQuestions: [],
           },
-        },
+        }),
         threadEventId: 'event-2',
       }), { status: 200, headers: { 'content-type': 'application/json' } }),
     )
@@ -407,7 +397,7 @@ describe('assistant service client', () => {
       ideaId: 'idea-123',
       authHeaders: { cookie: 'better-auth.session_token=test-session' },
       proposalId: 'proposal-1',
-    }, { fetchImpl: fetchMock as unknown as typeof fetch })
+    }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
 
     expect(result.outcome).toBe('rejected')
     const [url, init] = fetchMock.mock.calls[0] ?? []

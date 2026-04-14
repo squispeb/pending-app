@@ -2,6 +2,20 @@ import { AlertTriangle, HelpCircle, Lightbulb, MessageSquareText, Sparkles, Tren
 
 export type ThreadEventType = 'thread_created' | 'user_turn_added' | 'assistant_question' | 'assistant_synthesis' | 'stage_changed' | 'assistant_failed'
 
+export type ThreadStatus = 'idle' | 'queued' | 'processing' | 'streaming' | 'failed'
+
+export type ThreadTurnState = 'queued' | 'processing' | 'streaming' | 'completed' | 'failed'
+
+export type ThreadTurnPresentation = {
+  turnId: string
+  source: 'text'
+  userMessage: string
+  transcriptLanguage: null
+  state: ThreadTurnState
+  createdAt: string
+  completedAt: string | null
+}
+
 export function formatThreadEventLabel(type: ThreadEventType) {
   switch (type) {
     case 'thread_created':
@@ -66,7 +80,53 @@ export function getThreadEventPresentation(type: ThreadEventType) {
   }
 }
 
-export function deriveThreadState(visibleEvents: Array<{ type: ThreadEventType }>) {
+export function deriveThreadState(
+  input:
+    | Array<{ type: ThreadEventType }>
+    | {
+        status: ThreadStatus
+        visibleEvents: Array<{ type: ThreadEventType }>
+        activeTurn?: ThreadTurnPresentation | null
+        queuedTurns?: Array<ThreadTurnPresentation>
+      },
+) {
+  const status = Array.isArray(input) ? 'idle' : input.status
+  const visibleEvents = Array.isArray(input) ? input : input.visibleEvents
+  const activeTurn = Array.isArray(input) ? null : input.activeTurn ?? null
+  const queuedTurns = Array.isArray(input) ? [] : input.queuedTurns ?? []
+
+  if (status === 'queued') {
+    return {
+      label: queuedTurns.length > 0 ? `Queued (${queuedTurns.length})` : 'Queued',
+      badgeClassName: 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300',
+      helperText: activeTurn ? 'The assistant is finishing an earlier turn first.' : 'Your reply is queued for the assistant.',
+    }
+  }
+
+  if (status === 'processing') {
+    return {
+      label: 'Assistant thinking',
+      badgeClassName: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300',
+      helperText: activeTurn ? `Working on: ${activeTurn.userMessage}` : 'The assistant is processing the latest turn.',
+    }
+  }
+
+  if (status === 'streaming') {
+    return {
+      label: 'Assistant replying',
+      badgeClassName: 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300',
+      helperText: 'The assistant is currently writing back in this thread.',
+    }
+  }
+
+  if (status === 'failed') {
+    return {
+      label: 'Assistant failed',
+      badgeClassName: 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300',
+      helperText: 'The latest turn failed. You can retry by sending another reply.',
+    }
+  }
+
   const latestRelevantEvent = [...visibleEvents]
     .reverse()
     .find((event) => event.type !== 'thread_created' && event.type !== 'user_turn_added')
@@ -76,26 +136,31 @@ export function deriveThreadState(visibleEvents: Array<{ type: ThreadEventType }
       return {
         label: 'Assistant updated',
         badgeClassName: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300',
+        helperText: null,
       }
     case 'assistant_question':
       return {
         label: 'Assistant guiding',
         badgeClassName: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300',
+        helperText: null,
       }
     case 'stage_changed':
       return {
         label: 'Stage updated',
         badgeClassName: 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300',
+        helperText: null,
       }
     case 'assistant_failed':
       return {
         label: 'Assistant failed',
         badgeClassName: 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300',
+        helperText: 'The latest turn failed. You can retry by sending another reply.',
       }
     default:
       return {
         label: 'Discovery ready',
         badgeClassName: 'border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)]',
+        helperText: null,
       }
   }
 }
