@@ -194,6 +194,17 @@ export async function persistIdeaRefinementAndSync(
   }
 }
 
+export function markServerFnRawResponse(response: Response) {
+  const headers = new Headers(response.headers)
+  headers.set('x-tss-raw', 'true')
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  })
+}
+
 export const listIdeas = createServerFn({ method: 'GET' })
   .inputValidator((input) => ideaVaultSearchSchema.parse(input ?? {}))
   .handler(async ({ data }) => {
@@ -253,8 +264,7 @@ export const streamIdeaThread = createServerFn({ method: 'GET' })
     const response = await assistantThreadService.streamIdeaThread(data.id, {
       lastEventId: data.lastEventId ?? null,
     })
-    response.headers.set('x-tss-raw', 'true')
-    return response
+    return markServerFnRawResponse(response)
   })
 
 export const elaborateIdea = createServerFn({ method: 'POST' })

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { approveIdeaProposalAndPersist, createIdeaAndBootstrapThread, persistIdeaRefinementAndSync } from './ideas'
+import { approveIdeaProposalAndPersist, createIdeaAndBootstrapThread, markServerFnRawResponse, persistIdeaRefinementAndSync } from './ideas'
 
 describe('ideas server flow', () => {
   it('creates the canonical idea and bootstraps the assistant thread in one app-side path', async () => {
@@ -289,5 +289,20 @@ describe('ideas server flow', () => {
       ),
     ).rejects.toThrow('Title and summary improvements are only available for developed ideas.')
     expect(syncIdeaThreadCheckpoint).not.toHaveBeenCalled()
+  })
+
+  it('clones thread stream responses before marking them as raw', async () => {
+    const original = new Response('data: {"type":"assistant_chunk","textDelta":"Hello"}\n\n', {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    })
+
+    const wrapped = markServerFnRawResponse(original)
+
+    expect(wrapped).not.toBe(original)
+    expect(wrapped.headers.get('content-type')).toBe('text/event-stream')
+    expect(wrapped.headers.get('x-tss-raw')).toBe('true')
+    expect(original.headers.get('x-tss-raw')).toBeNull()
+    await expect(wrapped.text()).resolves.toContain('assistant_chunk')
   })
 })
