@@ -171,6 +171,19 @@ describe('IdeaThreadHistory', () => {
     expect(markup).toContain('Thinking about your question now.')
   })
 
+  it('can hide the internal thread header when the parent view already provides it', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        showHeader={false}
+      />,
+    )
+
+    expect(markup).not.toContain('>Thread<')
+    expect(markup).not.toContain('Discovery ready')
+    expect(markup).toContain('No visible thread history yet.')
+  })
+
   it('renders event timestamps inside a time element', () => {
     const markup = renderToStaticMarkup(
       <IdeaThreadHistory

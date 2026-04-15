@@ -310,6 +310,9 @@ function IdeaDetailPage() {
     },
   })
 
+  const refineActionsDisabled = isThreadBusy || requestRefinementMutation.isPending || persistRefinementMutation.isPending
+  const structuredActionsDisabled = isThreadBusy || requestRefinementMutation.isPending || requestStructuredActionMutation.isPending || persistRefinementMutation.isPending
+
   function handleDiscoverySubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const message = discoveryMessage.trim()
@@ -501,7 +504,7 @@ function IdeaDetailPage() {
   }, [ideaId, isThreadBusy])
 
   const contextSurface = (
-    <section className="panel rounded-[28px] p-4 sm:p-5">
+    <section className="subpanel rounded-[28px] p-4 sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Context</div>
@@ -589,7 +592,7 @@ function IdeaDetailPage() {
   )
 
   const reviewSurface = (
-    <section className="panel rounded-[28px] p-4 sm:p-5">
+    <section className="subpanel rounded-[28px] p-4 sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Review</div>
@@ -612,9 +615,16 @@ function IdeaDetailPage() {
                 <button
                   key={action}
                   type="button"
-                  disabled={isThreadBusy || requestRefinementMutation.isPending || persistRefinementMutation.isPending}
-                  onClick={() => requestRefinementMutation.mutate(action)}
-                  className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-300 hover:text-sky-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200"
+                  aria-disabled={refineActionsDisabled}
+                  data-disabled={refineActionsDisabled ? 'true' : 'false'}
+                  onClick={() => {
+                    if (refineActionsDisabled) {
+                      return
+                    }
+
+                    requestRefinementMutation.mutate(action)
+                  }}
+                  className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold leading-none text-slate-900 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 hover:text-slate-950 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-100 dark:border-slate-500/30 dark:bg-slate-950/30 dark:text-slate-100 dark:hover:border-slate-400/60 dark:hover:bg-slate-900/50 dark:hover:text-white"
                 >
                   {getIdeaStructuredActionLabel(action)}
                 </button>
@@ -623,9 +633,16 @@ function IdeaDetailPage() {
                 <button
                   key={action}
                   type="button"
-                  disabled={isThreadBusy || requestRefinementMutation.isPending || requestStructuredActionMutation.isPending || persistRefinementMutation.isPending}
-                  onClick={() => requestStructuredActionMutation.mutate(action)}
-                  className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-violet-200 bg-white px-4 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200"
+                  aria-disabled={structuredActionsDisabled}
+                  data-disabled={structuredActionsDisabled ? 'true' : 'false'}
+                  onClick={() => {
+                    if (structuredActionsDisabled) {
+                      return
+                    }
+
+                    requestStructuredActionMutation.mutate(action)
+                  }}
+                  className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold leading-none text-slate-900 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 hover:text-slate-950 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-100 dark:border-slate-500/30 dark:bg-slate-950/30 dark:text-slate-100 dark:hover:border-slate-400/60 dark:hover:bg-slate-900/50 dark:hover:text-white"
                 >
                   {getIdeaStructuredActionLabel(action)}
                 </button>
@@ -797,7 +814,7 @@ function IdeaDetailPage() {
   )
 
   const sourceSurface = (
-    <section className="panel rounded-[28px] p-4 sm:p-5">
+    <section className="subpanel rounded-[28px] p-4 sm:p-5">
       <div className="mb-4">
         <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Source</div>
         <p className="m-0 mt-0.5 text-sm leading-6 text-[var(--ink-soft)]">Original captured input, separated from the chat so it stays available without crowding the workspace.</p>
@@ -814,10 +831,10 @@ function IdeaDetailPage() {
 
   const activeTabSurface = activePageTab === 'thread'
     ? (
-        <section className="flex min-h-0 flex-1 flex-col gap-3">
+        <section className="flex min-h-0 flex-1 flex-col gap-2 sm:gap-3">
           {/* Thread-tab context bar — status/subtitle lives here, not in the page header */}
-          <div className="flex items-start justify-between gap-3 px-0.5">
-            <p className="m-0 min-w-0 flex-1 text-sm leading-6 text-[var(--ink-soft)]">
+          <div className="flex items-start justify-between gap-2 px-0.5 sm:gap-3">
+            <p className="m-0 min-w-0 flex-1 text-[13px] leading-6 text-[var(--ink-soft)] sm:text-sm">
               {currentThreadSubtitle}
             </p>
             <div className="inline-flex shrink-0 rounded-full border border-[var(--line)] bg-[var(--surface)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--ink-soft)] sm:hidden">
@@ -842,6 +859,7 @@ function IdeaDetailPage() {
                   lastTurn={thread.lastTurn}
                   streamingAssistantText={streamingAssistantText}
                   threadRegionId="thread-history-panel"
+                  showHeader={false}
                   className="min-h-full"
                 />
               </div>
@@ -935,19 +953,19 @@ function IdeaDetailPage() {
         : sourceSurface
 
   return (
-    <main className="page-wrap flex h-[calc(100dvh-4rem)] flex-col overflow-hidden px-4 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-5 sm:pt-7 lg:h-auto lg:overflow-visible lg:pb-8">
+    <main className="page-wrap flex h-[calc(100dvh-4rem)] flex-col overflow-hidden px-4 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-3 sm:pt-6 lg:h-auto lg:overflow-visible lg:pb-8">
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         {/* Page header — core identity only: back, title, stage, star */}
-        <section className="panel overflow-hidden rounded-[28px] px-3.5 py-3 sm:px-4 sm:py-3.5">
-          <div className="flex items-start justify-between gap-3">
+        <section className="subpanel overflow-hidden rounded-[22px] px-3 py-2 sm:rounded-[28px] sm:px-4 sm:py-3.5">
+          <div className="flex items-start justify-between gap-2 sm:gap-3">
             <div className="min-w-0 flex-1">
-              <Link to="/ideas" className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--brand)] no-underline hover:underline">
+              <Link to="/ideas" className="text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--brand)] no-underline hover:underline sm:text-xs">
                 ← Ideas
               </Link>
-              <h1 className="mt-1.5 text-lg font-semibold leading-tight tracking-tight text-[var(--ink-strong)] sm:text-xl">
+              <h1 className="mt-0.5 text-[0.98rem] font-semibold leading-tight tracking-tight text-[var(--ink-strong)] sm:mt-1.5 sm:text-xl">
                 {currentThreadTitle}
               </h1>
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <div className="mt-1.5 hidden flex-wrap items-center gap-1.5 sm:flex">
                 <div className="inline-flex items-center gap-1.5 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--brand)]">
                   <Lightbulb size={12} />
                   Discovery
@@ -956,9 +974,14 @@ function IdeaDetailPage() {
                   {stageLabel}
                 </div>
               </div>
+              <div className="mt-1.25 flex flex-wrap items-center gap-1.5 sm:hidden">
+                <div className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${stageBadgeClassName}`}>
+                  {stageLabel}
+                </div>
+              </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
               <div className="hidden rounded-full border border-[var(--line)] bg-[var(--surface)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--ink-soft)] sm:inline-flex">
                 {threadStatusChipLabel}
               </div>
@@ -981,7 +1004,7 @@ function IdeaDetailPage() {
 
         {/* Tab strip — dedicated compact control, horizontally scrollable on mobile */}
         <div
-          className="scrollbar-none -mx-4 flex items-stretch gap-0 overflow-x-auto px-4"
+          className="scrollbar-none sticky top-[4rem] z-30 -mx-4 flex items-stretch gap-0 overflow-x-auto border-b border-[var(--line)] bg-[var(--header-bg)] px-4 backdrop-blur-xl sm:top-[4.5rem]"
           role="tablist"
           aria-label="Idea sections"
           style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}

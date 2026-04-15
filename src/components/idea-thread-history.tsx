@@ -23,6 +23,7 @@ export function IdeaThreadHistory({
   streamingAssistantText = '',
   className = '',
   threadRegionId,
+  showHeader = true,
 }: {
   visibleEvents: Array<IdeaThreadVisibleEvent>
   threadStatus?: ThreadStatus
@@ -33,6 +34,8 @@ export function IdeaThreadHistory({
   className?: string
   /** Optional id wired up to a tab's aria-controls for ARIA tab panel semantics */
   threadRegionId?: string
+  /** Hide the internal thread shell header when a parent view already owns that context */
+  showHeader?: boolean
 }) {
   const threadState = deriveThreadState({
     status: threadStatus,
@@ -48,17 +51,19 @@ export function IdeaThreadHistory({
       aria-label="Idea thread history"
       className={`panel rounded-t-[28px] rounded-b-none p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] sm:p-5 ${className}`.trim()}
     >
-      <div className="mb-2.5 flex items-center justify-between gap-2">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Thread</div>
-        {/* aria-live so status changes are announced to screen readers without moving focus */}
-        <div
-          aria-live="polite"
-          aria-atomic="true"
-          className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${threadState.badgeClassName}`}
-        >
-          {threadState.label}
+      {showHeader ? (
+        <div className="mb-2.5 flex items-center justify-between gap-2">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Thread</div>
+          {/* aria-live so status changes are announced to screen readers without moving focus */}
+          <div
+            aria-live="polite"
+            aria-atomic="true"
+            className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${threadState.badgeClassName}`}
+          >
+            {threadState.label}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {showQueuePanel ? (
         <div
@@ -87,7 +92,7 @@ export function IdeaThreadHistory({
       ) : null}
 
       {/* aria-live region wrapping the message list so new streamed content is announced */}
-      <div aria-live="polite" aria-atomic="false" className="space-y-2.5">
+      <div aria-live="polite" aria-atomic="false" className="space-y-2.5 pb-8 sm:pb-10">
         {streamingAssistantText ? (
           <article aria-label="Assistant is replying" className="flex justify-start">
             <div className="max-w-[92%] rounded-[22px] border border-violet-200 bg-violet-50/70 px-3.5 py-3 shadow-sm dark:border-violet-500/30 dark:bg-violet-500/10 sm:max-w-[85%]">
