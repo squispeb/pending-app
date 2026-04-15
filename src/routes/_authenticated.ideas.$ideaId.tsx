@@ -6,6 +6,10 @@ import { IdeaThreadHistory } from '../components/idea-thread-history'
 import { useCaptureContext } from '../contexts/CaptureContext'
 import { formatDisplayDateTime } from '../lib/date-time'
 import {
+  canUseIdeaStructuredActions,
+  getIdeaActionLockedReason,
+  getIdeaStageActionGuidance,
+  getIdeaStructuredActionAvailability,
   canUseIdeaRefinementActions,
   getIdeaStructuredActionLabel,
   type IdeaRefinementAction,
@@ -95,6 +99,7 @@ function IdeaDetailPage() {
   }
 
   const canUseRefinementActions = canUseIdeaRefinementActions(thread.stage)
+  const canUseStructuredActions = canUseIdeaStructuredActions(thread.stage)
   const suggestedTitle = thread.workingIdea.provisionalTitle
     && thread.workingIdea.provisionalTitle !== idea.title
     && thread.workingIdea.provisionalTitle !== dismissedRefinements.title
@@ -145,6 +150,7 @@ function IdeaDetailPage() {
   ].filter((entry): entry is [string, string] => entry !== null)
   const stageLabel = getIdeaStageLabel(thread.stage)
   const stageBadgeClassName = getIdeaStageBadgeClassName(thread.stage)
+  const stageActionGuidance = getIdeaStageActionGuidance(thread.stage)
   const discoveryProgressPercent = Math.max(12, (populatedWorkingIdeaEntries.length / 7) * 100)
   const isThreadTabActive = activePageTab === 'thread'
   const threadRailMessage = isThreadBusy
@@ -176,6 +182,18 @@ function IdeaDetailPage() {
           ? 'Needs retry'
           : 'Thread ready'
   const reviewItemCount = Number(Boolean(suggestedTitle)) + Number(Boolean(suggestedSummary)) + Number(Boolean(pendingStructuredAction))
+  const refinementActions = (['title', 'summary'] as const).map((action) => ({
+    action,
+    label: getIdeaStructuredActionLabel(action),
+    available: getIdeaStructuredActionAvailability(action, thread.stage) === 'available',
+    lockedReason: getIdeaActionLockedReason(action, thread.stage),
+  }))
+  const structuredActions = (['restructure', 'breakdown'] as const).map((action) => ({
+    action,
+    label: getIdeaStructuredActionLabel(action),
+    available: getIdeaStructuredActionAvailability(action, thread.stage) === 'available',
+    lockedReason: getIdeaActionLockedReason(action, thread.stage),
+  }))
   const shouldShowComposerMeta = Boolean(discoveryError || discoveryNotice || isThreadBusy)
   const pageTabs = [
     { id: 'thread', label: 'Thread' },
