@@ -22,6 +22,7 @@ export function IdeaThreadHistory({
   lastTurn = null,
   streamingAssistantText = '',
   className = '',
+  threadRegionId,
 }: {
   visibleEvents: Array<IdeaThreadVisibleEvent>
   threadStatus?: ThreadStatus
@@ -30,6 +31,8 @@ export function IdeaThreadHistory({
   lastTurn?: ThreadTurnPresentation | null
   streamingAssistantText?: string
   className?: string
+  /** Optional id wired up to a tab's aria-controls for ARIA tab panel semantics */
+  threadRegionId?: string
 }) {
   const threadState = deriveThreadState({
     status: threadStatus,
@@ -40,14 +43,30 @@ export function IdeaThreadHistory({
   const showQueuePanel = threadStatus === 'queued' || threadStatus === 'processing' || threadStatus === 'streaming' || threadStatus === 'failed'
 
   return (
-    <section className={`panel rounded-t-[28px] rounded-b-none p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] sm:p-5 ${className}`.trim()}>
+    <section
+      id={threadRegionId}
+      aria-label="Idea thread history"
+      className={`panel rounded-t-[28px] rounded-b-none p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] sm:p-5 ${className}`.trim()}
+    >
       <div className="mb-2.5 flex items-center justify-between gap-2">
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Thread</div>
-        <div className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${threadState.badgeClassName}`}>{threadState.label}</div>
+        {/* aria-live so status changes are announced to screen readers without moving focus */}
+        <div
+          aria-live="polite"
+          aria-atomic="true"
+          className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${threadState.badgeClassName}`}
+        >
+          {threadState.label}
+        </div>
       </div>
 
       {showQueuePanel ? (
-        <div className="mb-2.5 rounded-[20px] border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="mb-2.5 rounded-[20px] border border-[var(--line)] bg-[var(--surface)] px-3 py-2"
+        >
           <p className="m-0 text-xs font-medium text-[var(--ink-strong)]">{threadState.helperText}</p>
           {activeTurn ? (
             <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
@@ -67,11 +86,12 @@ export function IdeaThreadHistory({
         </div>
       ) : null}
 
-      <div className="space-y-2.5">
+      {/* aria-live region wrapping the message list so new streamed content is announced */}
+      <div aria-live="polite" aria-atomic="false" className="space-y-2.5">
         {streamingAssistantText ? (
-          <article className="flex justify-start">
+          <article aria-label="Assistant is replying" className="flex justify-start">
             <div className="max-w-[92%] rounded-[22px] border border-violet-200 bg-violet-50/70 px-3.5 py-3 shadow-sm dark:border-violet-500/30 dark:bg-violet-500/10 sm:max-w-[85%]">
-              <div className="flex items-center gap-2 text-xs font-semibold text-[var(--ink-soft)]">
+              <div className="flex items-center gap-2 text-xs font-semibold text-[var(--ink-soft)]" aria-hidden="true">
                 <span className="text-violet-500">●</span>
                 <span>Assistant replying</span>
               </div>
@@ -93,22 +113,22 @@ export function IdeaThreadHistory({
               <article key={event.eventId} className={isSystemEvent ? 'flex justify-center py-1' : `flex ${isUserTurn ? 'justify-end' : 'justify-start'}`}>
                 {isSystemEvent ? (
                   <div className="inline-flex max-w-[90%] items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1.5 text-[11px] text-[var(--ink-soft)] sm:max-w-[85%]">
-                    <Icon size={14} className={presentation.iconClassName} />
+                    <Icon size={14} className={presentation.iconClassName} aria-hidden="true" />
                     <span className="font-medium text-[var(--ink-strong)]">{presentation.label}</span>
-                    <span>•</span>
+                    <span aria-hidden="true">•</span>
                     <span>{event.summary}</span>
                   </div>
                 ) : (
                   <div className={`max-w-[92%] rounded-[22px] px-3.5 py-3 shadow-sm sm:max-w-[85%] ${isUserTurn ? 'bg-[var(--brand)] text-white' : `border ${presentation.cardClassName}`}`}>
-                    <div className={`flex items-center gap-2 text-xs font-semibold ${isUserTurn ? 'text-white/80' : 'text-[var(--ink-soft)]'}`}>
-                      {!isUserTurn ? <Icon size={14} className={presentation.iconClassName} /> : null}
+                    <div className={`flex items-center gap-2 text-xs font-semibold ${isUserTurn ? 'text-white/80' : 'text-[var(--ink-soft)]'}`} aria-hidden="true">
+                      {!isUserTurn ? <Icon size={14} className={presentation.iconClassName} aria-hidden="true" /> : null}
                       <span>{presentation.label}</span>
                     </div>
                     <p className={`m-0 mt-1.5 text-sm leading-6 ${isUserTurn ? 'whitespace-pre-wrap text-white' : 'text-[var(--ink-strong)]'}`}>
                       {event.summary}
                     </p>
                     <div className={`mt-1.5 text-[11px] ${isUserTurn ? 'text-white/70' : 'text-[var(--ink-faint)]'}`}>
-                      {formatDisplayDateTime(event.createdAt)}
+                      <time dateTime={event.createdAt}>{formatDisplayDateTime(event.createdAt)}</time>
                     </div>
                   </div>
                 )}

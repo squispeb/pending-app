@@ -127,4 +127,65 @@ describe('IdeaThreadHistory', () => {
     expect(markup).toContain('I am outlining the fastest thread-first layout now.')
     expect(markup).toContain('min-h-full')
   })
+
+  it('includes accessible section label and live region on the status badge', () => {
+    const markup = renderToStaticMarkup(<IdeaThreadHistory visibleEvents={[]} />)
+
+    expect(markup).toContain('aria-label="Idea thread history"')
+    expect(markup).toContain('aria-live="polite"')
+    expect(markup).toContain('aria-atomic="true"')
+  })
+
+  it('adds role=status and aria-live to the queue/busy panel', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        threadStatus="streaming"
+      />,
+    )
+
+    expect(markup).toContain('role="status"')
+    expect(markup).toContain('The assistant is currently writing back in this thread.')
+  })
+
+  it('exposes threadRegionId as the section id for tab panel wiring', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        threadRegionId="thread-history-panel"
+      />,
+    )
+
+    expect(markup).toContain('id="thread-history-panel"')
+  })
+
+  it('wraps streaming text in an article with an accessible label', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        streamingAssistantText="Thinking about your question now."
+      />,
+    )
+
+    expect(markup).toContain('aria-label="Assistant is replying"')
+    expect(markup).toContain('Thinking about your question now.')
+  })
+
+  it('renders event timestamps inside a time element', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[
+          {
+            eventId: 'event-1',
+            type: 'user_turn_added',
+            createdAt: '2026-04-12T00:00:30.000Z',
+            summary: 'More context here.',
+          },
+        ]}
+      />,
+    )
+
+    expect(markup).toContain('<time')
+    expect(markup).toContain('dateTime="2026-04-12T00:00:30.000Z"')
+  })
 })

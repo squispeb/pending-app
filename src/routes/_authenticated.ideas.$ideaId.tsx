@@ -76,6 +76,8 @@ function IdeaDetailPage() {
   const lastStreamEventIdRef = useRef<string | null>(null)
   const streamedEventIdsRef = useRef(new Set<string>())
   const activeStreamingTurnIdRef = useRef<string | null>(null)
+  /** Track turn IDs that have already completed so replayed chunks on reconnect are skipped */
+  const completedTurnIdsRef = useRef(new Set<string>())
   const isThreadBusy = thread.status === 'queued' || thread.status === 'processing' || thread.status === 'streaming'
   const queuedTurnCount = thread.queuedTurns.length
   const latestQueuedTurn = thread.queuedTurns.at(-1) ?? null
@@ -373,6 +375,7 @@ function IdeaDetailPage() {
       lastStreamEventIdRef.current = null
       activeStreamingTurnIdRef.current = null
       streamedEventIdsRef.current.clear()
+      completedTurnIdsRef.current.clear()
       return
     }
 
@@ -418,12 +421,21 @@ function IdeaDetailPage() {
               }
 
               if (payload.type === 'turn_started') {
-                activeStreamingTurnIdRef.current = payload.turnId
-                setStreamingAssistantText('')
+                // Don't reset streaming text for a turn that already completed
+                // (can be replayed when lastEventId is sent on reconnect)
+                if (!completedTurnIdsRef.current.has(payload.turnId)) {
+                  activeStreamingTurnIdRef.current = payload.turnId
+                  setStreamingAssistantText('')
+                }
                 continue
               }
 
               if (payload.type === 'assistant_chunk') {
+                // Skip chunks for turns that have already completed to prevent duplicates
+                if (completedTurnIdsRef.current.has(payload.turnId)) {
+                  continue
+                }
+
                 if (activeStreamingTurnIdRef.current !== payload.turnId) {
                   activeStreamingTurnIdRef.current = payload.turnId
                   setStreamingAssistantText(payload.textDelta)
@@ -435,6 +447,7 @@ function IdeaDetailPage() {
               }
 
               if (payload.type === 'turn_completed' || payload.type === 'turn_failed') {
+                completedTurnIdsRef.current.add(payload.turnId)
                 setStreamingAssistantText('')
                 activeStreamingTurnIdRef.current = null
               }
@@ -806,6 +819,7 @@ function IdeaDetailPage() {
               <div
                 ref={threadViewportRef}
                 onScroll={handleThreadViewportScroll}
+                aria-label="Thread messages"
                 className="max-h-[52vh] min-h-[28vh] overflow-y-auto overscroll-contain lg:max-h-[calc(100vh-24rem)] lg:min-h-[22rem]"
               >
                 <IdeaThreadHistory
@@ -815,6 +829,7 @@ function IdeaDetailPage() {
                   queuedTurns={thread.queuedTurns}
                   lastTurn={thread.lastTurn}
                   streamingAssistantText={streamingAssistantText}
+                  threadRegionId="thread-history-panel"
                   className="min-h-full"
                 />
               </div>
@@ -823,6 +838,7 @@ function IdeaDetailPage() {
                 <button
                   type="button"
                   onClick={() => scrollThreadToBottom()}
+                  aria-label="Jump to latest message"
                   className="absolute bottom-3 right-4 inline-flex items-center justify-center rounded-full border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_88%,white_12%)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)] shadow-[0_16px_34px_rgba(15,23,42,0.16)] backdrop-blur hover:border-[var(--brand)] hover:text-[var(--brand)]"
                 >
                   Jump to latest
@@ -832,6 +848,7 @@ function IdeaDetailPage() {
 
             <form
               ref={composerRef}
+              aria-label="Reply in thread"
               className="panel z-10 space-y-4 rounded-b-[28px] border border-t-0 border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_84%,white_16%)] p-4 shadow-[0_22px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl"
               style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
               onSubmit={handleDiscoverySubmit}
@@ -881,18 +898,18 @@ function IdeaDetailPage() {
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0 flex-1">
                     {discoveryError ? (
-                      <p className="m-0 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">
+                      <p role="alert" aria-live="assertive" className="m-0 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">
                         {discoveryError}
                       </p>
                     ) : !discoveryError && discoveryNotice ? (
-                      <p className="m-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+                      <p aria-live="polite" className="m-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--ink-soft)]">
                         {discoveryNotice}
                       </p>
                     ) : (
-                      <p className="m-0 px-1 text-sm leading-6 text-[var(--ink-soft)]">{composerStatusText}</p>
+                      <p aria-live="polite" className="m-0 px-1 text-sm leading-6 text-[var(--ink-soft)]">{composerStatusText}</p>
                     )}
                   </div>
-                  <p className="m-0 px-1 text-xs leading-5 text-[var(--ink-faint)]">Voice is preferred. Use `Cmd/Ctrl+Enter` to send.</p>
+                  <p className="m-0 px-1 text-xs leading-5 text-[var(--ink-faint)]">Voice is preferred. Use <kbd className="rounded border border-[var(--line)] bg-[var(--surface-strong)] px-1 py-0.5 font-mono text-[10px]">⌘</kbd>/<kbd className="rounded border border-[var(--line)] bg-[var(--surface-strong)] px-1 py-0.5 font-mono text-[10px]">Ctrl</kbd>+<kbd className="rounded border border-[var(--line)] bg-[var(--surface-strong)] px-1 py-0.5 font-mono text-[10px]">Enter</kbd> to send.</p>
                 </div>
               ) : null}
             </form>
@@ -960,9 +977,11 @@ function IdeaDetailPage() {
           {pageTabs.map((tab) => (
             <button
               key={tab.id}
+              id={`tab-${tab.id}`}
               type="button"
               role="tab"
               aria-selected={activePageTab === tab.id}
+              aria-controls={`tabpanel-${tab.id}`}
               onClick={() => setActivePageTab(tab.id)}
               className={`relative inline-flex shrink-0 items-center justify-center whitespace-nowrap px-4 py-2.5 text-sm font-semibold transition focus-visible:outline-none ${
                 activePageTab === tab.id
@@ -978,7 +997,13 @@ function IdeaDetailPage() {
           ))}
         </div>
 
-        {activeTabSurface}
+        <div
+          id={`tabpanel-${activePageTab}`}
+          role="tabpanel"
+          aria-labelledby={`tab-${activePageTab}`}
+        >
+          {activeTabSurface}
+        </div>
       </div>
     </main>
   )
