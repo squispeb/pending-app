@@ -2,9 +2,10 @@ import type { z } from 'zod'
 import { ideaStageSchema } from './ideas'
 
 export type IdeaStage = z.infer<typeof ideaStageSchema>
-export type IdeaStructuredAction = 'title' | 'summary' | 'restructure' | 'breakdown'
+export type IdeaStructuredAction = 'title' | 'summary' | 'restructure' | 'breakdown' | 'convert-to-task'
 export type IdeaRefinementAction = Extract<IdeaStructuredAction, 'title' | 'summary'>
 export type IdeaRestructureAction = Extract<IdeaStructuredAction, 'restructure' | 'breakdown'>
+export type IdeaConvertAction = Extract<IdeaStructuredAction, 'convert-to-task'>
 
 export function canUseIdeaRefinementActions(stage: IdeaStage) {
   return stage === 'developed'
@@ -20,6 +21,10 @@ export function getIdeaStructuredActionAvailability(action: IdeaStructuredAction
   }
 
   if (action === 'breakdown') {
+    return stage === 'developed' ? 'available' : 'locked'
+  }
+
+  if (action === 'convert-to-task') {
     return stage === 'developed' ? 'available' : 'locked'
   }
 
@@ -41,7 +46,7 @@ export function getIdeaStageActionGuidance(stage: IdeaStage) {
     case 'developed':
       return {
         title: 'Developed ideas can use later actions',
-        description: 'Use these guided actions when you want the assistant to tighten the framing, sharpen the wording, or turn the current idea into concrete next steps without leaving the thread.',
+        description: 'Use these guided actions when you want the assistant to tighten the framing, sharpen the wording, turn the current idea into concrete next steps, or convert it into a task without leaving the thread.',
       }
   }
 }
@@ -60,6 +65,8 @@ export function getIdeaActionLockedReason(action: IdeaStructuredAction, stage: I
       return 'Restructure unlocks once the idea reaches framing.'
     case 'breakdown':
       return 'Next-step breakdown unlocks once the idea reaches developed.'
+    case 'convert-to-task':
+      return 'Convert to task unlocks once the idea reaches developed.'
   }
 }
 
@@ -73,5 +80,7 @@ export function getIdeaStructuredActionLabel(action: IdeaStructuredAction) {
       return 'Restructure idea'
     case 'breakdown':
       return 'Break into next steps'
+    case 'convert-to-task':
+      return 'Convert to task'
   }
 }

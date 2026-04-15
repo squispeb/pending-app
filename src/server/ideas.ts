@@ -312,6 +312,19 @@ export const getIdea = createServerFn({ method: 'GET' })
     return ideasService.getIdea(data.id, user.id)
   })
 
+export const listIdeaExecutionLinks = createServerFn({ method: 'GET' })
+  .inputValidator((input: { id: string; targetType?: 'task' | 'habit' }) => input)
+  .handler(async ({ data }) => {
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    return ideasService.listIdeaExecutionLinks(
+      {
+        ideaId: data.id,
+        targetType: data.targetType,
+      },
+      user.id,
+    )
+  })
+
 export const createIdea = createServerFn({ method: 'POST' })
   .inputValidator((input) => ideaCreateSchema.parse(input))
   .handler(async ({ data }) => {
@@ -460,6 +473,36 @@ export const requestIdeaStructuredAction = createServerFn({ method: 'POST' })
     }
 
     return assistantThreadService.requestIdeaThreadBreakdown(data.id, {
+      currentSnapshotVersion: latestSnapshot.version,
+      currentTitle: latestSnapshot.title,
+      currentBody: latestSnapshot.body,
+      currentSummary: latestSnapshot.threadSummary,
+    })
+  })
+
+export const requestIdeaConvertToTask = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    const idea = await ideasService.getIdea(data.id, user.id)
+
+    if (!idea) {
+      throw new Error('Idea not found')
+    }
+
+    const latestSnapshot = await ideasService.getLatestIdeaSnapshot(data.id, user.id)
+
+    if (!latestSnapshot) {
+      throw new Error('Accepted snapshot not found')
+    }
+
+    const currentThread = await assistantThreadService.getIdeaThread(data.id)
+
+    if (!canUseIdeaRefinementActions(currentThread.stage)) {
+      throw new Error('Convert to task is only available for developed ideas.')
+    }
+
+    return assistantThreadService.requestIdeaThreadConvertToTask(data.id, {
       currentSnapshotVersion: latestSnapshot.version,
       currentTitle: latestSnapshot.title,
       currentBody: latestSnapshot.body,

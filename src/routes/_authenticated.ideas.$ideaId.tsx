@@ -1,4 +1,4 @@
-import { Lightbulb, Mic, Quote, SendHorizonal, Star } from 'lucide-react'
+import { ChevronDown, ChevronUp, Lightbulb, Mic, Quote, SendHorizonal, Star } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
@@ -18,10 +18,13 @@ import { getIdeaStageBadgeClassName, getIdeaStageLabel, isIdeaStarred } from '..
 import { parseIdeaThreadStreamFrames } from '../lib/idea-thread-stream'
 import {
   acceptIdeaStructuredAction,
+  convertIdeaToTask,
   getIdea,
   getIdeaThread,
+  listIdeaExecutionLinks,
   persistIdeaRefinement,
   rejectIdeaStructuredAction,
+  requestIdeaConvertToTask,
   requestIdeaRefinement,
   requestIdeaStructuredAction,
   streamIdeaThread,
@@ -48,6 +51,12 @@ const ideaThreadQueryOptions = (ideaId: string) =>
     },
   })
 
+const ideaTaskLinksQueryOptions = (ideaId: string) =>
+  queryOptions({
+    queryKey: ['idea-execution-links', ideaId, 'task'],
+    queryFn: () => listIdeaExecutionLinks({ data: { id: ideaId, targetType: 'task' } }),
+  })
+
 export const Route = createFileRoute('/_authenticated/ideas/$ideaId')({
   validateSearch: (search: Record<string, unknown>) => ({
     view: search.view === 'default' ? 'default' : 'chat',
@@ -56,6 +65,7 @@ export const Route = createFileRoute('/_authenticated/ideas/$ideaId')({
     return Promise.all([
       context.queryClient.ensureQueryData(ideaDetailQueryOptions(params.ideaId)),
       context.queryClient.ensureQueryData(ideaThreadQueryOptions(params.ideaId)),
+      context.queryClient.ensureQueryData(ideaTaskLinksQueryOptions(params.ideaId)),
     ])
   },
   component: IdeaDetailPage,
@@ -67,6 +77,7 @@ function IdeaDetailPage() {
   const queryClient = useQueryClient()
   const { data: idea } = useSuspenseQuery(ideaDetailQueryOptions(ideaId))
   const { data: thread } = useSuspenseQuery(ideaThreadQueryOptions(ideaId))
+  const { data: taskLinks } = useSuspenseQuery(ideaTaskLinksQueryOptions(ideaId))
   const { openCapture } = useCaptureContext()
   const isChatView = view === 'chat'
   const [discoveryMessage, setDiscoveryMessage] = useState('')
@@ -74,6 +85,7 @@ function IdeaDetailPage() {
   const [discoveryNotice, setDiscoveryNotice] = useState<string | null>(null)
   const [streamingAssistantText, setStreamingAssistantText] = useState('')
   const [isComposerExpanded, setIsComposerExpanded] = useState(false)
+  const [isThreadActionRailCollapsed, setIsThreadActionRailCollapsed] = useState(false)
   const [dismissedRefinements, setDismissedRefinements] = useState<{ title: string | null; summary: string | null }>({
     title: null,
     summary: null,
@@ -109,6 +121,8 @@ function IdeaDetailPage() {
     ? thread.workingIdea.currentSummary
     : null
   const pendingStructuredAction = thread.pendingStructuredAction ?? null
+  const latestTaskLink = taskLinks[0] ?? null
+  const convertedTaskId = latestTaskLink?.targetId ?? null
 
   const latestAssistantEvent = [...thread.visibleEvents]
     .reverse()
@@ -191,8 +205,24 @@ function IdeaDetailPage() {
     label: getIdeaStructuredActionLabel(action),
     available: getIdeaStructuredActionAvailability(action, thread.stage) === 'available',
     lockedReason: getIdeaActionLockedReason(action, thread.stage),
-    hasPendingReview: Boolean(pendingStructuredAction),
+    hasPendingReview: Boolean(pendingStructuredAction) && pendingStructuredAction?.action === action,
   }))
+  const convertToTaskAction = {
+    action: 'convert-to-task' as const,
+    label: getIdeaStructuredActionLabel('convert-to-task'),
+    available: getIdeaStructuredActionAvailability('convert-to-task', thread.stage) === 'available',
+    lockedReason: getIdeaActionLockedReason('convert-to-task', thread.stage),
+    hasPendingReview: Boolean(pendingStructuredAction) && pendingStructuredAction?.action === 'convert-to-task',
+  }
+  const threadActionRailItems = [
+    ...refinementActions
+      .filter(({ available }) => available)
+      .map((item) => ({ ...item, tone: 'emerald' as const })),
+    ...structuredActions
+      .filter(({ available }) => available)
+      .map((item) => ({ ...item, tone: 'cyan' as const })),
+    ...(convertToTaskAction.available ? [{ ...convertToTaskAction, tone: 'cyan' as const }] : []),
+  ]
   const shouldShowComposerMeta = Boolean(discoveryError || discoveryNotice || isThreadBusy)
   const pageTabs = [
     { id: 'thread', label: 'Thread' },
@@ -336,8 +366,48 @@ function IdeaDetailPage() {
     },
   })
 
+  const requestConvertToTaskMutation = useMutation({
+    mutationFn: async () => requestIdeaConvertToTask({
+      data: {
+        id: ideaId,
+      },
+    }),
+    onSuccess: async (result) => {
+      setDiscoveryError(null)
+      setDiscoveryNotice('Convert to task request sent — a proposal will appear above.')
+      queryClient.setQueryData(['idea-thread', ideaId], result.thread)
+      await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
+    },
+    onError: (error) => {
+      setDiscoveryNotice(null)
+      setDiscoveryError(error instanceof Error ? error.message : 'Failed to request task conversion.')
+    },
+  })
+
+  const convertToTaskMutation = useMutation({
+    mutationFn: async (proposalId: string) => convertIdeaToTask({
+      data: {
+        id: ideaId,
+        proposalId,
+      },
+    }),
+    onSuccess: async (result) => {
+      setDiscoveryError(null)
+      setDiscoveryNotice('Task created and linked to this idea.')
+      queryClient.setQueryData(['idea-thread', ideaId], result.thread)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] }),
+        queryClient.invalidateQueries({ queryKey: ['idea-execution-links', ideaId, 'task'] }),
+      ])
+    },
+    onError: (error) => {
+      setDiscoveryNotice(null)
+      setDiscoveryError(error instanceof Error ? error.message : 'Failed to convert idea to task.')
+    },
+  })
+
   const refineActionsDisabled = isThreadBusy || requestRefinementMutation.isPending || persistRefinementMutation.isPending
-  const structuredActionsDisabled = isThreadBusy || requestRefinementMutation.isPending || requestStructuredActionMutation.isPending || persistRefinementMutation.isPending
+  const structuredActionsDisabled = isThreadBusy || requestRefinementMutation.isPending || requestStructuredActionMutation.isPending || persistRefinementMutation.isPending || requestConvertToTaskMutation.isPending || convertToTaskMutation.isPending
 
   function handleDiscoverySubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -675,9 +745,40 @@ function IdeaDetailPage() {
                   </div>
                 </div>
               ) : null}
+
+              {pendingStructuredAction.action === 'convert-to-task' ? (
+                <div className="space-y-2">
+                  <div className="font-medium text-[var(--ink-strong)]">Task conversion proposal</div>
+                  <div className="rounded-2xl border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/30 dark:bg-violet-500/10">
+                    <div className="text-xs uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">Proposed task</div>
+                    <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{pendingStructuredAction.proposedSummary}</div>
+                  </div>
+                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
+                    <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Why</div>
+                    <div className="mt-1 whitespace-pre-wrap">{pendingStructuredAction.explanation}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" disabled={convertToTaskMutation.isPending || rejectStructuredActionMutation.isPending} onClick={() => convertToTaskMutation.mutate(pendingStructuredAction.proposalId)} className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60">{convertToTaskMutation.isPending ? 'Creating task…' : 'Accept — create task'}</button>
+                    <button type="button" disabled={convertToTaskMutation.isPending || rejectStructuredActionMutation.isPending} onClick={() => rejectStructuredActionMutation.mutate(pendingStructuredAction.proposalId)} className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60">Reject proposal</button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         ) : null}
+
+        {convertedTaskId ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+            <div className="mb-1 text-sm font-semibold text-emerald-800 dark:text-emerald-300">Task created</div>
+              <p className="m-0 leading-6 text-[var(--ink-strong)]">
+                This idea has been converted to a task.{' '}
+                <Link to="/tasks" className="font-semibold text-[var(--brand)] underline-offset-2 hover:underline">
+                  View tasks →
+                </Link>
+              </p>
+              <p className="m-0 mt-2 text-xs leading-5 text-[var(--ink-soft)]">Created task ID: {convertedTaskId}</p>
+            </div>
+          ) : null}
 
         {canUseRefinementActions && (suggestedTitle || suggestedSummary) ? (
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
@@ -731,6 +832,15 @@ function IdeaDetailPage() {
                 <p className="m-0 mt-2 text-xs leading-5 text-[var(--ink-soft)]">{hasPendingReview ? 'A proposal is already waiting above. Review it before requesting another.' : available ? action === 'restructure' ? 'Sends a guided prompt into the thread to clarify the framing while keeping the same idea direction.' : 'Sends a guided prompt into the thread to turn the developed idea into concrete next steps.' : lockedReason}</p>
               </div>
             ))}
+            {(() => {
+              const { label, available, lockedReason, hasPendingReview } = convertToTaskAction
+              return (
+                <div className={`rounded-2xl border p-3 shadow-sm ${hasPendingReview ? 'border-violet-300 bg-violet-50/80 dark:border-violet-500/30 dark:bg-violet-500/10' : available ? 'border-cyan-300 bg-cyan-50/80 dark:border-cyan-500/30 dark:bg-cyan-500/10' : 'border-slate-200 bg-white dark:border-slate-500/30 dark:bg-slate-950/30'}`}>
+                  <button type="button" disabled={!available || structuredActionsDisabled || hasPendingReview} onClick={() => requestConvertToTaskMutation.mutate()} className={`inline-flex min-h-11 w-full items-center justify-center rounded-2xl border px-4 py-2 text-sm font-semibold leading-none transition disabled:cursor-not-allowed disabled:opacity-60 ${hasPendingReview ? 'border-violet-700 bg-violet-700 text-white hover:border-violet-800 hover:bg-violet-800 dark:border-violet-300 dark:bg-violet-300 dark:text-slate-950 dark:hover:bg-violet-200' : available ? 'border-cyan-700 bg-cyan-700 text-white hover:border-cyan-800 hover:bg-cyan-800 dark:border-cyan-300 dark:bg-cyan-300 dark:text-slate-950 dark:hover:bg-cyan-200' : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-500/30 dark:bg-slate-950/30 dark:text-slate-100 dark:hover:border-slate-400/60 dark:hover:bg-slate-900/50'}`}>{label}</button>
+                  <p className="m-0 mt-2 text-xs leading-5 text-[var(--ink-soft)]">{hasPendingReview ? 'A proposal is already waiting above. Review it before requesting another.' : available ? 'Asks the assistant to propose a task based on this idea. A proposal will appear above for you to review before any task is created.' : lockedReason}</p>
+                </div>
+              )
+            })()}
           </div>
         </div>
       </div>
@@ -974,11 +1084,72 @@ function IdeaDetailPage() {
       <form
         ref={composerRef}
         aria-label="Reply in thread"
-        className="shrink-0 border-t border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_84%,white_16%)] px-4 pt-3 shadow-[0_-10px_28px_rgba(15,23,42,0.08)] backdrop-blur-xl"
+        className="relative shrink-0 border-t border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_84%,white_16%)] px-4 pt-3 shadow-[0_-10px_28px_rgba(15,23,42,0.08)] backdrop-blur-xl"
         style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
         onSubmit={handleDiscoverySubmit}
       >
         <label className="sr-only" htmlFor="idea-thread-reply">Reply in thread</label>
+        {threadActionRailItems.length > 0 ? (
+          <div className="pointer-events-none absolute inset-x-4 bottom-[calc(100%+0.75rem)] z-20">
+            <div className="panel pointer-events-auto mx-auto max-w-4xl rounded-[26px] border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_90%,white_10%)] p-3 shadow-[0_18px_48px_rgba(15,23,42,0.16)] backdrop-blur-xl">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Next steps</div>
+                  <div className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${stageBadgeClassName}`}>
+                    {stageLabel}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsThreadActionRailCollapsed((current) => !current)}
+                  aria-label={isThreadActionRailCollapsed ? 'Show next steps' : 'Hide next steps'}
+                  aria-expanded={!isThreadActionRailCollapsed}
+                  className="inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)] transition hover:border-[var(--brand)] hover:text-[var(--ink-strong)]"
+                >
+                  {isThreadActionRailCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+              </div>
+              {isThreadActionRailCollapsed ? (
+                <button
+                  type="button"
+                  onClick={() => setIsThreadActionRailCollapsed(false)}
+                  aria-label="Expand next steps"
+                  className="mt-3 inline-flex w-full items-center justify-between rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-strong)] transition hover:border-[var(--brand)]"
+                >
+                  <span>Show next steps</span>
+                  <span className="text-[var(--ink-soft)]">
+                    {threadActionRailItems.length}
+                  </span>
+                </button>
+              ) : (
+                <div className="scrollbar-none mt-3 flex gap-2 overflow-x-auto overflow-y-hidden px-1 pb-1">
+                  {threadActionRailItems.map(({ action, label, tone }) => (
+                    <button
+                      key={action}
+                      type="button"
+                      onClick={() => {
+                        if (action === 'title' || action === 'summary') {
+                          requestRefinementMutation.mutate(action)
+                          return
+                        }
+
+                        if (action === 'convert-to-task') {
+                          requestConvertToTaskMutation.mutate()
+                          return
+                        }
+
+                        requestStructuredActionMutation.mutate(action)
+                      }}
+                      className={`inline-flex min-h-10 flex-none items-center justify-center rounded-full border px-4 text-sm font-semibold leading-none transition shadow-sm ${tone === 'emerald' ? 'min-w-[11rem] border-emerald-700 bg-emerald-700 text-white hover:border-emerald-800 hover:bg-emerald-800 dark:border-emerald-300 dark:bg-emerald-300 dark:text-slate-950 dark:hover:bg-emerald-200' : 'min-w-[11rem] border-cyan-700 bg-cyan-700 text-white hover:border-cyan-800 hover:bg-cyan-800 dark:border-cyan-300 dark:bg-cyan-300 dark:text-slate-950 dark:hover:bg-cyan-200'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
         <div className="flex items-end gap-2 rounded-[26px] border border-[var(--line)] bg-[var(--surface)] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]">
           <button
             type="button"

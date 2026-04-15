@@ -558,3 +558,5 @@ export async function rejectIdeaThreadStructuredAction(
 
   return rejectStructuredActionResponseSchema.parse(payload)
 }
+
+export type GetIdeaThreadResponse = z.infer<typeof getIdeaThreadResponseSchema>

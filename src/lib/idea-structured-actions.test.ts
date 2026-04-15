@@ -27,6 +27,9 @@ describe('idea structured actions', () => {
     expect(getIdeaStructuredActionAvailability('breakdown', 'framing')).toBe('locked')
     expect(getIdeaStructuredActionAvailability('breakdown', 'developed')).toBe('available')
     expect(getIdeaStructuredActionAvailability('summary', 'developed')).toBe('available')
+    expect(getIdeaStructuredActionAvailability('convert-to-task', 'discovery')).toBe('locked')
+    expect(getIdeaStructuredActionAvailability('convert-to-task', 'framing')).toBe('locked')
+    expect(getIdeaStructuredActionAvailability('convert-to-task', 'developed')).toBe('available')
   })
 
   it('explains the current stage guidance', () => {
@@ -40,6 +43,9 @@ describe('idea structured actions', () => {
     expect(getIdeaActionLockedReason('breakdown', 'framing')).toBe('Next-step breakdown unlocks once the idea reaches developed.')
     expect(getIdeaActionLockedReason('summary', 'discovery')).toBe('Summary improvement unlocks once the idea reaches developed.')
     expect(getIdeaActionLockedReason('title', 'developed')).toBeNull()
+    expect(getIdeaActionLockedReason('convert-to-task', 'discovery')).toBe('Convert to task unlocks once the idea reaches developed.')
+    expect(getIdeaActionLockedReason('convert-to-task', 'framing')).toBe('Convert to task unlocks once the idea reaches developed.')
+    expect(getIdeaActionLockedReason('convert-to-task', 'developed')).toBeNull()
   })
 
   it('exposes user-facing labels for both refinement actions', () => {
@@ -47,5 +53,6 @@ describe('idea structured actions', () => {
     expect(getIdeaStructuredActionLabel('summary')).toBe('Improve summary')
     expect(getIdeaStructuredActionLabel('restructure')).toBe('Restructure idea')
     expect(getIdeaStructuredActionLabel('breakdown')).toBe('Break into next steps')
+    expect(getIdeaStructuredActionLabel('convert-to-task')).toBe('Convert to task')
   })
 })
