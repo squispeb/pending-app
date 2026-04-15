@@ -73,6 +73,7 @@ function IdeasIndexPage() {
       await navigate({
         to: '/ideas/$ideaId',
         params: { ideaId: createdIdea.id },
+        search: { view: 'chat' },
       })
     },
     onError: (error) => {
@@ -248,6 +249,7 @@ function IdeasIndexPage() {
                             <Link
                               to="/ideas/$ideaId"
                               params={{ ideaId: idea.id }}
+                              search={{ view: 'chat' }}
                               className="text-base font-semibold text-[var(--ink-strong)] no-underline hover:text-[var(--brand)]"
                             >
                               {idea.title}

@@ -6,6 +6,8 @@ import ThemeToggle from './ThemeToggle'
 
 export default function Header() {
   const matches = useRouterState({ select: (state) => state.matches })
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const search = useRouterState({ select: (state) => state.location.search })
   const authMatch = [...matches].reverse().find((match) => match.context && 'auth' in match.context)
   const auth = authMatch?.context?.auth as
     | { state: 'authenticated'; user: { email: string; displayName: string | null } | null }
@@ -13,6 +15,12 @@ export default function Header() {
     | undefined
   const requiresLogin = !auth || auth.state !== 'authenticated'
   const label = auth && auth.state === 'authenticated' ? auth.user?.displayName ?? auth.user?.email ?? 'Signed in' : null
+  const isIdeaChatView = pathname.startsWith('/ideas/') && search.view === 'chat'
+
+  if (isIdeaChatView) {
+    return null
+  }
+
   return (
     <header className="sticky top-0 z-50 border-b border-[var(--line)] bg-[var(--header-bg)] px-4 backdrop-blur-xl">
       <nav className="page-wrap flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5 sm:py-4">

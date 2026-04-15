@@ -21,6 +21,14 @@ const workingIdeaSchema = z.object({
   openQuestions: z.array(z.string().min(1)),
 })
 
+const pendingStructuredActionSchema = z.object({
+  proposalId: z.string().min(1),
+  action: z.enum(['restructure', 'breakdown']),
+  basedOnSnapshotVersion: z.number().int().positive(),
+  proposedSummary: z.string().min(1),
+  explanation: z.string().min(1),
+})
+
 const threadTurnSchema = z.object({
   turnId: z.string().min(1),
   source: z.literal('text'),
@@ -42,6 +50,7 @@ const ideaThreadViewSchema = z.object({
   lastTurn: threadTurnSchema.nullable(),
   visibleEvents: z.array(threadEventSchema),
   workingIdea: workingIdeaSchema,
+  pendingStructuredAction: pendingStructuredActionSchema.nullable().optional(),
 })
 
 const resolveIdeaThreadResponseSchema = ideaThreadViewSchema

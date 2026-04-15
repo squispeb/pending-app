@@ -27,6 +27,7 @@ import {
 } from '../server/ideas'
 
 type IdeaPageTab = 'thread' | 'context' | 'review' | 'source'
+type SupportSheetTab = Exclude<IdeaPageTab, 'thread'>
 
 const ideaDetailQueryOptions = (ideaId: string) =>
   queryOptions({
@@ -45,6 +46,9 @@ const ideaThreadQueryOptions = (ideaId: string) =>
   })
 
 export const Route = createFileRoute('/_authenticated/ideas/$ideaId')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    view: search.view === 'default' ? 'default' : 'chat',
+  }),
   loader: ({ context, params }) => {
     return Promise.all([
       context.queryClient.ensureQueryData(ideaDetailQueryOptions(params.ideaId)),
@@ -56,10 +60,12 @@ export const Route = createFileRoute('/_authenticated/ideas/$ideaId')({
 
 function IdeaDetailPage() {
   const { ideaId } = Route.useParams()
+  const { view } = Route.useSearch()
   const queryClient = useQueryClient()
   const { data: idea } = useSuspenseQuery(ideaDetailQueryOptions(ideaId))
   const { data: thread } = useSuspenseQuery(ideaThreadQueryOptions(ideaId))
   const { openCapture } = useCaptureContext()
+  const isChatView = view === 'chat'
   const [discoveryMessage, setDiscoveryMessage] = useState('')
   const [discoveryError, setDiscoveryError] = useState<string | null>(null)
   const [discoveryNotice, setDiscoveryNotice] = useState<string | null>(null)
@@ -70,6 +76,8 @@ function IdeaDetailPage() {
     summary: null,
   })
   const [activePageTab, setActivePageTab] = useState<IdeaPageTab>('thread')
+  const [activeSupportTab, setActiveSupportTab] = useState<SupportSheetTab>('context')
+  const [isSupportSheetOpen, setIsSupportSheetOpen] = useState(false)
   const [isThreadAtBottom, setIsThreadAtBottom] = useState(true)
   const threadViewportRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLFormElement | null>(null)
@@ -175,6 +183,7 @@ function IdeaDetailPage() {
     { id: 'review', label: `Review${reviewItemCount > 0 ? ` (${reviewItemCount})` : ''}` },
     { id: 'source', label: 'Source' },
   ] as const satisfies ReadonlyArray<{ id: IdeaPageTab; label: string }>
+  const supportTabs = pageTabs.filter((tab) => tab.id !== 'thread')
 
   const toggleStarMutation = useMutation({
     mutationFn: async () => toggleIdeaStar({ data: { id: idea.id } }),
@@ -615,16 +624,9 @@ function IdeaDetailPage() {
                 <button
                   key={action}
                   type="button"
-                  aria-disabled={refineActionsDisabled}
-                  data-disabled={refineActionsDisabled ? 'true' : 'false'}
-                  onClick={() => {
-                    if (refineActionsDisabled) {
-                      return
-                    }
-
-                    requestRefinementMutation.mutate(action)
-                  }}
-                  className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold leading-none text-slate-900 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 hover:text-slate-950 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-100 dark:border-slate-500/30 dark:bg-slate-950/30 dark:text-slate-100 dark:hover:border-slate-400/60 dark:hover:bg-slate-900/50 dark:hover:text-white"
+                  disabled={refineActionsDisabled}
+                  onClick={() => requestRefinementMutation.mutate(action)}
+                  className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold leading-none text-slate-900 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-500/30 dark:bg-slate-950/30 dark:text-slate-100 dark:hover:border-slate-400/60 dark:hover:bg-slate-900/50 dark:hover:text-white"
                 >
                   {getIdeaStructuredActionLabel(action)}
                 </button>
@@ -633,16 +635,9 @@ function IdeaDetailPage() {
                 <button
                   key={action}
                   type="button"
-                  aria-disabled={structuredActionsDisabled}
-                  data-disabled={structuredActionsDisabled ? 'true' : 'false'}
-                  onClick={() => {
-                    if (structuredActionsDisabled) {
-                      return
-                    }
-
-                    requestStructuredActionMutation.mutate(action)
-                  }}
-                  className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold leading-none text-slate-900 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 hover:text-slate-950 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-100 dark:border-slate-500/30 dark:bg-slate-950/30 dark:text-slate-100 dark:hover:border-slate-400/60 dark:hover:bg-slate-900/50 dark:hover:text-white"
+                  disabled={structuredActionsDisabled}
+                  onClick={() => requestStructuredActionMutation.mutate(action)}
+                  className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold leading-none text-slate-900 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-500/30 dark:bg-slate-950/30 dark:text-slate-100 dark:hover:border-slate-400/60 dark:hover:bg-slate-900/50 dark:hover:text-white"
                 >
                   {getIdeaStructuredActionLabel(action)}
                 </button>
@@ -949,8 +944,258 @@ function IdeaDetailPage() {
     : activePageTab === 'context'
       ? contextSurface
       : activePageTab === 'review'
-        ? reviewSurface
+      ? reviewSurface
         : sourceSurface
+
+  const chatHeader = (
+    <header className="shrink-0 border-b border-[var(--line)] bg-[var(--header-bg)] px-4 pb-2.5 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <Link
+              to="/ideas"
+              className="inline-flex shrink-0 items-center text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--brand)] no-underline hover:underline"
+            >
+              ← Ideas
+            </Link>
+            <div className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${stageBadgeClassName}`}>
+              {stageLabel}
+            </div>
+          </div>
+          <h1 className="m-0 mt-2 truncate text-base font-semibold tracking-tight text-[var(--ink-strong)]">
+            {currentThreadTitle}
+          </h1>
+          <div className="mt-1 flex items-center gap-2 text-xs text-[var(--ink-soft)]">
+            <span className="min-w-0 truncate">{currentThreadSubtitle}</span>
+            <span className="shrink-0 rounded-full border border-[var(--line)] bg-[var(--surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ink-soft)]">
+              {threadStatusChipLabel}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveSupportTab(reviewItemCount > 0 ? 'review' : 'context')
+              setIsSupportSheetOpen(true)
+            }}
+            aria-label="Open supporting idea sections"
+            className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 text-xs font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+          >
+            <span>Details</span>
+            {reviewItemCount > 0 ? (
+              <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--brand)] px-1.5 py-0.5 text-[10px] font-bold text-white">
+                {reviewItemCount}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleStarMutation.mutate()}
+            aria-label={isIdeaStarred(idea) ? 'Remove star from idea' : 'Star idea'}
+            className={`inline-flex size-9 items-center justify-center rounded-full border text-sm font-semibold transition ${
+              isIdeaStarred(idea)
+                ? 'border-amber-300 bg-amber-100/70 text-amber-700 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-300'
+                : 'border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)] hover:text-[var(--ink-strong)]'
+            }`}
+          >
+            <Star size={14} className={isIdeaStarred(idea) ? 'fill-current' : ''} />
+            <span className="sr-only">{isIdeaStarred(idea) ? 'Starred' : 'Star idea'}</span>
+          </button>
+        </div>
+      </div>
+    </header>
+  )
+
+  const threadSurface = (
+    <section className="flex min-h-0 flex-1 flex-col">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          ref={threadViewportRef}
+          onScroll={handleThreadViewportScroll}
+          aria-label="Thread messages"
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 [scrollbar-gutter:stable]"
+        >
+          <IdeaThreadHistory
+            visibleEvents={thread.visibleEvents}
+            threadStatus={thread.status}
+            activeTurn={thread.activeTurn}
+            queuedTurns={thread.queuedTurns}
+            lastTurn={thread.lastTurn}
+            streamingAssistantText={streamingAssistantText}
+            threadRegionId="thread-history-panel"
+            showHeader={false}
+            className="min-h-full rounded-[0] border-x-0 border-t-0 bg-transparent px-0 pb-0 pt-0 shadow-none"
+          />
+        </div>
+
+        {!isThreadAtBottom ? (
+          <button
+            type="button"
+            onClick={() => scrollThreadToBottom()}
+            aria-label="Jump to latest message"
+            className="absolute bottom-4 right-4 inline-flex items-center justify-center rounded-full border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_88%,white_12%)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)] shadow-[0_16px_34px_rgba(15,23,42,0.16)] backdrop-blur hover:border-[var(--brand)] hover:text-[var(--brand)]"
+          >
+            Jump to latest
+          </button>
+        ) : null}
+      </div>
+
+      <form
+        ref={composerRef}
+        aria-label="Reply in thread"
+        className="shrink-0 border-t border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_84%,white_16%)] px-4 pt-3 shadow-[0_-10px_28px_rgba(15,23,42,0.08)] backdrop-blur-xl"
+        style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+        onSubmit={handleDiscoverySubmit}
+      >
+        <label className="sr-only" htmlFor="idea-thread-reply">Reply in thread</label>
+        <div className="flex items-end gap-2 rounded-[26px] border border-[var(--line)] bg-[var(--surface)] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]">
+          <button
+            type="button"
+            onClick={openCapture}
+            aria-label="Reply with voice"
+            className="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface-strong)] text-[var(--ink-strong)] transition hover:border-[var(--brand)] hover:text-[var(--brand)]"
+          >
+            <Mic size={16} />
+          </button>
+
+          <div className="min-w-0 flex-1">
+            <textarea
+              id="idea-thread-reply"
+              value={discoveryMessage}
+              onChange={handleComposerChange}
+              onFocus={() => setIsComposerExpanded((current) => current || discoveryMessage.length > 0)}
+              onBlur={() => setIsComposerExpanded(discoveryMessage.trim().length > 72 || discoveryMessage.includes('\n'))}
+              placeholder={latestAssistantQuestion ?? 'Add more context to this idea.'}
+              rows={isComposerExpanded ? 3 : 1}
+              className="max-h-32 min-h-11 w-full resize-none border-0 bg-transparent px-3 py-2 text-[var(--ink-strong)] outline-none transition placeholder:text-[var(--ink-faint)]"
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault()
+                  handleDiscoverySubmit(event as unknown as React.FormEvent<HTMLFormElement>)
+                }
+              }}
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={submitTurnMutation.isPending || discoveryMessage.trim().length === 0}
+            aria-label={composerButtonLabel}
+            className="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--brand)] text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            <SendHorizonal size={16} />
+          </button>
+        </div>
+
+        {shouldShowComposerMeta ? (
+          <div className="pt-2">
+            {discoveryError ? (
+              <p role="alert" aria-live="assertive" className="m-0 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">
+                {discoveryError}
+              </p>
+            ) : !discoveryError && discoveryNotice ? (
+              <p aria-live="polite" className="m-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+                {discoveryNotice}
+              </p>
+            ) : (
+              <p aria-live="polite" className="m-0 px-1 text-sm leading-6 text-[var(--ink-soft)]">{composerStatusText}</p>
+            )}
+          </div>
+        ) : null}
+      </form>
+    </section>
+  )
+
+  const activeSupportSurface = activePageTab === 'context'
+    ? contextSurface
+    : activePageTab === 'review'
+      ? reviewSurface
+      : sourceSurface
+  const chatSupportSurface = activeSupportTab === 'context'
+    ? contextSurface
+    : activeSupportTab === 'review'
+      ? reviewSurface
+      : sourceSurface
+
+  const supportSheet = isChatView ? (
+    <>
+      <div
+        onClick={() => setIsSupportSheetOpen(false)}
+        className={`fixed inset-0 z-40 bg-black/40 transition-opacity duration-300 ${
+          isSupportSheetOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      />
+
+      <div
+        className={`fixed inset-x-0 bottom-0 z-50 duration-300 ${
+          isSupportSheetOpen ? 'translate-y-0 opacity-100 transition-[transform,opacity]' : 'pointer-events-none translate-y-full opacity-0 transition-[transform,opacity]'
+        }`}
+      >
+        <div className="mx-auto w-full max-w-3xl">
+          <div className="panel rounded-t-[2rem] px-4 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-3">
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[var(--line)]" />
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="m-0 text-lg font-semibold text-[var(--ink-strong)]">
+                  {pageTabs.find((tab) => tab.id === activeSupportTab)?.label ?? 'Support'}
+                </h2>
+                <p className="m-0 mt-1 text-sm text-[var(--ink-soft)]">Inspect context, review items, or source input without leaving the thread.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSupportSheetOpen(false)}
+                className="inline-flex min-h-9 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+              >
+                Done
+              </button>
+            </div>
+
+            <div
+              className="scrollbar-none -mx-1 mb-4 flex items-stretch gap-1 overflow-x-auto px-1"
+              role="tablist"
+              aria-label="Support panels"
+              style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}
+            >
+              {supportTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeSupportTab === tab.id}
+                  onClick={() => setActiveSupportTab(tab.id)}
+                  className={`inline-flex shrink-0 items-center justify-center rounded-full border px-3 py-2 text-xs font-semibold transition ${
+                    activeSupportTab === tab.id
+                      ? 'border-[var(--brand)] bg-[var(--brand)] text-white'
+                      : 'border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)] hover:text-[var(--ink-strong)]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="max-h-[60dvh] overflow-y-auto pr-1">
+              {chatSupportSurface}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  ) : null
+
+  if (isChatView) {
+    return (
+      <>
+        <main className="flex h-[100dvh] flex-col overflow-hidden">
+          {chatHeader}
+          {threadSurface}
+        </main>
+        {supportSheet}
+      </>
+    )
+  }
 
   return (
     <main className="page-wrap flex h-[calc(100dvh-4rem)] flex-col overflow-hidden px-4 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-3 sm:pt-6 lg:h-auto lg:overflow-visible lg:pb-8">
@@ -1002,7 +1247,6 @@ function IdeaDetailPage() {
           </div>
         </section>
 
-        {/* Tab strip — dedicated compact control, horizontally scrollable on mobile */}
         <div
           className="scrollbar-none sticky top-[4rem] z-30 -mx-4 flex items-stretch gap-0 overflow-x-auto border-b border-[var(--line)] bg-[var(--header-bg)] px-4 backdrop-blur-xl sm:top-[4.5rem]"
           role="tablist"

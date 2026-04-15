@@ -1,4 +1,4 @@
-import { Link } from '@tanstack/react-router'
+import { Link, useRouterState } from '@tanstack/react-router'
 import { CalendarDays, CheckSquare, Lightbulb, Mic, Repeat, Sun } from 'lucide-react'
 import { useCaptureContext } from '../contexts/CaptureContext'
 
@@ -15,6 +15,13 @@ const NAV_ITEMS_RIGHT = [
 
 export default function BottomTabBar() {
   const { openCapture } = useCaptureContext()
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const search = useRouterState({ select: (state) => state.location.search })
+  const isIdeaChatView = pathname.startsWith('/ideas/') && search.view === 'chat'
+
+  if (isIdeaChatView) {
+    return null
+  }
 
   return (
     <nav
