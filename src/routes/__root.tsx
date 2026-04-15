@@ -124,7 +124,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <body className="font-sans antialiased [overflow-wrap:anywhere] selection:bg-[rgba(79,184,178,0.24)]">
         <Header />
         <GlobalCaptureHost>
-          <div className="min-h-screen lg:min-h-[calc(100vh-4rem)]">{children}</div>
+          <div className="flex min-h-[calc(100dvh-4rem)] flex-col">{children}</div>
           <Footer />
           <BottomTabBar />
         </GlobalCaptureHost>

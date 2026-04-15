@@ -805,7 +805,7 @@ function IdeaDetailPage() {
               <div
                 ref={threadViewportRef}
                 onScroll={handleThreadViewportScroll}
-                className="max-h-[56vh] min-h-[36vh] overflow-y-auto overscroll-contain lg:max-h-[calc(100vh-26rem)] lg:min-h-[28rem]"
+                className="max-h-[52vh] min-h-[28vh] overflow-y-auto overscroll-contain lg:max-h-[calc(100vh-24rem)] lg:min-h-[22rem]"
               >
                 <IdeaThreadHistory
                   visibleEvents={thread.visibleEvents}
@@ -905,7 +905,7 @@ function IdeaDetailPage() {
         : sourceSurface
 
   return (
-    <main className="page-wrap px-4 pb-28 pt-5 sm:pt-7 lg:pb-16">
+    <main className="page-wrap px-4 pb-20 pt-5 sm:pt-7 lg:pb-8">
       <div className="space-y-3">
         {/* Page header — core identity only: back, title, stage, star */}
         <section className="panel overflow-hidden rounded-[28px] px-3.5 py-3 sm:px-4 sm:py-3.5">
