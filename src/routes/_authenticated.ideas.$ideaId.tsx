@@ -332,6 +332,10 @@ function IdeaDetailPage() {
   }
 
   function handleThreadViewportScroll() {
+    if (activePageTab !== 'thread') {
+      return
+    }
+
     const viewport = threadViewportRef.current
 
     if (!viewport) {
@@ -358,16 +362,24 @@ function IdeaDetailPage() {
   }
 
   useEffect(() => {
+    if (activePageTab !== 'thread') {
+      return
+    }
+
     if (!isThreadAtBottom) {
       return
     }
 
     scrollThreadToBottom(streamingAssistantText ? 'auto' : 'smooth')
-  }, [isThreadAtBottom, thread.visibleEvents.length, streamingAssistantText])
+  }, [activePageTab, isThreadAtBottom, thread.visibleEvents.length, streamingAssistantText])
 
   useEffect(() => {
+    if (activePageTab !== 'thread') {
+      return
+    }
+
     handleThreadViewportScroll()
-  }, [thread.visibleEvents.length, streamingAssistantText])
+  }, [activePageTab, thread.visibleEvents.length, streamingAssistantText])
 
   useEffect(() => {
     if (!isThreadBusy) {
@@ -802,7 +814,7 @@ function IdeaDetailPage() {
 
   const activeTabSurface = activePageTab === 'thread'
     ? (
-        <section className="space-y-3">
+        <section className="flex min-h-0 flex-1 flex-col gap-3">
           {/* Thread-tab context bar — status/subtitle lives here, not in the page header */}
           <div className="flex items-start justify-between gap-3 px-0.5">
             <p className="m-0 min-w-0 flex-1 text-sm leading-6 text-[var(--ink-soft)]">
@@ -814,13 +826,13 @@ function IdeaDetailPage() {
           </div>
 
           {/* Chat unit: scroll area + composer together, no overlay */}
-          <div className="flex flex-col gap-0 overflow-hidden rounded-[28px]">
-            <div className="relative">
+          <div className="idea-thread-shell flex min-h-0 flex-1 flex-col gap-0 rounded-[28px]">
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-[28px]">
               <div
                 ref={threadViewportRef}
                 onScroll={handleThreadViewportScroll}
                 aria-label="Thread messages"
-                className="max-h-[52vh] min-h-[28vh] overflow-y-auto overscroll-contain lg:max-h-[calc(100vh-24rem)] lg:min-h-[22rem]"
+                className="flex-1 min-h-0 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]"
               >
                 <IdeaThreadHistory
                   visibleEvents={thread.visibleEvents}
@@ -849,7 +861,7 @@ function IdeaDetailPage() {
             <form
               ref={composerRef}
               aria-label="Reply in thread"
-              className="panel z-10 space-y-4 rounded-b-[28px] border border-t-0 border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_84%,white_16%)] p-4 shadow-[0_22px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl"
+              className="panel z-10 shrink-0 space-y-4 rounded-b-[28px] border border-t-0 border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_84%,white_16%)] p-4 shadow-[0_22px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl"
               style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
               onSubmit={handleDiscoverySubmit}
             >
@@ -909,7 +921,7 @@ function IdeaDetailPage() {
                       <p aria-live="polite" className="m-0 px-1 text-sm leading-6 text-[var(--ink-soft)]">{composerStatusText}</p>
                     )}
                   </div>
-                  <p className="m-0 px-1 text-xs leading-5 text-[var(--ink-faint)]">Voice is preferred. Use <kbd className="rounded border border-[var(--line)] bg-[var(--surface-strong)] px-1 py-0.5 font-mono text-[10px]">⌘</kbd>/<kbd className="rounded border border-[var(--line)] bg-[var(--surface-strong)] px-1 py-0.5 font-mono text-[10px]">Ctrl</kbd>+<kbd className="rounded border border-[var(--line)] bg-[var(--surface-strong)] px-1 py-0.5 font-mono text-[10px]">Enter</kbd> to send.</p>
+                  <p className="m-0 hidden px-1 text-xs leading-5 text-[var(--ink-faint)] sm:block">Voice is preferred. Use <kbd className="rounded border border-[var(--line)] bg-[var(--surface-strong)] px-1 py-0.5 font-mono text-[10px]">⌘</kbd>/<kbd className="rounded border border-[var(--line)] bg-[var(--surface-strong)] px-1 py-0.5 font-mono text-[10px]">Ctrl</kbd>+<kbd className="rounded border border-[var(--line)] bg-[var(--surface-strong)] px-1 py-0.5 font-mono text-[10px]">Enter</kbd> to send.</p>
                 </div>
               ) : null}
             </form>
@@ -923,8 +935,8 @@ function IdeaDetailPage() {
         : sourceSurface
 
   return (
-    <main className="page-wrap px-4 pb-20 pt-5 sm:pt-7 lg:pb-8">
-      <div className="space-y-3">
+    <main className="page-wrap flex h-[calc(100dvh-4rem)] flex-col overflow-hidden px-4 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-5 sm:pt-7 lg:h-auto lg:overflow-visible lg:pb-8">
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
         {/* Page header — core identity only: back, title, stage, star */}
         <section className="panel overflow-hidden rounded-[28px] px-3.5 py-3 sm:px-4 sm:py-3.5">
           <div className="flex items-start justify-between gap-3">
@@ -983,7 +995,7 @@ function IdeaDetailPage() {
               aria-selected={activePageTab === tab.id}
               aria-controls={`tabpanel-${tab.id}`}
               onClick={() => setActivePageTab(tab.id)}
-              className={`relative inline-flex shrink-0 items-center justify-center whitespace-nowrap px-4 py-2.5 text-sm font-semibold transition focus-visible:outline-none ${
+              className={`relative inline-flex shrink-0 items-center justify-center whitespace-nowrap px-3 py-2.5 text-sm font-semibold transition focus-visible:outline-none sm:px-4 ${
                 activePageTab === tab.id
                   ? 'text-[var(--brand)]'
                   : 'text-[var(--ink-soft)] hover:text-[var(--ink-strong)]'
@@ -1001,6 +1013,7 @@ function IdeaDetailPage() {
           id={`tabpanel-${activePageTab}`}
           role="tabpanel"
           aria-labelledby={`tab-${activePageTab}`}
+          className={activePageTab === 'thread' ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'min-h-0 flex-1 overflow-y-auto'}
         >
           {activeTabSurface}
         </div>
