@@ -10,6 +10,7 @@ import BottomTabBar from '../components/BottomTabBar'
 import Footer from '../components/Footer'
 import GlobalCaptureHost from '../components/GlobalCaptureHost'
 import Header from '../components/Header'
+import ReactGrabLifecycle from '../components/ReactGrabLifecycle'
 import PwaLifecycle from '../components/PwaLifecycle'
 import { getAuthStatus } from '../server/auth'
 
@@ -128,6 +129,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <Footer />
           <BottomTabBar />
         </GlobalCaptureHost>
+        <ReactGrabLifecycle />
         <PwaLifecycle />
         <TanStackDevtools
           config={{
