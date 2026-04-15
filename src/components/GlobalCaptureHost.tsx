@@ -118,6 +118,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   const [captureShowAdvanced, setCaptureShowAdvanced] = useState(false)
   const [captureThreadIdeaId, setCaptureThreadIdeaId] = useState<string | null>(null)
   const [isOpeningIdea, setIsOpeningIdea] = useState(false)
+  const [threadReplySucceeded, setThreadReplySucceeded] = useState(false)
 
   // Voice
   const [isRecording, setIsRecording] = useState(false)
@@ -305,11 +306,12 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     },
     onSuccess: async () => {
       const ideaId = captureThreadIdeaId
-      resetCapture()
-
       if (ideaId) {
         await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
       }
+      setThreadReplySucceeded(true)
+      setCaptureMode('success')
+      autoDismissTimerRef.current = setTimeout(() => resetCapture(), 2500)
     },
     onError: (error) => {
       setCaptureError(error instanceof Error ? error.message : 'Failed to send thread reply.')
@@ -348,8 +350,10 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
       }
     },
     onSuccess: async ({ ideaId }) => {
-      resetCapture()
       await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
+      setThreadReplySucceeded(true)
+      setCaptureMode('success')
+      autoDismissTimerRef.current = setTimeout(() => resetCapture(), 2500)
     },
     onError: (error) => {
       setTranscribeError(error instanceof Error ? error.message : 'Failed to add voice reply to the thread.')
@@ -498,6 +502,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureThreadIdeaId(null)
     setIsOpeningIdea(false)
     setTranscribeError(null)
+    setThreadReplySucceeded(false)
   }
 
   function registerEscapeHandler() {
@@ -693,11 +698,13 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
         ? 'Voice reply'
         : 'Voice capture'
       : captureMode === 'success'
-        ? captureAutoSaved?.candidateType === 'habit'
-          ? 'Habit saved'
-          : captureAutoSaved?.candidateType === 'idea'
-            ? 'Idea saved'
-          : 'Task saved'
+        ? threadReplySucceeded
+          ? 'Reply sent'
+          : captureAutoSaved?.candidateType === 'habit'
+            ? 'Habit saved'
+            : captureAutoSaved?.candidateType === 'idea'
+              ? 'Idea saved'
+              : 'Task saved'
         : captureMode === 'review'
           ? captureType === 'habit'
             ? 'Review habit'
@@ -817,8 +824,8 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                           ? isThreadReplyCapture ? 'Listening to your reply…' : 'Listening…'
                           : 'Starting…'
                         : captureMode === 'interpreting'
-                          ? isThreadReplyCapture ? 'Adding to thread…' : 'Interpreting…'
-                          : 'Transcribing…'}
+                          ? isThreadReplyCapture ? 'Adding reply to thread…' : 'Interpreting…'
+                          : isThreadReplyCapture ? 'Transcribing your reply…' : 'Transcribing…'}
                     </p>
                     {captureMode === 'recording' && isRecording ? (
                       <p className="m-0 text-xs text-[var(--ink-soft)]">Tap the button to stop</p>
@@ -828,14 +835,27 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                   {/* Error */}
                   {transcribeError ? (
                     <div className="flex flex-col items-center gap-2">
-                      <p className="m-0 text-sm font-medium text-red-500">{transcribeError}</p>
+                      <p className="m-0 text-center text-sm font-medium text-red-500">{transcribeError}</p>
                       <button
                         type="button"
-                        onClick={() => { setTranscribeError(null); setCaptureMode('recording'); void startRecording() }}
+                        onClick={() => {
+                          setTranscribeError(null)
+                          setCaptureMode('recording')
+                          void startRecording(captureThreadIdeaId)
+                        }}
                         className="cursor-pointer text-sm font-semibold text-[var(--brand)] transition hover:underline"
                       >
-                        Try again
+                        {isThreadReplyCapture ? 'Retry voice reply' : 'Try again'}
                       </button>
+                      {isThreadReplyCapture ? (
+                        <button
+                          type="button"
+                          onClick={() => { setTranscribeError(null); setCaptureMode('input') }}
+                          className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                        >
+                          Type reply instead
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -1456,6 +1476,38 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                           </button>
                         </div>
                       </form>
+                    </div>
+                  ) : null}
+
+                  {captureMode === 'success' && threadReplySucceeded ? (
+                    <div className="space-y-4">
+                      <div className="flex flex-col items-center gap-3 py-4">
+                        <div className="flex size-16 items-center justify-center rounded-full bg-green-500/10">
+                          <CheckCircle size={32} className="text-green-500" />
+                        </div>
+                        <p className="m-0 text-center text-base font-semibold text-[var(--ink-strong)]">
+                          Reply added to thread
+                        </p>
+                        <p className="m-0 text-center text-sm text-[var(--ink-soft)]">
+                          The thread is updating with your reply now.
+                        </p>
+                        {/* Auto-dismiss progress bar */}
+                        <div className="h-1 w-32 overflow-hidden rounded-full bg-[var(--line)]">
+                          <span
+                            className="block h-full rounded-full bg-green-500"
+                            style={{ animation: 'auto-dismiss-bar 2.5s linear forwards' }}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={resetCapture}
+                          className="primary-pill cursor-pointer border-0 text-sm font-semibold"
+                        >
+                          Back to thread
+                        </button>
+                      </div>
                     </div>
                   ) : null}
 
