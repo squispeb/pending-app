@@ -105,4 +105,26 @@ describe('IdeaThreadHistory', () => {
     expect(markup).toContain('Assistant failed')
     expect(markup).toContain('Assistant could not complete the request.')
   })
+
+  it('renders the denser thread shell and streaming reply state', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[
+          {
+            eventId: 'event-1',
+            type: 'assistant_question',
+            createdAt: '2026-04-12T00:01:00.000Z',
+            summary: 'What part of the flow should feel faster?',
+          },
+        ]}
+        streamingAssistantText="I am outlining the fastest thread-first layout now."
+        className="min-h-full"
+      />,
+    )
+
+    expect(markup).toContain('Thread history')
+    expect(markup).toContain('Assistant replying')
+    expect(markup).toContain('I am outlining the fastest thread-first layout now.')
+    expect(markup).toContain('min-h-full')
+  })
 })

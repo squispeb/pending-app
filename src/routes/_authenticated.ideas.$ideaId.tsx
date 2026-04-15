@@ -1,4 +1,4 @@
-import { Lightbulb, Mic, Quote, SendHorizonal, Sparkles, Star } from 'lucide-react'
+import { Lightbulb, Mic, Quote, SendHorizonal, Star } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
@@ -10,7 +10,7 @@ import {
   type IdeaRefinementAction,
   type IdeaRestructureAction,
 } from '../lib/idea-structured-actions'
-import { getIdeaExcerpt, getIdeaStageBadgeClassName, getIdeaStageLabel, isIdeaStarred } from '../lib/ideas'
+import { getIdeaStageBadgeClassName, getIdeaStageLabel, isIdeaStarred } from '../lib/ideas'
 import { parseIdeaThreadStreamFrames } from '../lib/idea-thread-stream'
 import {
   acceptIdeaStructuredAction,
@@ -24,6 +24,8 @@ import {
   submitIdeaThreadTurn,
   toggleIdeaStar,
 } from '../server/ideas'
+
+type IdeaPageTab = 'thread' | 'context' | 'review' | 'source'
 
 const ideaDetailQueryOptions = (ideaId: string) =>
   queryOptions({
@@ -61,12 +63,14 @@ function IdeaDetailPage() {
   const [discoveryError, setDiscoveryError] = useState<string | null>(null)
   const [discoveryNotice, setDiscoveryNotice] = useState<string | null>(null)
   const [streamingAssistantText, setStreamingAssistantText] = useState('')
+  const [isComposerExpanded, setIsComposerExpanded] = useState(false)
   const [dismissedRefinements, setDismissedRefinements] = useState<{ title: string | null; summary: string | null }>({
     title: null,
     summary: null,
   })
-  const [isMobileDetailsOpen, setIsMobileDetailsOpen] = useState(false)
-  const threadEndRef = useRef<HTMLDivElement | null>(null)
+  const [activePageTab, setActivePageTab] = useState<IdeaPageTab>('thread')
+  const [isThreadAtBottom, setIsThreadAtBottom] = useState(true)
+  const threadViewportRef = useRef<HTMLDivElement | null>(null)
   const lastStreamEventIdRef = useRef<string | null>(null)
   const streamedEventIdsRef = useRef(new Set<string>())
   const activeStreamingTurnIdRef = useRef<string | null>(null)
@@ -95,6 +99,7 @@ function IdeaDetailPage() {
     .reverse()
     .find((event) => event.type === 'assistant_question' || event.type === 'assistant_synthesis') ?? null
   const latestAssistantQuestion = latestAssistantEvent?.type === 'assistant_question' ? latestAssistantEvent.summary : null
+  const currentThreadTitle = thread.workingIdea.provisionalTitle ?? idea.title
   const composerStatusText = thread.status === 'queued'
     ? latestQueuedTurn
       ? `Queued after the current turn: ${latestQueuedTurn.userMessage}`
@@ -129,6 +134,7 @@ function IdeaDetailPage() {
   const stageLabel = getIdeaStageLabel(thread.stage)
   const stageBadgeClassName = getIdeaStageBadgeClassName(thread.stage)
   const discoveryProgressPercent = Math.max(12, (populatedWorkingIdeaEntries.length / 7) * 100)
+  const isThreadTabActive = activePageTab === 'thread'
   const threadRailMessage = isThreadBusy
     ? thread.status === 'queued'
       ? queuedTurnCount > 0
@@ -140,6 +146,12 @@ function IdeaDetailPage() {
     : missingDiscoveryAreas.length > 0
       ? `The biggest gaps right now are ${missingDiscoveryAreas.join(', ')}.`
       : 'The working idea has enough context for a stronger framing pass.'
+  const currentThreadSubtitle = latestAssistantQuestion
+    ?? (streamingAssistantText
+      ? 'Assistant is replying in the thread now.'
+      : thread.status === 'failed'
+        ? 'The last reply failed. Retry with another prompt or capture more context.'
+        : threadRailMessage)
   const threadStatusChipLabel = thread.status === 'queued'
     ? queuedTurnCount > 0
       ? `${queuedTurnCount} queued`
@@ -151,21 +163,8 @@ function IdeaDetailPage() {
         : thread.status === 'failed'
           ? 'Needs retry'
           : 'Thread ready'
-  const threadRailHeading = streamingAssistantText
-    ? 'Assistant replying'
-    : latestAssistantEvent?.type === 'assistant_question'
-      ? 'Latest prompt'
-      : latestAssistantEvent?.type === 'assistant_synthesis'
-        ? 'Latest synthesis'
-        : 'Discovery guide'
-  const threadRailBody = streamingAssistantText
-    ? 'Watch the live assistant reply in the thread below.'
-    : latestAssistantEvent?.summary ?? threadRailMessage
-  const mobileDetailsSummary = pendingStructuredAction
-    ? 'Structured output ready to review.'
-    : suggestedTitle || suggestedSummary
-      ? 'Refinement suggestions ready to review.'
-      : `${populatedWorkingIdeaEntries.length}/7 discovery areas captured.`
+  const reviewItemCount = Number(Boolean(suggestedTitle)) + Number(Boolean(suggestedSummary)) + Number(Boolean(pendingStructuredAction))
+  const shouldShowComposerMeta = Boolean(discoveryError || discoveryNotice || isThreadBusy)
 
   const toggleStarMutation = useMutation({
     mutationFn: async () => toggleIdeaStar({ data: { id: idea.id } }),
@@ -181,6 +180,7 @@ function IdeaDetailPage() {
     mutationFn: async (message: string) => submitIdeaThreadTurn({ data: { id: ideaId, message } }),
     onSuccess: async (result) => {
       setDiscoveryMessage('')
+      setIsComposerExpanded(false)
       setDiscoveryError(null)
       setDiscoveryNotice(result.state === 'queued' ? `Reply queued behind ${result.queueDepth} ${result.queueDepth === 1 ? 'active turn' : 'active turns'}.` : null)
       queryClient.setQueryData(['idea-thread', ideaId], result.thread)
@@ -192,6 +192,7 @@ function IdeaDetailPage() {
       setDiscoveryError(error instanceof Error ? error.message : 'Failed to submit discovery turn.')
     },
   })
+  const composerButtonLabel = submitTurnMutation.isPending ? 'Sending...' : isThreadBusy ? 'Queue reply' : 'Send reply'
 
   const requestRefinementMutation = useMutation({
     mutationFn: async (action: IdeaRefinementAction) => requestIdeaRefinement({
@@ -312,8 +313,49 @@ function IdeaDetailPage() {
     submitTurnMutation.mutate(message)
   }
 
+  function handleComposerChange(event: React.ChangeEvent<HTMLTextAreaElement>) {
+    const nextValue = event.target.value
+    const lineCount = nextValue.split('\n').length
+
+    setDiscoveryMessage(nextValue)
+    setIsComposerExpanded(nextValue.length > 72 || lineCount > 1)
+  }
+
+  function handleThreadViewportScroll() {
+    const viewport = threadViewportRef.current
+
+    if (!viewport) {
+      return
+    }
+
+    const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
+    setIsThreadAtBottom(distanceFromBottom < 96)
+  }
+
+  function scrollThreadToBottom(behavior: ScrollBehavior = 'smooth') {
+    const viewport = threadViewportRef.current
+
+    if (!viewport) {
+      return
+    }
+
+    viewport.scrollTo({
+      top: viewport.scrollHeight,
+      behavior,
+    })
+    setIsThreadAtBottom(true)
+  }
+
   useEffect(() => {
-    threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    if (!isThreadAtBottom) {
+      return
+    }
+
+    scrollThreadToBottom(streamingAssistantText ? 'auto' : 'smooth')
+  }, [isThreadAtBottom, thread.visibleEvents.length, streamingAssistantText])
+
+  useEffect(() => {
+    handleThreadViewportScroll()
   }, [thread.visibleEvents.length, streamingAssistantText])
 
   useEffect(() => {
@@ -424,18 +466,114 @@ function IdeaDetailPage() {
     }
   }, [ideaId, isThreadBusy])
 
-  const detailPanels = (
-    <>
-      {canUseRefinementActions ? (
-        <section className="panel rounded-[28px] border border-sky-200 bg-sky-50/70 p-4 dark:border-sky-500/30 dark:bg-sky-500/10 sm:p-5">
-          <div className="space-y-3">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700 dark:text-sky-300">Refine and structure</div>
-              <p className="m-0 mt-2 text-sm leading-6 text-[var(--ink-soft)]">
-                Keep using the thread as the main workspace, then open targeted review actions when you want to tighten wording or request a more structured output.
-              </p>
+  const contextSurface = (
+    <section className="panel rounded-[28px] p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Context</div>
+          <p className="m-0 mt-1 text-sm leading-6 text-[var(--ink-soft)]">
+            Compact supporting context for the current thread without pulling focus away from the conversation.
+          </p>
+        </div>
+        <div className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-semibold text-[var(--ink-soft)]">
+          {populatedWorkingIdeaEntries.length}/7 captured
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-4 text-sm text-[var(--ink-soft)]">
+        <div className="grid gap-3 xl:grid-cols-2">
+          <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-faint)]">Saved framing</div>
+            <div className="mt-3 space-y-3">
+              <div>
+                <div className="font-medium text-[var(--ink-strong)]">Title</div>
+                <div className="mt-1">{idea.title}</div>
+              </div>
+              <div>
+                <div className="font-medium text-[var(--ink-strong)]">Summary</div>
+                <div className="mt-1 whitespace-pre-wrap leading-6">{idea.threadSummary ?? 'No saved summary yet.'}</div>
+              </div>
+              <div>
+                <div className="font-medium text-[var(--ink-strong)]">Description</div>
+                <div className="mt-1 whitespace-pre-wrap leading-6">{idea.body || 'No description has been saved yet.'}</div>
+              </div>
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+          </div>
+
+          <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-faint)]">Working state</div>
+            <div className="mt-3 space-y-3">
+              <div>
+                <div className="font-medium text-[var(--ink-strong)]">Working title</div>
+                <div className="mt-1">{thread.workingIdea.provisionalTitle ?? idea.title}</div>
+              </div>
+              <div>
+                <div className="font-medium text-[var(--ink-strong)]">Working summary</div>
+                <div className="mt-1 whitespace-pre-wrap leading-6">{thread.workingIdea.currentSummary ?? 'No working summary yet.'}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-medium text-[var(--ink-strong)]">Discovery progress</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-faint)]">
+              {populatedWorkingIdeaEntries.length}/7 captured
+            </div>
+          </div>
+          <div className="mt-3 h-2 rounded-full bg-[var(--surface-strong)]">
+            <div className="h-2 rounded-full bg-[var(--brand)]" style={{ width: `${discoveryProgressPercent}%` }} />
+          </div>
+          <p className="m-0 mt-3 leading-6">
+            {missingDiscoveryAreas.length === 0
+              ? 'All tracked discovery areas have initial context.'
+              : `${missingDiscoveryAreas.length} areas still need more context: ${missingDiscoveryAreas.join(', ')}.`}
+          </p>
+        </div>
+
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+            <dt className="font-medium text-[var(--ink-strong)]">Stage</dt>
+            <dd className="mt-1">{stageLabel}</dd>
+          </div>
+          <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+            <dt className="font-medium text-[var(--ink-strong)]">Source type</dt>
+            <dd className="mt-1">{idea.sourceType.replace('_', ' ')}</dd>
+          </div>
+          <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+            <dt className="font-medium text-[var(--ink-strong)]">Created</dt>
+            <dd className="mt-1">{idea.createdAt.toLocaleString()}</dd>
+          </div>
+          <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+            <dt className="font-medium text-[var(--ink-strong)]">Updated</dt>
+            <dd className="mt-1">{idea.updatedAt.toLocaleString()}</dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+  )
+
+  const reviewSurface = (
+    <section className="panel rounded-[28px] p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Review</div>
+          <p className="m-0 mt-1 text-sm leading-6 text-[var(--ink-soft)]">Refinement suggestions and structured review actions live here instead of crowding the main thread.</p>
+        </div>
+        <div className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200">
+          {reviewItemCount} item{reviewItemCount === 1 ? '' : 's'}
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-4 text-sm text-[var(--ink-soft)]">
+        {canUseRefinementActions ? (
+          <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4 dark:border-sky-500/30 dark:bg-sky-500/10">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700 dark:text-sky-300">Refine and structure</div>
+            <p className="m-0 mt-2 leading-6 text-[var(--ink-soft)]">
+              Keep using the thread as the main workspace, then open targeted review actions when you want to tighten wording or request a more structured output.
+            </p>
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
               {(['title', 'summary'] as const).map((action) => (
                 <button
                   key={action}
@@ -460,249 +598,194 @@ function IdeaDetailPage() {
               ))}
             </div>
           </div>
-        </section>
-      ) : null}
+        ) : (
+          <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+            <div className="font-medium text-[var(--ink-strong)]">Review unlocks later in discovery</div>
+            <p className="m-0 mt-2 leading-6">Keep adding context in the thread until the idea is developed enough for refinements and structured review.</p>
+          </div>
+        )}
 
-      <section className="panel rounded-[28px] p-4 sm:p-5">
-        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Idea details</div>
-        <div className="mt-3 space-y-4 text-sm text-[var(--ink-soft)]">
-          <div>
-            <div className="font-medium text-[var(--ink-strong)]">Description</div>
-            <p className="m-0 mt-1 whitespace-pre-wrap leading-6">{idea.body || 'No description has been saved yet.'}</p>
-          </div>
-          <div>
-            <div className="font-medium text-[var(--ink-strong)]">Saved summary</div>
-            <p className="m-0 mt-1 whitespace-pre-wrap leading-6">{idea.threadSummary ?? 'No saved summary yet.'}</p>
-          </div>
-          <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-            <div>
-              <dt className="font-medium text-[var(--ink-strong)]">Stage</dt>
-              <dd className="mt-1">{stageLabel}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-[var(--ink-strong)]">Source type</dt>
-              <dd className="mt-1">{idea.sourceType.replace('_', ' ')}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-[var(--ink-strong)]">Created</dt>
-              <dd className="mt-1">{idea.createdAt.toLocaleString()}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-[var(--ink-strong)]">Updated</dt>
-              <dd className="mt-1">{idea.updatedAt.toLocaleString()}</dd>
-            </div>
-          </dl>
-        </div>
-      </section>
+        {canUseRefinementActions && (suggestedTitle || suggestedSummary) ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+            <div className="mb-2 text-sm font-semibold text-[var(--ink-strong)]">Suggested refinements</div>
+            <div className="space-y-4">
+              {suggestedTitle ? (
+                <div className="space-y-2">
+                  <div className="font-medium text-[var(--ink-strong)]">Title suggestion</div>
+                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
+                    <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Current</div>
+                    <div className="mt-1">{idea.title}</div>
+                  </div>
+                  <div className="rounded-2xl border border-emerald-200 bg-white px-3 py-2 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                    <div className="text-xs uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">Suggested</div>
+                    <div className="mt-1 text-[var(--ink-strong)]">{suggestedTitle}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={isThreadBusy || persistRefinementMutation.isPending}
+                      onClick={() => persistRefinementMutation.mutate('title')}
+                      className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Save title
+                    </button>
+                    <button
+                      type="button"
+                      disabled={persistRefinementMutation.isPending}
+                      onClick={() => {
+                        setDismissedRefinements((current) => ({
+                          ...current,
+                          title: suggestedTitle,
+                        }))
+                        setDiscoveryNotice('Kept the current title.')
+                      }}
+                      className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Keep current title
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
-      <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
-        <div className="mb-2 text-sm font-semibold text-[var(--ink-strong)]">Working idea</div>
-        <dl className="space-y-3 text-sm text-[var(--ink-soft)]">
-          <div>
-            <dt className="font-medium text-[var(--ink-strong)]">Provisional title</dt>
-            <dd className="mt-1">{thread.workingIdea.provisionalTitle ?? idea.title}</dd>
-          </div>
-          {populatedWorkingIdeaEntries.map(([label, value]) => (
-            <div key={label}>
-              <dt className="font-medium text-[var(--ink-strong)]">{label}</dt>
-              <dd className="mt-1">{value}</dd>
+              {suggestedSummary ? (
+                <div className="space-y-2">
+                  <div className="font-medium text-[var(--ink-strong)]">Summary suggestion</div>
+                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
+                    <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Current</div>
+                    <div className="mt-1 whitespace-pre-wrap">{idea.threadSummary ?? 'No saved summary yet.'}</div>
+                  </div>
+                  <div className="rounded-2xl border border-emerald-200 bg-white px-3 py-2 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                    <div className="text-xs uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">Suggested</div>
+                    <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{suggestedSummary}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={isThreadBusy || persistRefinementMutation.isPending}
+                      onClick={() => persistRefinementMutation.mutate('summary')}
+                      className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Save summary
+                    </button>
+                    <button
+                      type="button"
+                      disabled={persistRefinementMutation.isPending}
+                      onClick={() => {
+                        setDismissedRefinements((current) => ({
+                          ...current,
+                          summary: suggestedSummary,
+                        }))
+                        setDiscoveryNotice('Kept the current summary.')
+                      }}
+                      className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Keep current summary
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
-          ))}
-          <div>
-            <dt className="font-medium text-[var(--ink-strong)]">Discovery progress</dt>
-            <dd className="mt-2">
-              <div className="h-2 rounded-full bg-[var(--surface-strong)]">
-                <div
-                  className="h-2 rounded-full bg-[var(--brand)]"
-                  style={{ width: `${discoveryProgressPercent}%` }}
-                />
-              </div>
-              <p className="m-0 mt-2 text-sm text-[var(--ink-soft)]">
-                {missingDiscoveryAreas.length === 0
-                  ? 'All tracked discovery areas have initial context.'
-                  : `${missingDiscoveryAreas.length} areas still need more context: ${missingDiscoveryAreas.join(', ')}.`}
-              </p>
-            </dd>
           </div>
-        </dl>
+        ) : null}
+
+        {canUseRefinementActions && pendingStructuredAction ? (
+          <div className="rounded-2xl border border-violet-200 bg-violet-50/70 p-4 dark:border-violet-500/30 dark:bg-violet-500/10">
+            <div className="mb-2 text-sm font-semibold text-[var(--ink-strong)]">Structured outputs</div>
+            <div className="space-y-4">
+              {pendingStructuredAction.action === 'restructure' ? (
+                <div className="space-y-2">
+                  <div className="font-medium text-[var(--ink-strong)]">Restructured framing</div>
+                  <div className="rounded-2xl border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/30 dark:bg-violet-500/10">
+                    <div className="text-xs uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">Suggested</div>
+                    <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{pendingStructuredAction.proposedSummary}</div>
+                  </div>
+                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
+                    <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Why</div>
+                    <div className="mt-1 whitespace-pre-wrap">{pendingStructuredAction.explanation}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending}
+                      onClick={() => acceptStructuredActionMutation.mutate(pendingStructuredAction.proposalId)}
+                      className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Accept restructure
+                    </button>
+                    <button
+                      type="button"
+                      disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending}
+                      onClick={() => rejectStructuredActionMutation.mutate(pendingStructuredAction.proposalId)}
+                      className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Reject restructure
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {pendingStructuredAction.action === 'breakdown' ? (
+                <div className="space-y-2">
+                  <div className="font-medium text-[var(--ink-strong)]">Next-step breakdown</div>
+                  <div className="rounded-2xl border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/30 dark:bg-violet-500/10">
+                    <div className="text-xs uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">Suggested</div>
+                    <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{pendingStructuredAction.proposedSummary}</div>
+                  </div>
+                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
+                    <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Why</div>
+                    <div className="mt-1 whitespace-pre-wrap">{pendingStructuredAction.explanation}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending}
+                      onClick={() => acceptStructuredActionMutation.mutate(pendingStructuredAction.proposalId)}
+                      className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Accept breakdown
+                    </button>
+                    <button
+                      type="button"
+                      disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending}
+                      onClick={() => rejectStructuredActionMutation.mutate(pendingStructuredAction.proposalId)}
+                      className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Reject breakdown
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </div>
+    </section>
+  )
 
-      {canUseRefinementActions && (suggestedTitle || suggestedSummary) ? (
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
-          <div className="mb-2 text-sm font-semibold text-[var(--ink-strong)]">Suggested refinements</div>
-          <div className="space-y-4 text-sm text-[var(--ink-soft)]">
-            {suggestedTitle ? (
-              <div className="space-y-2">
-                <div className="font-medium text-[var(--ink-strong)]">Title suggestion</div>
-                <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
-                  <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Current</div>
-                  <div className="mt-1">{idea.title}</div>
-                </div>
-                <div className="rounded-2xl border border-emerald-200 bg-white px-3 py-2 dark:border-emerald-500/30 dark:bg-emerald-500/10">
-                  <div className="text-xs uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">Suggested</div>
-                  <div className="mt-1 text-[var(--ink-strong)]">{suggestedTitle}</div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={isThreadBusy || persistRefinementMutation.isPending}
-                    onClick={() => persistRefinementMutation.mutate('title')}
-                    className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Save title
-                  </button>
-                  <button
-                    type="button"
-                    disabled={persistRefinementMutation.isPending}
-                    onClick={() => {
-                      setDismissedRefinements((current) => ({
-                        ...current,
-                        title: suggestedTitle,
-                      }))
-                      setDiscoveryNotice('Kept the current title.')
-                    }}
-                    className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Keep current title
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            {suggestedSummary ? (
-              <div className="space-y-2">
-                <div className="font-medium text-[var(--ink-strong)]">Summary suggestion</div>
-                <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
-                  <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Current</div>
-                  <div className="mt-1 whitespace-pre-wrap">{idea.threadSummary ?? 'No saved summary yet.'}</div>
-                </div>
-                <div className="rounded-2xl border border-emerald-200 bg-white px-3 py-2 dark:border-emerald-500/30 dark:bg-emerald-500/10">
-                  <div className="text-xs uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">Suggested</div>
-                  <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{suggestedSummary}</div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={isThreadBusy || persistRefinementMutation.isPending}
-                    onClick={() => persistRefinementMutation.mutate('summary')}
-                    className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Save summary
-                  </button>
-                  <button
-                    type="button"
-                    disabled={persistRefinementMutation.isPending}
-                    onClick={() => {
-                      setDismissedRefinements((current) => ({
-                        ...current,
-                        summary: suggestedSummary,
-                      }))
-                      setDiscoveryNotice('Kept the current summary.')
-                    }}
-                    className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Keep current summary
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
-      {canUseRefinementActions && pendingStructuredAction ? (
-        <div className="rounded-2xl border border-violet-200 bg-violet-50/70 p-4 dark:border-violet-500/30 dark:bg-violet-500/10">
-          <div className="mb-2 text-sm font-semibold text-[var(--ink-strong)]">Structured outputs</div>
-          <div className="space-y-4 text-sm text-[var(--ink-soft)]">
-            {pendingStructuredAction.action === 'restructure' ? (
-              <div className="space-y-2">
-                <div className="font-medium text-[var(--ink-strong)]">Restructured framing</div>
-                <div className="rounded-2xl border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/30 dark:bg-violet-500/10">
-                  <div className="text-xs uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">Suggested</div>
-                  <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{pendingStructuredAction.proposedSummary}</div>
-                </div>
-                <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
-                  <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Why</div>
-                  <div className="mt-1 whitespace-pre-wrap">{pendingStructuredAction.explanation}</div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending}
-                    onClick={() => acceptStructuredActionMutation.mutate(pendingStructuredAction.proposalId)}
-                    className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Accept restructure
-                  </button>
-                  <button
-                    type="button"
-                    disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending}
-                    onClick={() => rejectStructuredActionMutation.mutate(pendingStructuredAction.proposalId)}
-                    className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Reject restructure
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            {pendingStructuredAction.action === 'breakdown' ? (
-              <div className="space-y-2">
-                <div className="font-medium text-[var(--ink-strong)]">Next-step breakdown</div>
-                <div className="rounded-2xl border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/30 dark:bg-violet-500/10">
-                  <div className="text-xs uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">Suggested</div>
-                  <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{pendingStructuredAction.proposedSummary}</div>
-                </div>
-                <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
-                  <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Why</div>
-                  <div className="mt-1 whitespace-pre-wrap">{pendingStructuredAction.explanation}</div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending}
-                    onClick={() => acceptStructuredActionMutation.mutate(pendingStructuredAction.proposalId)}
-                    className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Accept breakdown
-                  </button>
-                  <button
-                    type="button"
-                    disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending}
-                    onClick={() => rejectStructuredActionMutation.mutate(pendingStructuredAction.proposalId)}
-                    className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Reject breakdown
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
-      <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+  const sourceSurface = (
+    <section className="panel rounded-[28px] p-4 sm:p-5">
+      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Source</div>
+      <p className="m-0 mt-2 text-sm leading-6 text-[var(--ink-soft)]">Original captured input for this idea, separated from the chat so it stays available without crowding the main workspace.</p>
+      <div className="mt-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
         <div className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-[var(--ink-strong)]">
           <Quote size={15} className="text-[var(--brand)]" />
           Source input
         </div>
-        <p className="m-0 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-soft)]">
-          {idea.sourceInput || 'No raw source input was stored for this idea.'}
-        </p>
+        <p className="m-0 whitespace-pre-wrap leading-6">{idea.sourceInput || 'No raw source input was stored for this idea.'}</p>
       </div>
-    </>
+    </section>
   )
 
   return (
     <main className="page-wrap px-4 pb-28 pt-5 sm:pt-7 lg:pb-16">
       <div className="space-y-4">
-        <section className="panel overflow-hidden rounded-[32px] p-4 sm:p-5">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <section className={`panel overflow-hidden rounded-[32px] ${isThreadTabActive ? 'p-3.5 sm:p-4' : 'p-4 sm:p-5'}`}>
+          <div className={`flex flex-col ${isThreadTabActive ? 'gap-3' : 'gap-4 sm:flex-row sm:items-start sm:justify-between'}`}>
             <div className="min-w-0 flex-1">
-              <Link to="/ideas" className="text-sm font-medium text-[var(--brand)] no-underline hover:underline">
+              <Link to="/ideas" className={`font-medium text-[var(--brand)] no-underline hover:underline ${isThreadTabActive ? 'text-xs uppercase tracking-[0.14em]' : 'text-sm'}`}>
                 Back to ideas
               </Link>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
+              <div className={`flex flex-wrap items-center gap-2 ${isThreadTabActive ? 'mt-2' : 'mt-3'}`}>
                 <div className="inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
                   <Lightbulb size={14} />
                   Discovery thread
@@ -714,93 +797,122 @@ function IdeaDetailPage() {
                   {threadStatusChipLabel}
                 </div>
               </div>
-              <h1 className="mt-3 text-2xl font-semibold tracking-tight text-[var(--ink-strong)] sm:text-3xl">
-                {thread.workingIdea.provisionalTitle ?? idea.title}
+              <h1 className={`font-semibold tracking-tight text-[var(--ink-strong)] ${isThreadTabActive ? 'mt-2 text-xl leading-tight sm:text-2xl' : 'mt-3 text-2xl sm:text-3xl'}`}>
+                {currentThreadTitle}
               </h1>
-              <p className="m-0 mt-2 max-w-3xl text-sm leading-6 text-[var(--ink-soft)]">
-                {thread.workingIdea.currentSummary ?? (getIdeaExcerpt(idea, 260) || 'This idea is still in discovery.')}
-              </p>
+              {isThreadTabActive ? (
+                <p className="m-0 mt-1 text-sm leading-6 text-[var(--ink-soft)]">
+                  {currentThreadSubtitle}
+                </p>
+              ) : (
+                <p className="m-0 mt-2 max-w-3xl text-sm leading-6 text-[var(--ink-soft)]">
+                  {thread.workingIdea.currentSummary ?? 'This idea is still in discovery.'}
+                </p>
+              )}
             </div>
 
-            <button
-              type="button"
-              onClick={() => toggleStarMutation.mutate()}
-              aria-label={isIdeaStarred(idea) ? 'Remove star from idea' : 'Star idea'}
-              className={`inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-3 text-sm font-semibold transition sm:w-auto ${
-                isIdeaStarred(idea)
-                  ? 'border-amber-300 bg-amber-100/70 text-amber-700 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-300'
-                  : 'border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)] hover:text-[var(--ink-strong)]'
-              }`}
-            >
-              <Star size={16} className={isIdeaStarred(idea) ? 'fill-current' : ''} />
-              {isIdeaStarred(idea) ? 'Starred' : 'Star idea'}
-            </button>
+            <div className={`flex items-center gap-2 ${isThreadTabActive ? 'self-start' : ''}`}>
+              {isThreadTabActive ? (
+                <div className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-medium text-[var(--ink-soft)]">
+                  {threadStatusChipLabel}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => toggleStarMutation.mutate()}
+                aria-label={isIdeaStarred(idea) ? 'Remove star from idea' : 'Star idea'}
+                className={`inline-flex items-center justify-center gap-2 rounded-full border text-sm font-semibold transition ${isThreadTabActive ? 'size-11 self-start px-0' : 'w-full px-4 py-3 sm:w-auto'} ${
+                  isIdeaStarred(idea)
+                    ? 'border-amber-300 bg-amber-100/70 text-amber-700 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-300'
+                    : 'border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)] hover:text-[var(--ink-strong)]'
+                }`}
+              >
+                <Star size={16} className={isIdeaStarred(idea) ? 'fill-current' : ''} />
+                {isThreadTabActive ? <span className="sr-only">{isIdeaStarred(idea) ? 'Starred' : 'Star idea'}</span> : (isIdeaStarred(idea) ? 'Starred' : 'Star idea')}
+              </button>
+            </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-2 text-xs font-medium text-[var(--ink-soft)]">
-            <div className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1">
-              {populatedWorkingIdeaEntries.length}/7 discovery areas captured
-            </div>
-            <div className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1">
-              {missingDiscoveryAreas.length === 0 ? 'No major discovery gaps' : `${missingDiscoveryAreas.length} gaps left to cover`}
-            </div>
-            {pendingStructuredAction ? (
-              <div className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200">
-                Structured review ready
+          {!isThreadTabActive ? (
+            <>
+              <div className="mt-4 flex flex-wrap gap-2 text-xs font-medium text-[var(--ink-soft)]">
+                <div className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1">
+                  {populatedWorkingIdeaEntries.length}/7 discovery areas captured
+                </div>
+                <div className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1">
+                  {missingDiscoveryAreas.length === 0 ? 'No major discovery gaps' : `${missingDiscoveryAreas.length} gaps left to cover`}
+                </div>
+                {pendingStructuredAction ? (
+                  <div className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200">
+                    Structured review ready
+                  </div>
+                ) : null}
               </div>
-            ) : null}
-          </div>
 
-          <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--surface)] px-4 py-4">
-            <div className="flex items-start gap-3">
-              <div className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-2xl ${threadRailHeading === 'Latest prompt' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : threadRailHeading === 'Latest synthesis' ? 'bg-violet-100 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300' : 'bg-[var(--chip-bg)] text-[var(--brand)]'}`}>
-                <Sparkles size={16} />
-              </div>
-              <div className="min-w-0">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">{threadRailHeading}</div>
-                <p className="m-0 mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">{threadRailBody}</p>
+              <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--surface)] px-4 py-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Thread guidance</div>
+                <p className="m-0 mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">{latestAssistantEvent?.summary ?? threadRailMessage}</p>
                 {!streamingAssistantText ? (
                   <p className="m-0 mt-2 text-sm leading-6 text-[var(--ink-soft)]">{threadRailMessage}</p>
                 ) : null}
               </div>
-            </div>
-          </div>
+            </>
+          ) : null}
 
-          <div className="mt-4 flex items-center justify-between gap-3 lg:hidden">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Details and review</div>
-              <div className="mt-1 text-sm leading-6 text-[var(--ink-soft)]">{mobileDetailsSummary}</div>
-            </div>
-            <button
-              type="button"
-              aria-expanded={isMobileDetailsOpen}
-              aria-controls="idea-thread-details"
-              onClick={() => setIsMobileDetailsOpen((current) => !current)}
-              className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-strong)] transition hover:border-[var(--brand)] hover:text-[var(--brand)]"
-            >
-              {isMobileDetailsOpen ? 'Hide details' : 'Show details'}
-            </button>
+          <div className={`flex flex-wrap gap-2 ${isThreadTabActive ? 'mt-3' : 'mt-4'}`}>
+            {([
+              { id: 'thread', label: 'Thread' },
+              { id: 'context', label: 'Context' },
+              { id: 'review', label: `Review${reviewItemCount > 0 ? ` (${reviewItemCount})` : ''}` },
+              { id: 'source', label: 'Source' },
+            ] as const).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                aria-pressed={activePageTab === tab.id}
+                onClick={() => setActivePageTab(tab.id)}
+                className={`inline-flex min-h-10 items-center justify-center rounded-full border px-4 py-2 text-sm font-semibold transition ${isThreadTabActive ? 'flex-1 sm:flex-none' : ''} ${
+                  activePageTab === tab.id
+                    ? 'border-[var(--brand)] bg-[var(--chip-bg)] text-[var(--brand)]'
+                    : 'border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)] hover:text-[var(--ink-strong)]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         </section>
 
-        <section className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
-          <div className="space-y-4">
-            {isMobileDetailsOpen ? (
-              <section id="idea-thread-details" className="space-y-4 lg:hidden">
-                {detailPanels}
-              </section>
-            ) : null}
+        {activePageTab === 'thread' ? (
+          <section className="space-y-4">
+            <div className="space-y-3 pb-40 lg:pb-40">
+              <div className="relative">
+                <div
+                  ref={threadViewportRef}
+                  onScroll={handleThreadViewportScroll}
+                  className="max-h-[64vh] min-h-[52vh] overflow-y-auto overscroll-contain rounded-[28px] lg:max-h-[calc(100vh-20rem)] lg:min-h-[34rem]"
+                >
+                  <IdeaThreadHistory
+                    visibleEvents={thread.visibleEvents}
+                    threadStatus={thread.status}
+                    activeTurn={thread.activeTurn}
+                    queuedTurns={thread.queuedTurns}
+                    lastTurn={thread.lastTurn}
+                    streamingAssistantText={streamingAssistantText}
+                    className="min-h-full"
+                  />
+                </div>
 
-            <div className="space-y-4 pb-40 lg:pb-40">
-              <IdeaThreadHistory
-                visibleEvents={thread.visibleEvents}
-                threadStatus={thread.status}
-                activeTurn={thread.activeTurn}
-                queuedTurns={thread.queuedTurns}
-                lastTurn={thread.lastTurn}
-                streamingAssistantText={streamingAssistantText}
-              />
-              <div ref={threadEndRef} />
+                {!isThreadAtBottom ? (
+                  <button
+                    type="button"
+                    onClick={() => scrollThreadToBottom()}
+                    className="absolute bottom-4 right-4 inline-flex items-center justify-center rounded-full border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_88%,white_12%)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)] shadow-[0_16px_34px_rgba(15,23,42,0.16)] backdrop-blur hover:border-[var(--brand)] hover:text-[var(--brand)]"
+                  >
+                    Jump to latest
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             <form
@@ -808,69 +920,68 @@ function IdeaDetailPage() {
               style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
               onSubmit={handleDiscoverySubmit}
             >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Reply in thread</div>
-                  <div className="mt-1 text-sm leading-6 text-[var(--ink-soft)]">{composerStatusText}</div>
-                </div>
+              <label className="sr-only" htmlFor="idea-thread-reply">Reply in thread</label>
+              <div className="flex items-end gap-2 rounded-[26px] border border-[var(--line)] bg-[var(--surface)] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]">
                 <button
                   type="button"
                   onClick={openCapture}
-                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 font-semibold text-[var(--ink-strong)] transition hover:border-[var(--brand)] hover:text-[var(--brand)] sm:w-auto"
+                  aria-label="Reply with voice"
+                  className="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface-strong)] text-[var(--ink-strong)] transition hover:border-[var(--brand)] hover:text-[var(--brand)]"
                 >
                   <Mic size={16} />
-                  Voice reply
                 </button>
-              </div>
 
-              <label className="block" htmlFor="idea-thread-reply">
-                <span className="sr-only">Reply in thread</span>
-                <textarea
-                  id="idea-thread-reply"
-                  value={discoveryMessage}
-                  onChange={(event) => setDiscoveryMessage(event.target.value)}
-                  placeholder={latestAssistantQuestion ?? 'Add more context to this idea.'}
-                  rows={3}
-                  className="w-full resize-none rounded-[24px] border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                      event.preventDefault()
-                      handleDiscoverySubmit(event as unknown as React.FormEvent<HTMLFormElement>)
-                    }
-                  }}
-                />
-              </label>
+                <div className="min-w-0 flex-1">
+                  <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Reply in thread</div>
+                  <textarea
+                    id="idea-thread-reply"
+                    value={discoveryMessage}
+                    onChange={handleComposerChange}
+                    onFocus={() => setIsComposerExpanded((current) => current || discoveryMessage.length > 0)}
+                    onBlur={() => setIsComposerExpanded(discoveryMessage.trim().length > 72 || discoveryMessage.includes('\n'))}
+                    placeholder={latestAssistantQuestion ?? 'Add more context to this idea.'}
+                    rows={isComposerExpanded ? 3 : 1}
+                    className="max-h-32 min-h-11 w-full resize-none border-0 bg-transparent px-3 py-2 text-[var(--ink-strong)] outline-none transition placeholder:text-[var(--ink-faint)]"
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                        event.preventDefault()
+                        handleDiscoverySubmit(event as unknown as React.FormEvent<HTMLFormElement>)
+                      }
+                    }}
+                  />
+                </div>
 
-              {discoveryError ? (
-                <p className="m-0 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">
-                  {discoveryError}
-                </p>
-              ) : null}
-
-              {!discoveryError && discoveryNotice ? (
-                <p className="m-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--ink-soft)]">
-                  {discoveryNotice}
-                </p>
-              ) : null}
-
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="m-0 text-sm leading-6 text-[var(--ink-soft)]">Voice is preferred. Use `Cmd/Ctrl+Enter` to send typed replies.</p>
                 <button
                   type="submit"
                   disabled={submitTurnMutation.isPending || discoveryMessage.trim().length === 0}
-                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] px-4 py-3 font-semibold text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+                  aria-label={composerButtonLabel}
+                  className="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--brand)] text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   <SendHorizonal size={16} />
-                  {submitTurnMutation.isPending ? 'Sending...' : isThreadBusy ? 'Queue reply' : 'Send reply'}
                 </button>
               </div>
-            </form>
-          </div>
 
-          <aside className="hidden space-y-4 lg:block">
-            {detailPanels}
-          </aside>
-        </section>
+              {shouldShowComposerMeta ? (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    {discoveryError ? (
+                      <p className="m-0 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">
+                        {discoveryError}
+                      </p>
+                    ) : !discoveryError && discoveryNotice ? (
+                      <p className="m-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+                        {discoveryNotice}
+                      </p>
+                    ) : (
+                      <p className="m-0 px-1 text-sm leading-6 text-[var(--ink-soft)]">{composerStatusText}</p>
+                    )}
+                  </div>
+                  <p className="m-0 px-1 text-xs leading-5 text-[var(--ink-faint)]">Voice is preferred. Use `Cmd/Ctrl+Enter` to send.</p>
+                </div>
+              ) : null}
+            </form>
+          </section>
+        ) : activePageTab === 'context' ? contextSurface : activePageTab === 'review' ? reviewSurface : sourceSurface}
       </div>
     </main>
   )

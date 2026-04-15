@@ -6,9 +6,11 @@ import { signOutSession } from '../server/auth'
 export default function AuthControls({
   state,
   label,
+  compact = false,
 }: {
   state: 'authenticated' | 'needs_login'
   label?: string | null
+  compact?: boolean
 }) {
   const navigate = useNavigate()
   const router = useRouter()
@@ -35,10 +37,14 @@ export default function AuthControls({
     return (
       <Link
         to="/login"
-        className="inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)] no-underline transition hover:text-[var(--brand)]"
+        className={compact
+          ? 'inline-flex size-10 items-center justify-center rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] text-[var(--ink-strong)] no-underline transition hover:text-[var(--brand)]'
+          : 'inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)] no-underline transition hover:text-[var(--brand)]'}
+        aria-label="Log in"
+        title="Log in"
       >
         <UserRound size={14} />
-        Log in
+        {compact ? null : 'Log in'}
       </Link>
     )
   }
@@ -46,14 +52,19 @@ export default function AuthControls({
   const resolvedLabel = label ?? 'Signed in'
 
   return (
-    <div className="inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)]">
+    <div
+      className={compact
+        ? 'inline-flex h-10 items-center gap-1 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-2 text-xs font-semibold text-[var(--ink-strong)]'
+        : 'inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)]'}
+      title={resolvedLabel}
+    >
       <UserRound size={14} className="text-[var(--brand)]" />
-      <span className="max-w-32 truncate sm:max-w-44">{resolvedLabel}</span>
+      <span className={compact ? 'hidden sm:inline max-w-32 truncate' : 'max-w-32 truncate sm:max-w-44'}>{resolvedLabel}</span>
       <button
         type="button"
         onClick={() => signOutMutation.mutate()}
         disabled={signOutMutation.isPending}
-        className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[var(--ink-soft)] transition hover:text-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-60"
+        className={`inline-flex items-center gap-1 rounded-full text-[var(--ink-soft)] transition hover:text-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-60 ${compact ? 'size-7 justify-center px-0 py-0' : 'px-1.5 py-0.5'}`}
         aria-label="Sign out"
         title="Sign out"
       >
