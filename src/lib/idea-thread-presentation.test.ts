@@ -86,7 +86,7 @@ describe('idea thread presentation', () => {
 
   it('returns distinct event labels and treatments for each visible event family', () => {
     expect(getThreadEventPresentation('user_turn_added')).toMatchObject({
-      label: 'You added context',
+      label: 'Your reply',
       iconClassName: 'text-sky-500',
     })
     expect(getThreadEventPresentation('assistant_synthesis')).toMatchObject({

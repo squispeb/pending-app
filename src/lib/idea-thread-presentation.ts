@@ -21,7 +21,7 @@ export function formatThreadEventLabel(type: ThreadEventType) {
     case 'thread_created':
       return 'Thread created'
     case 'user_turn_added':
-      return 'You added context'
+      return 'Your reply'
     case 'assistant_question':
       return 'Assistant asked'
     case 'assistant_synthesis':

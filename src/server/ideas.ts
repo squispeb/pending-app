@@ -349,17 +349,21 @@ export const requestIdeaStructuredAction = createServerFn({ method: 'POST' })
 
     const currentThread = await assistantThreadService.getIdeaThread(data.id)
 
-    if (!canUseIdeaRefinementActions(currentThread.stage)) {
-      throw new Error('Restructure and breakdown actions are only available for developed ideas.')
-    }
-
     if (data.kind === 'restructure') {
+      if (currentThread.stage === 'discovery') {
+        throw new Error('Restructure is only available once the idea reaches framing.')
+      }
+
       return assistantThreadService.requestIdeaThreadRestructure(data.id, {
         currentSnapshotVersion: latestSnapshot.version,
         currentTitle: latestSnapshot.title,
         currentBody: latestSnapshot.body,
         currentSummary: latestSnapshot.threadSummary,
       })
+    }
+
+    if (!canUseIdeaRefinementActions(currentThread.stage)) {
+      throw new Error('Next-step breakdown is only available for developed ideas.')
     }
 
     return assistantThreadService.requestIdeaThreadBreakdown(data.id, {

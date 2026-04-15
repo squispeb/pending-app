@@ -97,7 +97,7 @@ describe('IdeaThreadHistory', () => {
     )
 
     expect(markup).toContain('Thread created')
-    expect(markup).toContain('You added context')
+    expect(markup).toContain('Your reply')
     expect(markup).toContain('This could help new users understand the setup flow faster.')
     expect(markup).toContain('Assistant asked')
     expect(markup).toContain('Assistant synthesis')
