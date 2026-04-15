@@ -122,7 +122,7 @@ describe('IdeaThreadHistory', () => {
       />,
     )
 
-    expect(markup).toContain('Thread history')
+    expect(markup).toContain('Thread')
     expect(markup).toContain('Assistant replying')
     expect(markup).toContain('I am outlining the fastest thread-first layout now.')
     expect(markup).toContain('min-h-full')

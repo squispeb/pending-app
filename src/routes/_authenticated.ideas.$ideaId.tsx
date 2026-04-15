@@ -71,6 +71,7 @@ function IdeaDetailPage() {
   const [activePageTab, setActivePageTab] = useState<IdeaPageTab>('thread')
   const [isThreadAtBottom, setIsThreadAtBottom] = useState(true)
   const threadViewportRef = useRef<HTMLDivElement | null>(null)
+  const composerRef = useRef<HTMLFormElement | null>(null)
   const lastStreamEventIdRef = useRef<string | null>(null)
   const streamedEventIdsRef = useRef(new Set<string>())
   const activeStreamingTurnIdRef = useRef<string | null>(null)
@@ -334,8 +335,9 @@ function IdeaDetailPage() {
       return
     }
 
+    const composerHeight = composerRef.current?.offsetHeight ?? 96
     const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
-    setIsThreadAtBottom(distanceFromBottom < 96)
+    setIsThreadAtBottom(distanceFromBottom < composerHeight + 24)
   }
 
   function scrollThreadToBottom(behavior: ScrollBehavior = 'smooth') {
@@ -797,12 +799,13 @@ function IdeaDetailPage() {
             </div>
           </div>
 
-          <div className="space-y-3 pb-36 lg:pb-40">
+          {/* Chat unit: scroll area + composer together, no overlay */}
+          <div className="flex flex-col gap-0 overflow-hidden rounded-[28px]">
             <div className="relative">
               <div
                 ref={threadViewportRef}
                 onScroll={handleThreadViewportScroll}
-                className="max-h-[62vh] min-h-[44vh] overflow-y-auto overscroll-contain rounded-[28px] lg:max-h-[calc(100vh-22rem)] lg:min-h-[32rem]"
+                className="max-h-[56vh] min-h-[36vh] overflow-y-auto overscroll-contain lg:max-h-[calc(100vh-26rem)] lg:min-h-[28rem]"
               >
                 <IdeaThreadHistory
                   visibleEvents={thread.visibleEvents}
@@ -819,79 +822,80 @@ function IdeaDetailPage() {
                 <button
                   type="button"
                   onClick={() => scrollThreadToBottom()}
-                  className="absolute bottom-4 right-4 inline-flex items-center justify-center rounded-full border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_88%,white_12%)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)] shadow-[0_16px_34px_rgba(15,23,42,0.16)] backdrop-blur hover:border-[var(--brand)] hover:text-[var(--brand)]"
+                  className="absolute bottom-3 right-4 inline-flex items-center justify-center rounded-full border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_88%,white_12%)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)] shadow-[0_16px_34px_rgba(15,23,42,0.16)] backdrop-blur hover:border-[var(--brand)] hover:text-[var(--brand)]"
                 >
                   Jump to latest
                 </button>
               ) : null}
             </div>
-          </div>
 
-          <form
-            className="panel sticky bottom-20 z-10 space-y-4 rounded-[28px] border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_84%,white_16%)] p-4 shadow-[0_22px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl lg:bottom-6"
-            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
-            onSubmit={handleDiscoverySubmit}
-          >
-            <label className="sr-only" htmlFor="idea-thread-reply">Reply in thread</label>
-            <div className="flex items-end gap-2 rounded-[26px] border border-[var(--line)] bg-[var(--surface)] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]">
-              <button
-                type="button"
-                onClick={openCapture}
-                aria-label="Reply with voice"
-                className="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface-strong)] text-[var(--ink-strong)] transition hover:border-[var(--brand)] hover:text-[var(--brand)]"
-              >
-                <Mic size={16} />
-              </button>
+            <form
+              ref={composerRef}
+              className="panel z-10 space-y-4 rounded-b-[28px] border border-t-0 border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_84%,white_16%)] p-4 shadow-[0_22px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl"
+              style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+              onSubmit={handleDiscoverySubmit}
+            >
+              <label className="sr-only" htmlFor="idea-thread-reply">Reply in thread</label>
+              <div className="flex items-end gap-2 rounded-[26px] border border-[var(--line)] bg-[var(--surface)] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]">
+                <button
+                  type="button"
+                  onClick={openCapture}
+                  aria-label="Reply with voice"
+                  className="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface-strong)] text-[var(--ink-strong)] transition hover:border-[var(--brand)] hover:text-[var(--brand)]"
+                >
+                  <Mic size={16} />
+                </button>
 
-              <div className="min-w-0 flex-1">
-                <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Reply in thread</div>
-                <textarea
-                  id="idea-thread-reply"
-                  value={discoveryMessage}
-                  onChange={handleComposerChange}
-                  onFocus={() => setIsComposerExpanded((current) => current || discoveryMessage.length > 0)}
-                  onBlur={() => setIsComposerExpanded(discoveryMessage.trim().length > 72 || discoveryMessage.includes('\n'))}
-                  placeholder={latestAssistantQuestion ?? 'Add more context to this idea.'}
-                  rows={isComposerExpanded ? 3 : 1}
-                  className="max-h-32 min-h-11 w-full resize-none border-0 bg-transparent px-3 py-2 text-[var(--ink-strong)] outline-none transition placeholder:text-[var(--ink-faint)]"
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                      event.preventDefault()
-                      handleDiscoverySubmit(event as unknown as React.FormEvent<HTMLFormElement>)
-                    }
-                  }}
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={submitTurnMutation.isPending || discoveryMessage.trim().length === 0}
-                aria-label={composerButtonLabel}
-                className="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--brand)] text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                <SendHorizonal size={16} />
-              </button>
-            </div>
-
-            {shouldShowComposerMeta ? (
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 flex-1">
-                  {discoveryError ? (
-                    <p className="m-0 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">
-                      {discoveryError}
-                    </p>
-                  ) : !discoveryError && discoveryNotice ? (
-                    <p className="m-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--ink-soft)]">
-                      {discoveryNotice}
-                    </p>
-                  ) : (
-                    <p className="m-0 px-1 text-sm leading-6 text-[var(--ink-soft)]">{composerStatusText}</p>
-                  )}
+                  <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Reply in thread</div>
+                  <textarea
+                    id="idea-thread-reply"
+                    value={discoveryMessage}
+                    onChange={handleComposerChange}
+                    onFocus={() => setIsComposerExpanded((current) => current || discoveryMessage.length > 0)}
+                    onBlur={() => setIsComposerExpanded(discoveryMessage.trim().length > 72 || discoveryMessage.includes('\n'))}
+                    placeholder={latestAssistantQuestion ?? 'Add more context to this idea.'}
+                    rows={isComposerExpanded ? 3 : 1}
+                    className="max-h-32 min-h-11 w-full resize-none border-0 bg-transparent px-3 py-2 text-[var(--ink-strong)] outline-none transition placeholder:text-[var(--ink-faint)]"
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                        event.preventDefault()
+                        handleDiscoverySubmit(event as unknown as React.FormEvent<HTMLFormElement>)
+                      }
+                    }}
+                  />
                 </div>
-                <p className="m-0 px-1 text-xs leading-5 text-[var(--ink-faint)]">Voice is preferred. Use `Cmd/Ctrl+Enter` to send.</p>
+
+                <button
+                  type="submit"
+                  disabled={submitTurnMutation.isPending || discoveryMessage.trim().length === 0}
+                  aria-label={composerButtonLabel}
+                  className="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--brand)] text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  <SendHorizonal size={16} />
+                </button>
               </div>
-            ) : null}
-          </form>
+
+              {shouldShowComposerMeta ? (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    {discoveryError ? (
+                      <p className="m-0 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">
+                        {discoveryError}
+                      </p>
+                    ) : !discoveryError && discoveryNotice ? (
+                      <p className="m-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+                        {discoveryNotice}
+                      </p>
+                    ) : (
+                      <p className="m-0 px-1 text-sm leading-6 text-[var(--ink-soft)]">{composerStatusText}</p>
+                    )}
+                  </div>
+                  <p className="m-0 px-1 text-xs leading-5 text-[var(--ink-faint)]">Voice is preferred. Use `Cmd/Ctrl+Enter` to send.</p>
+                </div>
+              ) : null}
+            </form>
+          </div>
         </section>
       )
     : activePageTab === 'context'

@@ -39,27 +39,27 @@ export function IdeaThreadHistory({
   const showQueuePanel = threadStatus === 'queued' || threadStatus === 'processing' || threadStatus === 'streaming' || threadStatus === 'failed'
 
   return (
-    <section className={`panel rounded-[28px] p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] sm:p-5 ${className}`.trim()}>
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Thread history</div>
-        <div className={`rounded-full border px-3 py-1 text-xs font-medium ${threadState.badgeClassName}`}>{threadState.label}</div>
+    <section className={`panel rounded-t-[28px] rounded-b-none p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] sm:p-5 ${className}`.trim()}>
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Thread</div>
+        <div className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${threadState.badgeClassName}`}>{threadState.label}</div>
       </div>
 
       {showQueuePanel ? (
-        <div className="mb-3 rounded-[22px] border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5">
-          <p className="m-0 text-sm font-medium text-[var(--ink-strong)]">{threadState.helperText}</p>
+        <div className="mb-2.5 rounded-[20px] border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
+          <p className="m-0 text-xs font-medium text-[var(--ink-strong)]">{threadState.helperText}</p>
           {activeTurn ? (
-            <p className="m-0 mt-1.5 text-xs leading-5 text-[var(--ink-soft)] sm:text-sm">
+            <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
               Active turn: {activeTurn.userMessage}
             </p>
           ) : null}
           {queuedTurns.length > 0 ? (
-            <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)] sm:text-sm">
+            <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
               {queuedTurns.length === 1 ? '1 later reply is queued.' : `${queuedTurns.length} later replies are queued.`}
             </p>
           ) : null}
           {threadStatus === 'failed' && lastTurn ? (
-            <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)] sm:text-sm">
+            <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
               Last failed turn: {lastTurn.userMessage}
             </p>
           ) : null}
