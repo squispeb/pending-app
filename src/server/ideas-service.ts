@@ -1,6 +1,6 @@
 import { and, desc, eq, isNotNull, isNull, like, or } from 'drizzle-orm'
 import type { Database } from '../db/client'
-import { ideaSnapshots, ideaThreadRefs, ideas } from '../db/schema'
+import { ideaExecutionLinks, ideaSnapshots, ideaThreadRefs, ideas } from '../db/schema'
 import {
   ideaCreateSchema,
   ideaStageSchema,
@@ -115,6 +115,59 @@ export function createIdeasService(database: Database) {
 
       return database.query.ideaThreadRefs.findFirst({
         where: eq(ideaThreadRefs.ideaId, ideaId),
+      })
+    },
+    async createIdeaExecutionLink(
+      input: {
+        ideaId: string
+        targetType: 'task' | 'habit'
+        targetId: string
+        linkReason?: string | null
+      },
+      userId: string,
+    ) {
+      const idea = await database.query.ideas.findFirst({
+        where: and(eq(ideas.id, input.ideaId), eq(ideas.userId, userId), isNull(ideas.archivedAt)),
+      })
+
+      if (!idea) {
+        throw new Error('Idea not found')
+      }
+
+      const now = new Date()
+
+      await database.insert(ideaExecutionLinks).values({
+        id: crypto.randomUUID(),
+        ideaId: input.ideaId,
+        targetType: input.targetType,
+        targetId: input.targetId,
+        linkReason: input.linkReason ?? null,
+        createdAt: now,
+        updatedAt: now,
+      })
+
+      return { ok: true as const }
+    },
+    async listIdeaExecutionLinks(
+      input: {
+        ideaId: string
+        targetType?: 'task' | 'habit'
+      },
+      userId: string,
+    ) {
+      const idea = await database.query.ideas.findFirst({
+        where: and(eq(ideas.id, input.ideaId), eq(ideas.userId, userId), isNull(ideas.archivedAt)),
+      })
+
+      if (!idea) {
+        return []
+      }
+
+      return database.query.ideaExecutionLinks.findMany({
+        where: input.targetType
+          ? and(eq(ideaExecutionLinks.ideaId, input.ideaId), eq(ideaExecutionLinks.targetType, input.targetType))
+          : eq(ideaExecutionLinks.ideaId, input.ideaId),
+        orderBy: [desc(ideaExecutionLinks.createdAt)],
       })
     },
     async getLatestIdeaSnapshot(ideaId: string, userId: string) {

@@ -90,6 +90,24 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
     CREATE UNIQUE INDEX idea_thread_ref_thread_unique
       ON idea_thread_refs (thread_id);
   `)
+
+  await db.run(sql`
+    CREATE TABLE idea_execution_links (
+      id text PRIMARY KEY NOT NULL,
+      idea_id text NOT NULL,
+      target_type text NOT NULL,
+      target_id text NOT NULL,
+      link_reason text,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
+    CREATE UNIQUE INDEX idea_execution_link_unique
+      ON idea_execution_links (idea_id, target_type, target_id);
+  `)
 }
 
 describe('ideas service', () => {
@@ -376,6 +394,121 @@ describe('ideas service', () => {
     )
 
     await expect(service.getIdeaThreadRef(created.id, secondaryUserId)).resolves.toBeUndefined()
+  })
+
+  it('creates and lists idea execution links for the owning user', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Execution bridge idea',
+      body: 'Turn this into planner work.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    await service.createIdeaExecutionLink(
+      {
+        ideaId: created.id,
+        targetType: 'task',
+        targetId: 'task-123',
+        linkReason: 'Accepted task conversion from developed idea.',
+      },
+      primaryUserId,
+    )
+
+    const links = await service.listIdeaExecutionLinks({ ideaId: created.id }, primaryUserId)
+
+    expect(links).toHaveLength(1)
+    expect(links[0]).toMatchObject({
+      ideaId: created.id,
+      targetType: 'task',
+      targetId: 'task-123',
+      linkReason: 'Accepted task conversion from developed idea.',
+    })
+  })
+
+  it('filters execution links by target type', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Multi-target idea',
+      body: 'Could turn into different execution items.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    await service.createIdeaExecutionLink(
+      {
+        ideaId: created.id,
+        targetType: 'task',
+        targetId: 'task-123',
+      },
+      primaryUserId,
+    )
+
+    await service.createIdeaExecutionLink(
+      {
+        ideaId: created.id,
+        targetType: 'habit',
+        targetId: 'habit-456',
+      },
+      primaryUserId,
+    )
+
+    const taskLinks = await service.listIdeaExecutionLinks({ ideaId: created.id, targetType: 'task' }, primaryUserId)
+
+    expect(taskLinks).toHaveLength(1)
+    expect(taskLinks[0]).toMatchObject({
+      targetType: 'task',
+      targetId: 'task-123',
+    })
+  })
+
+  it('scopes execution links to the owning user', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Private execution bridge',
+      body: 'Only the owner should link this.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    await expect(
+      service.createIdeaExecutionLink(
+        {
+          ideaId: created.id,
+          targetType: 'task',
+          targetId: 'task-123',
+        },
+        secondaryUserId,
+      ),
+    ).rejects.toThrow('Idea not found')
+
+    await expect(service.listIdeaExecutionLinks({ ideaId: created.id }, secondaryUserId)).resolves.toEqual([])
+  })
+
+  it('rejects duplicate execution links for the same idea target', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Duplicate guard idea',
+      body: 'Should not create the same link twice.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    await service.createIdeaExecutionLink(
+      {
+        ideaId: created.id,
+        targetType: 'task',
+        targetId: 'task-123',
+      },
+      primaryUserId,
+    )
+
+    await expect(
+      service.createIdeaExecutionLink(
+        {
+          ideaId: created.id,
+          targetType: 'task',
+          targetId: 'task-123',
+        },
+        primaryUserId,
+      ),
+    ).rejects.toThrow()
   })
 
   it('applies an approved proposal as the next accepted canonical snapshot', async () => {

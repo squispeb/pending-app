@@ -134,6 +134,32 @@ export const ideaThreadRefs = sqliteTable(
   }),
 )
 
+export const ideaExecutionLinks = sqliteTable(
+  'idea_execution_links',
+  {
+    id: text('id').primaryKey(),
+    ideaId: text('idea_id')
+      .notNull()
+      .references(() => ideas.id, { onDelete: 'cascade' }),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    linkReason: text('link_reason'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    ideaTargetUniqueIdx: uniqueIndex('idea_execution_link_unique').on(
+      table.ideaId,
+      table.targetType,
+      table.targetId,
+    ),
+  }),
+)
+
 export const habitCompletions = sqliteTable(
   'habit_completions',
   {
@@ -313,6 +339,7 @@ export type Habit = typeof habits.$inferSelect
 export type Idea = typeof ideas.$inferSelect
 export type IdeaSnapshot = typeof ideaSnapshots.$inferSelect
 export type IdeaThreadRef = typeof ideaThreadRefs.$inferSelect
+export type IdeaExecutionLink = typeof ideaExecutionLinks.$inferSelect
 export type HabitCompletion = typeof habitCompletions.$inferSelect
 export type GoogleAccount = typeof googleAccounts.$inferSelect
 export type CalendarConnection = typeof calendarConnections.$inferSelect
