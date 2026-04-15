@@ -165,6 +165,12 @@ function IdeaDetailPage() {
           : 'Thread ready'
   const reviewItemCount = Number(Boolean(suggestedTitle)) + Number(Boolean(suggestedSummary)) + Number(Boolean(pendingStructuredAction))
   const shouldShowComposerMeta = Boolean(discoveryError || discoveryNotice || isThreadBusy)
+  const pageTabs = [
+    { id: 'thread', label: 'Thread' },
+    { id: 'context', label: 'Context' },
+    { id: 'review', label: `Review${reviewItemCount > 0 ? ` (${reviewItemCount})` : ''}` },
+    { id: 'source', label: 'Source' },
+  ] as const satisfies ReadonlyArray<{ id: IdeaPageTab; label: string }>
 
   const toggleStarMutation = useMutation({
     mutationFn: async () => toggleIdeaStar({ data: { id: idea.id } }),
@@ -468,19 +474,19 @@ function IdeaDetailPage() {
 
   const contextSurface = (
     <section className="panel rounded-[28px] p-4 sm:p-5">
-      <div className="flex items-start justify-between gap-3">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Context</div>
-          <p className="m-0 mt-1 text-sm leading-6 text-[var(--ink-soft)]">
-            Compact supporting context for the current thread without pulling focus away from the conversation.
+          <p className="m-0 mt-0.5 text-sm leading-6 text-[var(--ink-soft)]">
+            Supporting context captured alongside this thread.
           </p>
         </div>
         <div className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-semibold text-[var(--ink-soft)]">
-          {populatedWorkingIdeaEntries.length}/7 captured
+          {populatedWorkingIdeaEntries.length}/7
         </div>
       </div>
 
-      <div className="mt-4 space-y-4 text-sm text-[var(--ink-soft)]">
+      <div className="space-y-4 text-sm text-[var(--ink-soft)]">
         <div className="grid gap-3 xl:grid-cols-2">
           <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-faint)]">Saved framing</div>
@@ -556,17 +562,17 @@ function IdeaDetailPage() {
 
   const reviewSurface = (
     <section className="panel rounded-[28px] p-4 sm:p-5">
-      <div className="flex items-start justify-between gap-3">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Review</div>
-          <p className="m-0 mt-1 text-sm leading-6 text-[var(--ink-soft)]">Refinement suggestions and structured review actions live here instead of crowding the main thread.</p>
+          <p className="m-0 mt-0.5 text-sm leading-6 text-[var(--ink-soft)]">Refinement suggestions and structured actions.</p>
         </div>
         <div className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200">
           {reviewItemCount} item{reviewItemCount === 1 ? '' : 's'}
         </div>
       </div>
 
-      <div className="mt-4 space-y-4 text-sm text-[var(--ink-soft)]">
+      <div className="space-y-4 text-sm text-[var(--ink-soft)]">
         {canUseRefinementActions ? (
           <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4 dark:border-sky-500/30 dark:bg-sky-500/10">
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700 dark:text-sky-300">Refine and structure</div>
@@ -764,9 +770,11 @@ function IdeaDetailPage() {
 
   const sourceSurface = (
     <section className="panel rounded-[28px] p-4 sm:p-5">
-      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Source</div>
-      <p className="m-0 mt-2 text-sm leading-6 text-[var(--ink-soft)]">Original captured input for this idea, separated from the chat so it stays available without crowding the main workspace.</p>
-      <div className="mt-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+      <div className="mb-4">
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Source</div>
+        <p className="m-0 mt-0.5 text-sm leading-6 text-[var(--ink-soft)]">Original captured input, separated from the chat so it stays available without crowding the workspace.</p>
+      </div>
+      <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
         <div className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-[var(--ink-strong)]">
           <Quote size={15} className="text-[var(--brand)]" />
           Source input
@@ -776,212 +784,196 @@ function IdeaDetailPage() {
     </section>
   )
 
-  return (
-    <main className="page-wrap px-4 pb-28 pt-5 sm:pt-7 lg:pb-16">
-      <div className="space-y-4">
-        <section className={`panel overflow-hidden rounded-[32px] ${isThreadTabActive ? 'p-3.5 sm:p-4' : 'p-4 sm:p-5'}`}>
-          <div className={`flex flex-col ${isThreadTabActive ? 'gap-3' : 'gap-4 sm:flex-row sm:items-start sm:justify-between'}`}>
-            <div className="min-w-0 flex-1">
-              <Link to="/ideas" className={`font-medium text-[var(--brand)] no-underline hover:underline ${isThreadTabActive ? 'text-xs uppercase tracking-[0.14em]' : 'text-sm'}`}>
-                Back to ideas
-              </Link>
-              <div className={`flex flex-wrap items-center gap-2 ${isThreadTabActive ? 'mt-2' : 'mt-3'}`}>
-                <div className="inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
-                  <Lightbulb size={14} />
-                  Discovery thread
-                </div>
-                <div className={`rounded-full border px-3 py-1 text-xs font-semibold ${stageBadgeClassName}`}>
-                  {stageLabel}
-                </div>
-                <div className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-medium text-[var(--ink-soft)]">
-                  {threadStatusChipLabel}
-                </div>
+  const activeTabSurface = activePageTab === 'thread'
+    ? (
+        <section className="space-y-3">
+          {/* Thread-tab context bar — status/subtitle lives here, not in the page header */}
+          <div className="flex items-start justify-between gap-3 px-0.5">
+            <p className="m-0 min-w-0 flex-1 text-sm leading-6 text-[var(--ink-soft)]">
+              {currentThreadSubtitle}
+            </p>
+            <div className="inline-flex shrink-0 rounded-full border border-[var(--line)] bg-[var(--surface)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--ink-soft)] sm:hidden">
+              {threadStatusChipLabel}
+            </div>
+          </div>
+
+          <div className="space-y-3 pb-36 lg:pb-40">
+            <div className="relative">
+              <div
+                ref={threadViewportRef}
+                onScroll={handleThreadViewportScroll}
+                className="max-h-[62vh] min-h-[44vh] overflow-y-auto overscroll-contain rounded-[28px] lg:max-h-[calc(100vh-22rem)] lg:min-h-[32rem]"
+              >
+                <IdeaThreadHistory
+                  visibleEvents={thread.visibleEvents}
+                  threadStatus={thread.status}
+                  activeTurn={thread.activeTurn}
+                  queuedTurns={thread.queuedTurns}
+                  lastTurn={thread.lastTurn}
+                  streamingAssistantText={streamingAssistantText}
+                  className="min-h-full"
+                />
               </div>
-              <h1 className={`font-semibold tracking-tight text-[var(--ink-strong)] ${isThreadTabActive ? 'mt-2 text-xl leading-tight sm:text-2xl' : 'mt-3 text-2xl sm:text-3xl'}`}>
-                {currentThreadTitle}
-              </h1>
-              {isThreadTabActive ? (
-                <p className="m-0 mt-1 text-sm leading-6 text-[var(--ink-soft)]">
-                  {currentThreadSubtitle}
-                </p>
-              ) : (
-                <p className="m-0 mt-2 max-w-3xl text-sm leading-6 text-[var(--ink-soft)]">
-                  {thread.workingIdea.currentSummary ?? 'This idea is still in discovery.'}
-                </p>
-              )}
+
+              {!isThreadAtBottom ? (
+                <button
+                  type="button"
+                  onClick={() => scrollThreadToBottom()}
+                  className="absolute bottom-4 right-4 inline-flex items-center justify-center rounded-full border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_88%,white_12%)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)] shadow-[0_16px_34px_rgba(15,23,42,0.16)] backdrop-blur hover:border-[var(--brand)] hover:text-[var(--brand)]"
+                >
+                  Jump to latest
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          <form
+            className="panel sticky bottom-20 z-10 space-y-4 rounded-[28px] border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_84%,white_16%)] p-4 shadow-[0_22px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl lg:bottom-6"
+            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+            onSubmit={handleDiscoverySubmit}
+          >
+            <label className="sr-only" htmlFor="idea-thread-reply">Reply in thread</label>
+            <div className="flex items-end gap-2 rounded-[26px] border border-[var(--line)] bg-[var(--surface)] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]">
+              <button
+                type="button"
+                onClick={openCapture}
+                aria-label="Reply with voice"
+                className="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface-strong)] text-[var(--ink-strong)] transition hover:border-[var(--brand)] hover:text-[var(--brand)]"
+              >
+                <Mic size={16} />
+              </button>
+
+              <div className="min-w-0 flex-1">
+                <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Reply in thread</div>
+                <textarea
+                  id="idea-thread-reply"
+                  value={discoveryMessage}
+                  onChange={handleComposerChange}
+                  onFocus={() => setIsComposerExpanded((current) => current || discoveryMessage.length > 0)}
+                  onBlur={() => setIsComposerExpanded(discoveryMessage.trim().length > 72 || discoveryMessage.includes('\n'))}
+                  placeholder={latestAssistantQuestion ?? 'Add more context to this idea.'}
+                  rows={isComposerExpanded ? 3 : 1}
+                  className="max-h-32 min-h-11 w-full resize-none border-0 bg-transparent px-3 py-2 text-[var(--ink-strong)] outline-none transition placeholder:text-[var(--ink-faint)]"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                      event.preventDefault()
+                      handleDiscoverySubmit(event as unknown as React.FormEvent<HTMLFormElement>)
+                    }
+                  }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={submitTurnMutation.isPending || discoveryMessage.trim().length === 0}
+                aria-label={composerButtonLabel}
+                className="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--brand)] text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <SendHorizonal size={16} />
+              </button>
             </div>
 
-            <div className={`flex items-center gap-2 ${isThreadTabActive ? 'self-start' : ''}`}>
-              {isThreadTabActive ? (
-                <div className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-medium text-[var(--ink-soft)]">
-                  {threadStatusChipLabel}
+            {shouldShowComposerMeta ? (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
+                  {discoveryError ? (
+                    <p className="m-0 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">
+                      {discoveryError}
+                    </p>
+                  ) : !discoveryError && discoveryNotice ? (
+                    <p className="m-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+                      {discoveryNotice}
+                    </p>
+                  ) : (
+                    <p className="m-0 px-1 text-sm leading-6 text-[var(--ink-soft)]">{composerStatusText}</p>
+                  )}
                 </div>
-              ) : null}
+                <p className="m-0 px-1 text-xs leading-5 text-[var(--ink-faint)]">Voice is preferred. Use `Cmd/Ctrl+Enter` to send.</p>
+              </div>
+            ) : null}
+          </form>
+        </section>
+      )
+    : activePageTab === 'context'
+      ? contextSurface
+      : activePageTab === 'review'
+        ? reviewSurface
+        : sourceSurface
+
+  return (
+    <main className="page-wrap px-4 pb-28 pt-5 sm:pt-7 lg:pb-16">
+      <div className="space-y-3">
+        {/* Page header — core identity only: back, title, stage, star */}
+        <section className="panel overflow-hidden rounded-[28px] px-3.5 py-3 sm:px-4 sm:py-3.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <Link to="/ideas" className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--brand)] no-underline hover:underline">
+                ← Ideas
+              </Link>
+              <h1 className="mt-1.5 text-lg font-semibold leading-tight tracking-tight text-[var(--ink-strong)] sm:text-xl">
+                {currentThreadTitle}
+              </h1>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <div className="inline-flex items-center gap-1.5 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--brand)]">
+                  <Lightbulb size={12} />
+                  Discovery
+                </div>
+                <div className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${stageBadgeClassName}`}>
+                  {stageLabel}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              <div className="hidden rounded-full border border-[var(--line)] bg-[var(--surface)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--ink-soft)] sm:inline-flex">
+                {threadStatusChipLabel}
+              </div>
               <button
                 type="button"
                 onClick={() => toggleStarMutation.mutate()}
                 aria-label={isIdeaStarred(idea) ? 'Remove star from idea' : 'Star idea'}
-                className={`inline-flex items-center justify-center gap-2 rounded-full border text-sm font-semibold transition ${isThreadTabActive ? 'size-11 self-start px-0' : 'w-full px-4 py-3 sm:w-auto'} ${
+                className={`inline-flex size-9 items-center justify-center rounded-full border text-sm font-semibold transition ${
                   isIdeaStarred(idea)
                     ? 'border-amber-300 bg-amber-100/70 text-amber-700 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-300'
                     : 'border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)] hover:text-[var(--ink-strong)]'
                 }`}
               >
-                <Star size={16} className={isIdeaStarred(idea) ? 'fill-current' : ''} />
-                {isThreadTabActive ? <span className="sr-only">{isIdeaStarred(idea) ? 'Starred' : 'Star idea'}</span> : (isIdeaStarred(idea) ? 'Starred' : 'Star idea')}
+                <Star size={14} className={isIdeaStarred(idea) ? 'fill-current' : ''} />
+                <span className="sr-only">{isIdeaStarred(idea) ? 'Starred' : 'Star idea'}</span>
               </button>
             </div>
-          </div>
-
-          {!isThreadTabActive ? (
-            <>
-              <div className="mt-4 flex flex-wrap gap-2 text-xs font-medium text-[var(--ink-soft)]">
-                <div className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1">
-                  {populatedWorkingIdeaEntries.length}/7 discovery areas captured
-                </div>
-                <div className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1">
-                  {missingDiscoveryAreas.length === 0 ? 'No major discovery gaps' : `${missingDiscoveryAreas.length} gaps left to cover`}
-                </div>
-                {pendingStructuredAction ? (
-                  <div className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200">
-                    Structured review ready
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--surface)] px-4 py-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Thread guidance</div>
-                <p className="m-0 mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">{latestAssistantEvent?.summary ?? threadRailMessage}</p>
-                {!streamingAssistantText ? (
-                  <p className="m-0 mt-2 text-sm leading-6 text-[var(--ink-soft)]">{threadRailMessage}</p>
-                ) : null}
-              </div>
-            </>
-          ) : null}
-
-          <div className={`flex flex-wrap gap-2 ${isThreadTabActive ? 'mt-3' : 'mt-4'}`}>
-            {([
-              { id: 'thread', label: 'Thread' },
-              { id: 'context', label: 'Context' },
-              { id: 'review', label: `Review${reviewItemCount > 0 ? ` (${reviewItemCount})` : ''}` },
-              { id: 'source', label: 'Source' },
-            ] as const).map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                aria-pressed={activePageTab === tab.id}
-                onClick={() => setActivePageTab(tab.id)}
-                className={`inline-flex min-h-10 items-center justify-center rounded-full border px-4 py-2 text-sm font-semibold transition ${isThreadTabActive ? 'flex-1 sm:flex-none' : ''} ${
-                  activePageTab === tab.id
-                    ? 'border-[var(--brand)] bg-[var(--chip-bg)] text-[var(--brand)]'
-                    : 'border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)] hover:text-[var(--ink-strong)]'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
           </div>
         </section>
 
-        {activePageTab === 'thread' ? (
-          <section className="space-y-4">
-            <div className="space-y-3 pb-40 lg:pb-40">
-              <div className="relative">
-                <div
-                  ref={threadViewportRef}
-                  onScroll={handleThreadViewportScroll}
-                  className="max-h-[64vh] min-h-[52vh] overflow-y-auto overscroll-contain rounded-[28px] lg:max-h-[calc(100vh-20rem)] lg:min-h-[34rem]"
-                >
-                  <IdeaThreadHistory
-                    visibleEvents={thread.visibleEvents}
-                    threadStatus={thread.status}
-                    activeTurn={thread.activeTurn}
-                    queuedTurns={thread.queuedTurns}
-                    lastTurn={thread.lastTurn}
-                    streamingAssistantText={streamingAssistantText}
-                    className="min-h-full"
-                  />
-                </div>
-
-                {!isThreadAtBottom ? (
-                  <button
-                    type="button"
-                    onClick={() => scrollThreadToBottom()}
-                    className="absolute bottom-4 right-4 inline-flex items-center justify-center rounded-full border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_88%,white_12%)] px-3 py-2 text-xs font-semibold text-[var(--ink-strong)] shadow-[0_16px_34px_rgba(15,23,42,0.16)] backdrop-blur hover:border-[var(--brand)] hover:text-[var(--brand)]"
-                  >
-                    Jump to latest
-                  </button>
-                ) : null}
-              </div>
-            </div>
-
-            <form
-              className="panel sticky bottom-20 z-10 space-y-4 rounded-[28px] border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_84%,white_16%)] p-4 shadow-[0_22px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl lg:bottom-6"
-              style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
-              onSubmit={handleDiscoverySubmit}
+        {/* Tab strip — dedicated compact control, horizontally scrollable on mobile */}
+        <div
+          className="scrollbar-none -mx-4 flex items-stretch gap-0 overflow-x-auto px-4"
+          role="tablist"
+          aria-label="Idea sections"
+          style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}
+        >
+          {pageTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activePageTab === tab.id}
+              onClick={() => setActivePageTab(tab.id)}
+              className={`relative inline-flex shrink-0 items-center justify-center whitespace-nowrap px-4 py-2.5 text-sm font-semibold transition focus-visible:outline-none ${
+                activePageTab === tab.id
+                  ? 'text-[var(--brand)]'
+                  : 'text-[var(--ink-soft)] hover:text-[var(--ink-strong)]'
+              }`}
             >
-              <label className="sr-only" htmlFor="idea-thread-reply">Reply in thread</label>
-              <div className="flex items-end gap-2 rounded-[26px] border border-[var(--line)] bg-[var(--surface)] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]">
-                <button
-                  type="button"
-                  onClick={openCapture}
-                  aria-label="Reply with voice"
-                  className="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface-strong)] text-[var(--ink-strong)] transition hover:border-[var(--brand)] hover:text-[var(--brand)]"
-                >
-                  <Mic size={16} />
-                </button>
-
-                <div className="min-w-0 flex-1">
-                  <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Reply in thread</div>
-                  <textarea
-                    id="idea-thread-reply"
-                    value={discoveryMessage}
-                    onChange={handleComposerChange}
-                    onFocus={() => setIsComposerExpanded((current) => current || discoveryMessage.length > 0)}
-                    onBlur={() => setIsComposerExpanded(discoveryMessage.trim().length > 72 || discoveryMessage.includes('\n'))}
-                    placeholder={latestAssistantQuestion ?? 'Add more context to this idea.'}
-                    rows={isComposerExpanded ? 3 : 1}
-                    className="max-h-32 min-h-11 w-full resize-none border-0 bg-transparent px-3 py-2 text-[var(--ink-strong)] outline-none transition placeholder:text-[var(--ink-faint)]"
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                        event.preventDefault()
-                        handleDiscoverySubmit(event as unknown as React.FormEvent<HTMLFormElement>)
-                      }
-                    }}
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={submitTurnMutation.isPending || discoveryMessage.trim().length === 0}
-                  aria-label={composerButtonLabel}
-                  className="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--brand)] text-white shadow-[0_18px_50px_rgba(79,184,178,0.3)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  <SendHorizonal size={16} />
-                </button>
-              </div>
-
-              {shouldShowComposerMeta ? (
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0 flex-1">
-                    {discoveryError ? (
-                      <p className="m-0 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">
-                        {discoveryError}
-                      </p>
-                    ) : !discoveryError && discoveryNotice ? (
-                      <p className="m-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--ink-soft)]">
-                        {discoveryNotice}
-                      </p>
-                    ) : (
-                      <p className="m-0 px-1 text-sm leading-6 text-[var(--ink-soft)]">{composerStatusText}</p>
-                    )}
-                  </div>
-                  <p className="m-0 px-1 text-xs leading-5 text-[var(--ink-faint)]">Voice is preferred. Use `Cmd/Ctrl+Enter` to send.</p>
-                </div>
+              {tab.label}
+              {activePageTab === tab.id ? (
+                <span className="absolute inset-x-3 bottom-0 h-[2px] rounded-full bg-[var(--brand)]" />
               ) : null}
-            </form>
-          </section>
-        ) : activePageTab === 'context' ? contextSurface : activePageTab === 'review' ? reviewSurface : sourceSurface}
+            </button>
+          ))}
+        </div>
+
+        {activeTabSurface}
       </div>
     </main>
   )
