@@ -4,6 +4,7 @@ import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@ta
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
 import { IdeaThreadHistory } from '../components/idea-thread-history'
 import { useCaptureContext } from '../contexts/CaptureContext'
+import { formatDisplayDateTime } from '../lib/date-time'
 import {
   canUseIdeaRefinementActions,
   getIdeaStructuredActionLabel,
@@ -549,14 +550,14 @@ function IdeaDetailPage() {
             <dt className="font-medium text-[var(--ink-strong)]">Source type</dt>
             <dd className="mt-1">{idea.sourceType.replace('_', ' ')}</dd>
           </div>
-          <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
-            <dt className="font-medium text-[var(--ink-strong)]">Created</dt>
-            <dd className="mt-1">{idea.createdAt.toLocaleString()}</dd>
-          </div>
-          <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
-            <dt className="font-medium text-[var(--ink-strong)]">Updated</dt>
-            <dd className="mt-1">{idea.updatedAt.toLocaleString()}</dd>
-          </div>
+            <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+              <dt className="font-medium text-[var(--ink-strong)]">Created</dt>
+              <dd className="mt-1">{formatDisplayDateTime(idea.createdAt)}</dd>
+            </div>
+            <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+              <dt className="font-medium text-[var(--ink-strong)]">Updated</dt>
+              <dd className="mt-1">{formatDisplayDateTime(idea.updatedAt)}</dd>
+            </div>
         </dl>
       </div>
     </section>

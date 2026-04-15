@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-query'
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { z } from 'zod'
+import { formatDisplayDateTime } from '../lib/date-time'
 import {
   getIdeaExcerpt,
   getIdeaStageBadgeClassName,
@@ -268,10 +269,10 @@ function IdeasIndexPage() {
                           </button>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--ink-faint)]">
-                          {idea.threadSummary ? <span className="line-clamp-1">{idea.threadSummary}</span> : null}
-                          <span>Updated {idea.updatedAt.toLocaleString()}</span>
-                        </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--ink-faint)]">
+                            {idea.threadSummary ? <span className="line-clamp-1">{idea.threadSummary}</span> : null}
+                            <span>Updated {formatDisplayDateTime(idea.updatedAt)}</span>
+                          </div>
                       </div>
                     </div>
                   </article>

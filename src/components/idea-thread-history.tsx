@@ -5,6 +5,7 @@ import {
   type ThreadStatus,
   type ThreadTurnPresentation,
 } from '../lib/idea-thread-presentation'
+import { formatDisplayDateTime } from '../lib/date-time'
 
 type IdeaThreadVisibleEvent = {
   eventId: string
@@ -107,7 +108,7 @@ export function IdeaThreadHistory({
                       {event.summary}
                     </p>
                     <div className={`mt-1.5 text-[11px] ${isUserTurn ? 'text-white/70' : 'text-[var(--ink-faint)]'}`}>
-                      {new Date(event.createdAt).toLocaleString()}
+                      {formatDisplayDateTime(event.createdAt)}
                     </div>
                   </div>
                 )}
