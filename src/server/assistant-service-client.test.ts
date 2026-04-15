@@ -259,6 +259,41 @@ describe('assistant service client', () => {
     expect(init?.method).toBe('POST')
   })
 
+  it('parses task creation payloads when accepting a convert-to-task proposal', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          ok: true,
+          outcome: 'accepted',
+          thread: makeThread({ stage: 'developed' }),
+          threadEventId: 'event-accept-1',
+          taskCreationPayload: {
+            taskTitle: 'Reduce onboarding drop-off',
+            taskDescription: 'Validate the riskiest assumption and run the first experiment.',
+            suggestedSteps: ['Validate the riskiest assumption', 'Run the first experiment'],
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    )
+
+    const { acceptIdeaThreadStructuredAction } = await import('./assistant-service-client')
+    const result = await acceptIdeaThreadStructuredAction(
+      {
+        ideaId: 'idea-123',
+        authHeaders: { cookie: 'better-auth.session_token=test-session' },
+        proposalId: 'proposal-1',
+      },
+      { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' },
+    )
+
+    expect(result.taskCreationPayload).toEqual({
+      taskTitle: 'Reduce onboarding drop-off',
+      taskDescription: 'Validate the riskiest assumption and run the first experiment.',
+      suggestedSteps: ['Validate the riskiest assumption', 'Run the first experiment'],
+    })
+  })
+
   it('requests a summary improvement through the dedicated action contract', async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({

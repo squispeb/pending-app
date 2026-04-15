@@ -4,6 +4,7 @@ import {
   approveIdeaThreadProposal,
   getAssistantIdeaThread,
   requestIdeaThreadBreakdown as requestIdeaThreadBreakdownFromAssistant,
+  requestIdeaThreadConvertToTask as requestIdeaThreadConvertToTaskFromAssistant,
   requestIdeaThreadRestructure as requestIdeaThreadRestructureFromAssistant,
   requestIdeaThreadSummaryImprovement as requestIdeaThreadSummaryImprovementFromAssistant,
   requestIdeaThreadTitleImprovement as requestIdeaThreadTitleImprovementFromAssistant,
@@ -347,6 +348,39 @@ export function createAssistantThreadService(database: Database) {
       }
 
       return requestIdeaThreadBreakdownFromAssistant(
+        {
+          ideaId,
+          authHeaders,
+          ...input,
+        },
+        {
+          fetchImpl: options?.fetchImpl,
+          baseUrl: options?.assistantServiceBaseUrl,
+        },
+      )
+    },
+    async requestIdeaThreadConvertToTask(
+      ideaId: string,
+      input: {
+        currentSnapshotVersion: number
+        currentTitle: string
+        currentBody: string
+        currentSummary: string | null
+      },
+      options?: ResolveIdeaThreadOptions,
+    ) {
+      const { user, authHeaders } = await resolveAuthenticatedPlannerUser(database, {
+        requestHeaders: options?.requestHeaders,
+        fetchImpl: options?.fetchImpl,
+        baseUrl: options?.assistantServiceBaseUrl,
+      })
+      const idea = await ideasService.getIdea(ideaId, user.id)
+
+      if (!idea) {
+        throw new Error('Idea not found')
+      }
+
+      return requestIdeaThreadConvertToTaskFromAssistant(
         {
           ideaId,
           authHeaders,

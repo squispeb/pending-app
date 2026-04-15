@@ -23,10 +23,23 @@ const workingIdeaSchema = z.object({
 
 const pendingStructuredActionSchema = z.object({
   proposalId: z.string().min(1),
-  action: z.enum(['restructure', 'breakdown']),
+  action: z.enum(['restructure', 'breakdown', 'convert-to-task']),
   basedOnSnapshotVersion: z.number().int().positive(),
   proposedSummary: z.string().min(1),
   explanation: z.string().min(1),
+  taskCreationPayload: z
+    .object({
+      taskTitle: z.string().min(1),
+      taskDescription: z.string(),
+      suggestedSteps: z.array(z.string().min(1)).max(10),
+    })
+    .optional(),
+})
+
+const taskCreationPayloadSchema = z.object({
+  taskTitle: z.string().min(1),
+  taskDescription: z.string(),
+  suggestedSteps: z.array(z.string().min(1)).max(10),
 })
 
 const threadTurnSchema = z.object({
@@ -79,10 +92,11 @@ const improveIdeaResponseSchema = z.object({
 const transformIdeaResponseSchema = z.object({
   ok: z.literal(true),
   outcome: z.literal('proposal_created'),
-  action: z.enum(['restructure', 'breakdown']),
+  action: z.enum(['restructure', 'breakdown', 'convert-to-task']),
   thread: ideaThreadViewSchema,
   proposal: z.object({
     explanation: z.string().min(1),
+    taskProposal: taskCreationPayloadSchema.optional(),
   }),
 })
 
@@ -121,6 +135,7 @@ const acceptStructuredActionResponseSchema = z.object({
   outcome: z.literal('accepted'),
   thread: ideaThreadViewSchema,
   threadEventId: z.string().min(1),
+  taskCreationPayload: taskCreationPayloadSchema.optional(),
 })
 
 const rejectStructuredActionResponseSchema = z.object({
@@ -292,7 +307,7 @@ export async function requestIdeaThreadSummaryImprovement(
 }
 
 async function requestIdeaTransform(
-  path: 'restructure' | 'breakdown',
+  path: 'restructure' | 'breakdown' | 'convert-to-task',
   input: {
     ideaId: string
     authHeaders: HeadersInit
@@ -353,6 +368,20 @@ export async function requestIdeaThreadBreakdown(
   options?: { fetchImpl?: typeof fetch; baseUrl?: string },
 ) {
   return requestIdeaTransform('breakdown', input, options)
+}
+
+export async function requestIdeaThreadConvertToTask(
+  input: {
+    ideaId: string
+    authHeaders: HeadersInit
+    currentSnapshotVersion: number
+    currentTitle: string
+    currentBody: string
+    currentSummary: string | null
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  return requestIdeaTransform('convert-to-task', input, options)
 }
 
 export async function submitIdeaDiscoveryTurn(

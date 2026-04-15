@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { approveIdeaProposalAndPersist, createIdeaAndBootstrapThread, markServerFnRawResponse, persistIdeaRefinementAndSync } from './ideas'
+import { approveIdeaProposalAndPersist, convertIdeaToTaskAndLink, createIdeaAndBootstrapThread, markServerFnRawResponse, persistIdeaRefinementAndSync } from './ideas'
 
 describe('ideas server flow', () => {
   it('creates the canonical idea and bootstraps the assistant thread in one app-side path', async () => {
@@ -253,6 +253,101 @@ describe('ideas server flow', () => {
       threadSummary: 'Sharper summary grounded in the thread.',
       stage: 'developed',
     })
+  })
+
+  it('accepts a task conversion, creates the canonical task, and links it back to the idea', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const acceptIdeaThreadStructuredAction = vi.fn().mockResolvedValue({
+      thread: {
+        threadId: 'thread-user-1:idea-123',
+        ideaId: 'idea-123',
+        userId: 'user-1',
+        stage: 'developed',
+      },
+      taskCreationPayload: {
+        taskTitle: 'Reduce onboarding drop-off',
+        taskDescription: 'Validate the riskiest assumption and run the first experiment.',
+        suggestedSteps: ['Validate the riskiest assumption', 'Run the first experiment'],
+      },
+    })
+    const createTask = vi.fn().mockResolvedValue({ ok: true as const, id: 'task-123' })
+    const createIdeaExecutionLink = vi.fn().mockResolvedValue({ ok: true })
+
+    const result = await convertIdeaToTaskAndLink(
+      {
+        ideaId: 'idea-123',
+        proposalId: 'proposal-1',
+      },
+      {
+        resolveUser,
+        acceptIdeaThreadStructuredAction,
+        createTask,
+        createIdeaExecutionLink,
+      },
+    )
+
+    expect(acceptIdeaThreadStructuredAction).toHaveBeenCalledWith('idea-123', {
+      proposalId: 'proposal-1',
+    })
+    expect(createTask).toHaveBeenCalledWith('user-1', {
+      title: 'Reduce onboarding drop-off',
+      notes: 'Validate the riskiest assumption and run the first experiment.',
+      priority: 'medium',
+      dueDate: undefined,
+      dueTime: undefined,
+      reminderAt: undefined,
+      estimatedMinutes: undefined,
+      preferredStartTime: undefined,
+      preferredEndTime: undefined,
+    })
+    expect(createIdeaExecutionLink).toHaveBeenCalledWith(
+      {
+        ideaId: 'idea-123',
+        targetType: 'task',
+        targetId: 'task-123',
+        linkReason: 'Accepted task conversion from developed idea.',
+      },
+      'user-1',
+    )
+    expect(result).toEqual({
+      ok: true,
+      taskId: 'task-123',
+      thread: {
+        threadId: 'thread-user-1:idea-123',
+        ideaId: 'idea-123',
+        userId: 'user-1',
+        stage: 'developed',
+      },
+    })
+  })
+
+  it('fails task conversion when the accepted structured action has no task payload', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const acceptIdeaThreadStructuredAction = vi.fn().mockResolvedValue({
+      thread: {
+        threadId: 'thread-user-1:idea-123',
+      },
+    })
+    const createTask = vi.fn()
+    const createIdeaExecutionLink = vi.fn()
+
+    await expect(
+      convertIdeaToTaskAndLink(
+        {
+          ideaId: 'idea-123',
+          proposalId: 'proposal-1',
+        },
+        {
+          resolveUser,
+          acceptIdeaThreadStructuredAction,
+          createTask,
+          createIdeaExecutionLink,
+        },
+      ),
+    ).rejects.toThrow('Accepted structured action did not return a task payload')
+
+    expect(createTask).not.toHaveBeenCalled()
+    expect(createIdeaExecutionLink).not.toHaveBeenCalled()
   })
 
   it('rejects refinement persistence when the thread is not developed yet', async () => {

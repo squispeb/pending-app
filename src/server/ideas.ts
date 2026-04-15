@@ -3,12 +3,15 @@ import { z } from 'zod'
 import { db } from '../db/client'
 import { canUseIdeaRefinementActions, type IdeaStructuredAction } from '../lib/idea-structured-actions'
 import { ideaStageSchema, ideaCreateSchema, ideaToggleStarSchema, ideaVaultSearchSchema } from '../lib/ideas'
+import type { GetIdeaThreadResponse } from './assistant-service-client'
 import { createAssistantThreadService } from './assistant-thread-service'
 import { resolveAuthenticatedPlannerUser } from './authenticated-user'
 import { createIdeasService } from './ideas-service'
+import { createTasksService } from './tasks-service'
 
 const ideasService = createIdeasService(db)
 const assistantThreadService = createAssistantThreadService(db)
+const tasksService = createTasksService(db)
 
 type CreateIdeaAndThreadDependencies = {
   resolveUser: () => Promise<{
@@ -91,6 +94,51 @@ type PersistIdeaRefinementDependencies = {
       body: string
       threadSummary: string | null
       stage: z.infer<typeof ideaStageSchema>
+    },
+    userId: string,
+  ) => Promise<unknown>
+}
+
+type ConvertIdeaToTaskDependencies = {
+  resolveUser: () => Promise<{
+    user: { id: string }
+  }>
+  acceptIdeaThreadStructuredAction: (
+    ideaId: string,
+    input: {
+      proposalId: string
+    },
+  ) => Promise<{
+    thread: GetIdeaThreadResponse
+    taskCreationPayload?: {
+      taskTitle: string
+      taskDescription: string
+      suggestedSteps: string[]
+    }
+  }>
+  createTask: (
+    userId: string,
+    input: {
+      title: string
+      notes: string | undefined
+      priority: 'low' | 'medium' | 'high'
+      dueDate: string | undefined
+      dueTime: string | undefined
+      reminderAt: string | undefined
+      estimatedMinutes: number | undefined
+      preferredStartTime: string | undefined
+      preferredEndTime: string | undefined
+    },
+  ) => Promise<{
+    ok: true
+    id: string
+  }>
+  createIdeaExecutionLink: (
+    input: {
+      ideaId: string
+      targetType: 'task' | 'habit'
+      targetId: string
+      linkReason?: string | null
     },
     userId: string,
   ) => Promise<unknown>
@@ -191,6 +239,51 @@ export async function persistIdeaRefinementAndSync(
     title: nextTitle,
     threadSummary: nextSummary,
     stage: thread.stage,
+  }
+}
+
+export async function convertIdeaToTaskAndLink(
+  input: {
+    ideaId: string
+    proposalId: string
+  },
+  dependencies: ConvertIdeaToTaskDependencies,
+) {
+  const { user } = await dependencies.resolveUser()
+  const acceptance = await dependencies.acceptIdeaThreadStructuredAction(input.ideaId, {
+    proposalId: input.proposalId,
+  })
+
+  if (!acceptance.taskCreationPayload) {
+    throw new Error('Accepted structured action did not return a task payload')
+  }
+
+  const taskResult = await dependencies.createTask(user.id, {
+    title: acceptance.taskCreationPayload.taskTitle,
+    notes: acceptance.taskCreationPayload.taskDescription,
+    priority: 'medium',
+    dueDate: undefined,
+    dueTime: undefined,
+    reminderAt: undefined,
+    estimatedMinutes: undefined,
+    preferredStartTime: undefined,
+    preferredEndTime: undefined,
+  })
+
+  await dependencies.createIdeaExecutionLink(
+    {
+      ideaId: input.ideaId,
+      targetType: 'task',
+      targetId: taskResult.id,
+      linkReason: 'Accepted task conversion from developed idea.',
+    },
+    user.id,
+  )
+
+  return {
+    ok: true as const,
+    taskId: taskResult.id,
+    thread: acceptance.thread,
   }
 }
 
@@ -382,6 +475,27 @@ export const acceptIdeaStructuredAction = createServerFn({ method: 'POST' })
     })
 
     return acceptance.thread
+  })
+
+export const convertIdeaToTask = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string; proposalId: string }) => input)
+  .handler(async ({ data }) => {
+    return convertIdeaToTaskAndLink(
+      {
+        ideaId: data.id,
+        proposalId: data.proposalId,
+      },
+      {
+        resolveUser: async () => {
+          const { user } = await resolveAuthenticatedPlannerUser(db)
+          return { user }
+        },
+        acceptIdeaThreadStructuredAction: (ideaId, input) =>
+          assistantThreadService.acceptIdeaThreadStructuredAction(ideaId, input),
+        createTask: (userId, input) => tasksService.createTask(userId, input),
+        createIdeaExecutionLink: (input, userId) => ideasService.createIdeaExecutionLink(input, userId),
+      },
+    )
   })
 
 export const rejectIdeaStructuredAction = createServerFn({ method: 'POST' })
