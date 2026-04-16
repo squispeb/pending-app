@@ -105,5 +105,10 @@ describe('idea thread presentation', () => {
       label: 'Assistant failed',
       iconClassName: 'text-red-500',
     })
+    expect(getThreadEventPresentation('task_created')).toMatchObject({
+      label: 'Task created',
+      iconClassName: 'text-emerald-500',
+      cardClassName: 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-500/30 dark:bg-emerald-500/10',
+    })
   })
 })

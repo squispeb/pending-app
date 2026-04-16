@@ -1,6 +1,6 @@
-import { AlertTriangle, HelpCircle, Lightbulb, MessageSquareText, Sparkles, TrendingUp } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, HelpCircle, Lightbulb, MessageSquareText, Sparkles, TrendingUp } from 'lucide-react'
 
-export type ThreadEventType = 'thread_created' | 'user_turn_added' | 'assistant_question' | 'assistant_synthesis' | 'stage_changed' | 'assistant_failed'
+export type ThreadEventType = 'thread_created' | 'user_turn_added' | 'assistant_question' | 'assistant_synthesis' | 'stage_changed' | 'assistant_failed' | 'task_created'
 
 export type ThreadStatus = 'idle' | 'queued' | 'processing' | 'streaming' | 'failed'
 
@@ -30,6 +30,8 @@ export function formatThreadEventLabel(type: ThreadEventType) {
       return 'Stage changed'
     case 'assistant_failed':
       return 'Assistant failed'
+    case 'task_created':
+      return 'Task created'
   }
 }
 
@@ -69,6 +71,13 @@ export function getThreadEventPresentation(type: ThreadEventType) {
         icon: AlertTriangle,
         iconClassName: 'text-red-500',
         cardClassName: 'border-red-200 bg-red-50/70 dark:border-red-500/30 dark:bg-red-500/10',
+      }
+    case 'task_created':
+      return {
+        label: formatThreadEventLabel(type),
+        icon: CheckCircle2,
+        iconClassName: 'text-emerald-500',
+        cardClassName: 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-500/30 dark:bg-emerald-500/10',
       }
     case 'thread_created':
       return {
@@ -148,6 +157,12 @@ export function deriveThreadState(
       return {
         label: 'Stage updated',
         badgeClassName: 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300',
+        helperText: null,
+      }
+    case 'task_created':
+      return {
+        label: 'Task created',
+        badgeClassName: 'border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)]',
         helperText: null,
       }
     case 'assistant_failed':

@@ -272,6 +272,14 @@ describe('ideas server flow', () => {
     })
     const createTask = vi.fn().mockResolvedValue({ ok: true as const, id: 'task-123' })
     const createIdeaExecutionLink = vi.fn().mockResolvedValue({ ok: true })
+    const recordTaskCreatedForIdeaThread = vi.fn().mockResolvedValue({
+      ok: true as const,
+      outcome: 'recorded',
+      thread: {
+        threadId: 'thread-user-1:idea-123',
+      },
+      threadEventId: 'event-task-1',
+    })
 
     const result = await convertIdeaToTaskAndLink(
       {
@@ -283,6 +291,7 @@ describe('ideas server flow', () => {
         acceptIdeaThreadStructuredAction,
         createTask,
         createIdeaExecutionLink,
+        recordTaskCreatedForIdeaThread,
       },
     )
 
@@ -309,6 +318,10 @@ describe('ideas server flow', () => {
       },
       'user-1',
     )
+    expect(recordTaskCreatedForIdeaThread).toHaveBeenCalledWith('idea-123', {
+      taskId: 'task-123',
+      summary: 'Created task Reduce onboarding drop-off from the accepted idea conversion.',
+    })
     expect(result).toEqual({
       ok: true,
       taskId: 'task-123',

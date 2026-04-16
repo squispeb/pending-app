@@ -10,6 +10,7 @@ import {
   requestIdeaThreadTitleImprovement as requestIdeaThreadTitleImprovementFromAssistant,
   rejectIdeaThreadStructuredAction,
   rejectIdeaThreadProposal,
+  recordTaskCreatedForIdeaThread,
   requestIdeaThreadElaboration,
   resolveAssistantIdeaThread,
   streamAssistantIdeaThread,
@@ -474,6 +475,37 @@ export function createAssistantThreadService(database: Database) {
       }
 
       return acceptIdeaThreadStructuredAction(
+        {
+          ideaId,
+          authHeaders,
+          ...input,
+        },
+        {
+          fetchImpl: options?.fetchImpl,
+          baseUrl: options?.assistantServiceBaseUrl,
+        },
+      )
+    },
+    async recordTaskCreatedForIdeaThread(
+      ideaId: string,
+      input: {
+        taskId: string
+        summary: string
+      },
+      options?: ResolveIdeaThreadOptions,
+    ) {
+      const { user, authHeaders } = await resolveAuthenticatedPlannerUser(database, {
+        requestHeaders: options?.requestHeaders,
+        fetchImpl: options?.fetchImpl,
+        baseUrl: options?.assistantServiceBaseUrl,
+      })
+      const idea = await ideasService.getIdea(ideaId, user.id)
+
+      if (!idea) {
+        throw new Error('Idea not found')
+      }
+
+      return recordTaskCreatedForIdeaThread(
         {
           ideaId,
           authHeaders,

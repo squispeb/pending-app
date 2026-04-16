@@ -415,6 +415,41 @@ describe('assistant service client', () => {
     expect(init?.method).toBe('POST')
   })
 
+  it('records a task-created write-back through the dedicated thread contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        outcome: 'recorded',
+        thread: makeThread({
+          visibleEvents: [
+            {
+              eventId: 'event-1',
+              type: 'task_created',
+              createdAt: '2026-04-12T00:00:30.000Z',
+              summary: 'Created task Reduce onboarding drop-off from the accepted idea conversion.',
+              visibleToUser: true,
+              taskId: 'task-123',
+            },
+          ],
+        }),
+        threadEventId: 'event-task-1',
+      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const { recordTaskCreatedForIdeaThread } = await import('./assistant-service-client')
+    const result = await recordTaskCreatedForIdeaThread({
+      ideaId: 'idea-123',
+      authHeaders: { cookie: 'better-auth.session_token=test-session' },
+      taskId: 'task-123',
+      summary: 'Created task Reduce onboarding drop-off from the accepted idea conversion.',
+    }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
+
+    expect(result.outcome).toBe('recorded')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/record-task-created')
+    expect(init?.method).toBe('POST')
+  })
+
   it('rejects a structured action through the dedicated review contract', async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({

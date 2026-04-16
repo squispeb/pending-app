@@ -1,6 +1,19 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { IdeaThreadHistory } from './idea-thread-history'
+
+vi.mock('@tanstack/react-router', async () => {
+  const actual = await vi.importActual<typeof import('@tanstack/react-router')>('@tanstack/react-router')
+
+  return {
+    ...actual,
+    Link: ({ to, children, ...props }: any) => (
+      <a href={typeof to === 'string' ? to : String(to)} {...props}>
+        {children}
+      </a>
+    ),
+  }
+})
 
 describe('IdeaThreadHistory', () => {
   it('renders an empty-state message when no visible events exist', () => {
@@ -92,6 +105,12 @@ describe('IdeaThreadHistory', () => {
             createdAt: '2026-04-12T00:04:00.000Z',
             summary: 'Assistant could not complete the request.',
           },
+          {
+            eventId: 'event-7',
+            type: 'task_created',
+            createdAt: '2026-04-12T00:05:00.000Z',
+            summary: 'Created task Reduce onboarding drop-off from the accepted idea conversion.',
+          },
         ]}
       />,
     )
@@ -104,6 +123,9 @@ describe('IdeaThreadHistory', () => {
     expect(markup).toContain('Stage changed')
     expect(markup).toContain('Assistant failed')
     expect(markup).toContain('Assistant could not complete the request.')
+    expect(markup).toContain('Task created')
+    expect(markup).toContain('View in Tasks')
+    expect(markup).toContain('Created task Reduce onboarding drop-off from the accepted idea conversion.')
   })
 
   it('renders the denser thread shell and streaming reply state', () => {

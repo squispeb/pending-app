@@ -1,3 +1,5 @@
+import { CheckCircle2 } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
 import {
   deriveThreadState,
   getThreadEventPresentation,
@@ -112,11 +114,28 @@ export function IdeaThreadHistory({
             const presentation = getThreadEventPresentation(event.type)
             const Icon = presentation.icon
             const isUserTurn = event.type === 'user_turn_added'
+            const isTaskCreated = event.type === 'task_created'
             const isSystemEvent = event.type === 'thread_created' || event.type === 'stage_changed'
 
             return (
               <article key={event.eventId} className={isSystemEvent ? 'flex justify-center py-1' : `flex ${isUserTurn ? 'justify-end' : 'justify-start'}`}>
-                {isSystemEvent ? (
+                {isTaskCreated ? (
+                  <div className="max-w-[92%] rounded-[22px] border border-emerald-200 bg-emerald-50/80 px-3.5 py-3 shadow-sm dark:border-emerald-500/30 dark:bg-emerald-500/10 sm:max-w-[85%]">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300" aria-hidden="true">
+                      <CheckCircle2 size={14} className="text-emerald-500" aria-hidden="true" />
+                      <span>Task created</span>
+                    </div>
+                    <p className="m-0 mt-1.5 text-sm leading-6 text-[var(--ink-strong)]">
+                      {event.summary}
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--ink-faint)]">
+                      <time dateTime={event.createdAt}>{formatDisplayDateTime(event.createdAt)}</time>
+                      <Link to="/tasks" className="font-semibold text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-300">
+                        View in Tasks →
+                      </Link>
+                    </div>
+                  </div>
+                ) : isSystemEvent ? (
                   <div className="inline-flex max-w-[90%] items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1.5 text-[11px] text-[var(--ink-soft)] sm:max-w-[85%]">
                     <Icon size={14} className={presentation.iconClassName} aria-hidden="true" />
                     <span className="font-medium text-[var(--ink-strong)]">{presentation.label}</span>

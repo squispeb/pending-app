@@ -3,7 +3,7 @@ import { env } from '../lib/env'
 
 const threadEventSchema = z.object({
   eventId: z.string().min(1),
-  type: z.enum(['thread_created', 'user_turn_added', 'assistant_question', 'assistant_synthesis', 'stage_changed', 'assistant_failed']),
+  type: z.enum(['thread_created', 'user_turn_added', 'assistant_question', 'assistant_synthesis', 'stage_changed', 'assistant_failed', 'task_created']),
   createdAt: z.string().min(1),
   summary: z.string().min(1),
   visibleToUser: z.literal(true),
@@ -136,6 +136,13 @@ const acceptStructuredActionResponseSchema = z.object({
   thread: ideaThreadViewSchema,
   threadEventId: z.string().min(1),
   taskCreationPayload: taskCreationPayloadSchema.optional(),
+})
+
+const recordTaskCreatedResponseSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('recorded'),
+  thread: ideaThreadViewSchema,
+  threadEventId: z.string().min(1),
 })
 
 const rejectStructuredActionResponseSchema = z.object({
@@ -530,6 +537,34 @@ export async function acceptIdeaThreadStructuredAction(
   const payload = await parseAssistantResponse(response)
 
   return acceptStructuredActionResponseSchema.parse(payload)
+}
+
+export async function recordTaskCreatedForIdeaThread(
+  input: {
+    ideaId: string
+    authHeaders: HeadersInit
+    taskId: string
+    summary: string
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+
+  if (!baseUrl) {
+    throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  }
+
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/actions/record-task-created`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ taskId: input.taskId, summary: input.summary }),
+  })
+  const payload = await parseAssistantResponse(response)
+
+  return recordTaskCreatedResponseSchema.parse(payload)
 }
 
 export async function rejectIdeaThreadStructuredAction(

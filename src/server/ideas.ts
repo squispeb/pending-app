@@ -142,6 +142,13 @@ type ConvertIdeaToTaskDependencies = {
     },
     userId: string,
   ) => Promise<unknown>
+  recordTaskCreatedForIdeaThread?: (
+    ideaId: string,
+    input: {
+      taskId: string
+      summary: string
+    },
+  ) => Promise<unknown>
 }
 
 export async function createIdeaAndBootstrapThread(
@@ -279,6 +286,11 @@ export async function convertIdeaToTaskAndLink(
     },
     user.id,
   )
+
+  await dependencies.recordTaskCreatedForIdeaThread?.(input.ideaId, {
+    taskId: taskResult.id,
+    summary: `Created task ${acceptance.taskCreationPayload.taskTitle} from the accepted idea conversion.`,
+  })
 
   return {
     ok: true as const,
@@ -537,6 +549,8 @@ export const convertIdeaToTask = createServerFn({ method: 'POST' })
           assistantThreadService.acceptIdeaThreadStructuredAction(ideaId, input),
         createTask: (userId, input) => tasksService.createTask(userId, input),
         createIdeaExecutionLink: (input, userId) => ideasService.createIdeaExecutionLink(input, userId),
+        recordTaskCreatedForIdeaThread: (ideaId, input) =>
+          assistantThreadService.recordTaskCreatedForIdeaThread(ideaId, input),
       },
     )
   })

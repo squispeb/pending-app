@@ -375,6 +375,8 @@ function IdeaDetailPage() {
     onSuccess: async (result) => {
       setDiscoveryError(null)
       setDiscoveryNotice('Convert to task request sent — a proposal will appear above.')
+      setActiveSupportTab('guided')
+      setIsSupportSheetOpen(true)
       queryClient.setQueryData(['idea-thread', ideaId], result.thread)
       await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
     },
