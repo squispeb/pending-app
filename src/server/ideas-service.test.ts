@@ -108,6 +108,23 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
     CREATE UNIQUE INDEX idea_execution_link_unique
       ON idea_execution_links (idea_id, target_type, target_id);
   `)
+
+  await db.run(sql`
+    CREATE TABLE accepted_breakdown_steps (
+      id text PRIMARY KEY NOT NULL,
+      idea_id text NOT NULL,
+      step_order integer NOT NULL,
+      step_text text NOT NULL,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
+    CREATE UNIQUE INDEX accepted_breakdown_step_idea_step_unique
+      ON accepted_breakdown_steps (idea_id, step_order);
+  `)
 }
 
 describe('ideas service', () => {
@@ -509,6 +526,59 @@ describe('ideas service', () => {
         primaryUserId,
       ),
     ).rejects.toThrow()
+  })
+
+  it('creates and lists accepted breakdown steps in step order', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Breakdown target',
+      body: 'Capture accepted steps.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    await service.createAcceptedBreakdownSteps(
+      {
+        ideaId: created.id,
+        steps: [
+          { stepOrder: 2, stepText: 'Second step' },
+          { stepOrder: 1, stepText: 'First step' },
+        ],
+      },
+      primaryUserId,
+    )
+
+    const steps = await service.listAcceptedBreakdownSteps(created.id, primaryUserId)
+
+    expect(steps.map((step) => step.stepOrder)).toEqual([1, 2])
+    expect(steps.map((step) => step.stepText)).toEqual(['First step', 'Second step'])
+  })
+
+  it('scopes accepted breakdown steps to the owning user', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Scoped breakdown target',
+      body: 'Keep step records private.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    await service.createAcceptedBreakdownSteps(
+      {
+        ideaId: created.id,
+        steps: [{ stepOrder: 1, stepText: 'Visible step' }],
+      },
+      primaryUserId,
+    )
+
+    await expect(service.listAcceptedBreakdownSteps(created.id, secondaryUserId)).resolves.toEqual([])
+    await expect(
+      service.createAcceptedBreakdownSteps(
+        {
+          ideaId: created.id,
+          steps: [{ stepOrder: 2, stepText: 'Forbidden step' }],
+        },
+        secondaryUserId,
+      ),
+    ).rejects.toThrow('Idea not found')
   })
 
   it('applies an approved proposal as the next accepted canonical snapshot', async () => {

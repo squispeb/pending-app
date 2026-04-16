@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Lightbulb, Mic, Quote, SendHorizonal, Star } from 'lucide-react'
+import { Lightbulb, Mic, Quote, SendHorizonal, Star } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
@@ -17,10 +17,12 @@ import {
 import { getIdeaStageBadgeClassName, getIdeaStageLabel, isIdeaStarred } from '../lib/ideas'
 import { parseIdeaThreadStreamFrames } from '../lib/idea-thread-stream'
 import {
+  acceptIdeaBreakdown,
   acceptIdeaStructuredAction,
   convertIdeaToTask,
   getIdea,
   getIdeaThread,
+  listAcceptedBreakdownSteps,
   listIdeaExecutionLinks,
   persistIdeaRefinement,
   rejectIdeaStructuredAction,
@@ -57,6 +59,12 @@ const ideaTaskLinksQueryOptions = (ideaId: string) =>
     queryFn: () => listIdeaExecutionLinks({ data: { id: ideaId, targetType: 'task' } }),
   })
 
+const acceptedBreakdownStepsQueryOptions = (ideaId: string) =>
+  queryOptions({
+    queryKey: ['idea-accepted-breakdown-steps', ideaId],
+    queryFn: () => listAcceptedBreakdownSteps({ data: { id: ideaId } }),
+  })
+
 export const Route = createFileRoute('/_authenticated/ideas/$ideaId')({
   validateSearch: (search: Record<string, unknown>) => ({
     view: search.view === 'default' ? 'default' : 'chat',
@@ -66,6 +74,7 @@ export const Route = createFileRoute('/_authenticated/ideas/$ideaId')({
       context.queryClient.ensureQueryData(ideaDetailQueryOptions(params.ideaId)),
       context.queryClient.ensureQueryData(ideaThreadQueryOptions(params.ideaId)),
       context.queryClient.ensureQueryData(ideaTaskLinksQueryOptions(params.ideaId)),
+      context.queryClient.ensureQueryData(acceptedBreakdownStepsQueryOptions(params.ideaId)),
     ])
   },
   component: IdeaDetailPage,
@@ -78,6 +87,7 @@ function IdeaDetailPage() {
   const { data: idea } = useSuspenseQuery(ideaDetailQueryOptions(ideaId))
   const { data: thread } = useSuspenseQuery(ideaThreadQueryOptions(ideaId))
   const { data: taskLinks } = useSuspenseQuery(ideaTaskLinksQueryOptions(ideaId))
+  const { data: acceptedBreakdownSteps } = useSuspenseQuery(acceptedBreakdownStepsQueryOptions(ideaId))
   const { openCapture } = useCaptureContext()
   const isChatView = view === 'chat'
   const [discoveryMessage, setDiscoveryMessage] = useState('')
@@ -85,7 +95,6 @@ function IdeaDetailPage() {
   const [discoveryNotice, setDiscoveryNotice] = useState<string | null>(null)
   const [streamingAssistantText, setStreamingAssistantText] = useState('')
   const [isComposerExpanded, setIsComposerExpanded] = useState(false)
-  const [isThreadActionRailCollapsed, setIsThreadActionRailCollapsed] = useState(false)
   const [dismissedRefinements, setDismissedRefinements] = useState<{ title: string | null; summary: string | null }>({
     title: null,
     summary: null,
@@ -101,9 +110,13 @@ function IdeaDetailPage() {
   const activeStreamingTurnIdRef = useRef<string | null>(null)
   /** Track turn IDs that have already completed so replayed chunks on reconnect are skipped */
   const completedTurnIdsRef = useRef(new Set<string>())
+  const queuedTurns = thread.queuedTurns ?? []
+  const visibleEvents = thread.visibleEvents ?? []
+  const safeAcceptedBreakdownSteps = acceptedBreakdownSteps ?? []
+  const safeTaskLinks = taskLinks ?? []
   const isThreadBusy = thread.status === 'queued' || thread.status === 'processing' || thread.status === 'streaming'
-  const queuedTurnCount = thread.queuedTurns.length
-  const latestQueuedTurn = thread.queuedTurns.at(-1) ?? null
+  const queuedTurnCount = queuedTurns.length
+  const latestQueuedTurn = queuedTurns.at(-1) ?? null
 
   if (!idea) {
     throw notFound()
@@ -121,10 +134,10 @@ function IdeaDetailPage() {
     ? thread.workingIdea.currentSummary
     : null
   const pendingStructuredAction = thread.pendingStructuredAction ?? null
-  const latestTaskLink = taskLinks[0] ?? null
+  const latestTaskLink = safeTaskLinks[0] ?? null
   const convertedTaskId = latestTaskLink?.targetId ?? null
 
-  const latestAssistantEvent = [...thread.visibleEvents]
+  const latestAssistantEvent = [...visibleEvents]
     .reverse()
     .find((event) => event.type === 'assistant_question' || event.type === 'assistant_synthesis') ?? null
   const latestAssistantQuestion = latestAssistantEvent?.type === 'assistant_question' ? latestAssistantEvent.summary : null
@@ -223,6 +236,41 @@ function IdeaDetailPage() {
       .map((item) => ({ ...item, tone: 'cyan' as const })),
     ...(convertToTaskAction.available ? [{ ...convertToTaskAction, tone: 'cyan' as const }] : []),
   ]
+  const threadActionGuide = threadActionRailItems.length > 0 ? (
+    <div className="pointer-events-none sticky top-3 z-20 mb-3 flex justify-end">
+      <div
+        className="pointer-events-auto w-full max-w-[18rem] rounded-[20px] border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_90%,white_10%)] px-2.5 py-2 shadow-[0_14px_34px_rgba(15,23,42,0.16)] backdrop-blur-xl"
+        role="group"
+        aria-label="Suggested next steps"
+      >
+        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Next steps</div>
+        <div className="scrollbar-none mt-1.5 flex gap-1 overflow-x-auto overflow-y-hidden pb-0.5">
+          {threadActionRailItems.map(({ action, label, tone }) => (
+            <button
+              key={action}
+              type="button"
+              onClick={() => {
+                if (action === 'title' || action === 'summary') {
+                  requestRefinementMutation.mutate(action)
+                  return
+                }
+
+                if (action === 'convert-to-task') {
+                  requestConvertToTaskMutation.mutate()
+                  return
+                }
+
+                requestStructuredActionMutation.mutate(action)
+              }}
+              className={`inline-flex h-7 flex-none items-center justify-center rounded-full border px-2.5 text-[10px] font-semibold leading-none transition ${tone === 'emerald' ? 'border-emerald-600/60 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20' : 'border-cyan-600/60 bg-cyan-50 text-cyan-800 hover:bg-cyan-100 dark:border-cyan-500/40 dark:bg-cyan-500/10 dark:text-cyan-300 dark:hover:bg-cyan-500/20'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  ) : null
   const shouldShowComposerMeta = Boolean(discoveryError || discoveryNotice || isThreadBusy)
   const pageTabs = [
     { id: 'thread', label: 'Thread' },
@@ -344,6 +392,25 @@ function IdeaDetailPage() {
     onError: (error) => {
       setDiscoveryNotice(null)
       setDiscoveryError(error instanceof Error ? error.message : 'Failed to apply the proposal.')
+    },
+  })
+
+  const acceptBreakdownMutation = useMutation({
+    mutationFn: async (proposalId: string) => acceptIdeaBreakdown({
+      data: {
+        id: ideaId,
+        proposalId,
+      },
+    }),
+    onSuccess: async (thread) => {
+      setDiscoveryError(null)
+      setDiscoveryNotice('Accepted — breakdown steps persisted to the thread.')
+      queryClient.setQueryData(['idea-thread', ideaId], thread)
+      await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
+    },
+    onError: (error) => {
+      setDiscoveryNotice(null)
+      setDiscoveryError(error instanceof Error ? error.message : 'Failed to persist the breakdown steps.')
     },
   })
 
@@ -472,7 +539,7 @@ function IdeaDetailPage() {
     }
 
     scrollThreadToBottom(streamingAssistantText ? 'auto' : 'smooth')
-  }, [activePageTab, isThreadAtBottom, thread.visibleEvents.length, streamingAssistantText])
+  }, [activePageTab, isThreadAtBottom, visibleEvents.length, streamingAssistantText])
 
   useEffect(() => {
     if (activePageTab !== 'thread') {
@@ -480,7 +547,7 @@ function IdeaDetailPage() {
     }
 
     handleThreadViewportScroll()
-  }, [activePageTab, thread.visibleEvents.length, streamingAssistantText])
+  }, [activePageTab, visibleEvents.length, streamingAssistantText])
 
   useEffect(() => {
     if (!isThreadBusy) {
@@ -708,6 +775,29 @@ function IdeaDetailPage() {
           </div>
         ) : null}
 
+        {safeAcceptedBreakdownSteps.length > 0 ? (
+          <div className="rounded-2xl border border-cyan-200 bg-cyan-50/60 p-4 dark:border-cyan-500/30 dark:bg-cyan-500/10">
+            <div className="mb-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700 dark:text-cyan-300">
+                Accepted breakdown
+              </div>
+              <p className="m-0 mt-0.5 text-sm leading-6 text-[var(--ink-strong)]">
+                {safeAcceptedBreakdownSteps.length} step{safeAcceptedBreakdownSteps.length === 1 ? '' : 's'} locked in from the last accepted proposal.
+              </p>
+            </div>
+            <ol className="m-0 space-y-2 pl-0 list-none">
+              {safeAcceptedBreakdownSteps.map((step, index) => (
+                <li key={step.id} className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-cyan-100 text-[11px] font-bold text-cyan-700 dark:bg-cyan-500/20 dark:text-cyan-300">
+                    {index + 1}
+                  </span>
+                  <span className="leading-6 text-[var(--ink-strong)]">{step.stepText}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ) : null}
+
         {canUseRefinementActions && pendingStructuredAction ? (
           <div className="rounded-2xl border border-violet-200 bg-violet-50/70 p-4 dark:border-violet-500/30 dark:bg-violet-500/10">
             <div className="mb-2 text-sm font-semibold text-[var(--ink-strong)]">Assistant proposal</div>
@@ -742,8 +832,8 @@ function IdeaDetailPage() {
                     <div className="mt-1 whitespace-pre-wrap">{pendingStructuredAction.explanation}</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending} onClick={() => acceptStructuredActionMutation.mutate(pendingStructuredAction.proposalId)} className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60">Accept breakdown</button>
-                    <button type="button" disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending} onClick={() => rejectStructuredActionMutation.mutate(pendingStructuredAction.proposalId)} className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60">Reject breakdown</button>
+                    <button type="button" disabled={acceptBreakdownMutation.isPending || rejectStructuredActionMutation.isPending} onClick={() => acceptBreakdownMutation.mutate(pendingStructuredAction.proposalId)} className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60">Accept breakdown</button>
+                    <button type="button" disabled={acceptBreakdownMutation.isPending || rejectStructuredActionMutation.isPending} onClick={() => rejectStructuredActionMutation.mutate(pendingStructuredAction.proposalId)} className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60">Reject breakdown</button>
                   </div>
                 </div>
               ) : null}
@@ -878,7 +968,7 @@ function IdeaDetailPage() {
             </div>
           </div>
 
-          {/* Chat unit: scroll area + composer together, no overlay */}
+          {/* Chat unit: scroll area + composer together, with a compact in-thread guide */}
           <div className="idea-thread-shell flex min-h-0 flex-1 flex-col gap-0 rounded-[28px]">
             <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-[28px]">
               <div
@@ -887,13 +977,29 @@ function IdeaDetailPage() {
                 aria-label="Thread messages"
                 className="flex-1 min-h-0 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]"
               >
+                {threadActionGuide}
                 <IdeaThreadHistory
-                  visibleEvents={thread.visibleEvents}
+                  visibleEvents={visibleEvents}
                   threadStatus={thread.status}
                   activeTurn={thread.activeTurn}
-                  queuedTurns={thread.queuedTurns}
+                  queuedTurns={queuedTurns}
                   lastTurn={thread.lastTurn}
                   streamingAssistantText={streamingAssistantText}
+                  acceptedBreakdownSteps={safeAcceptedBreakdownSteps}
+                  pendingBreakdownProposal={
+                    pendingStructuredAction?.action === 'breakdown' && canUseRefinementActions
+                      ? {
+                          proposalId: pendingStructuredAction.proposalId,
+                          action: 'breakdown',
+                          proposedSummary: pendingStructuredAction.proposedSummary,
+                          explanation: pendingStructuredAction.explanation,
+                        }
+                      : null
+                  }
+                  isAcceptingBreakdown={acceptBreakdownMutation.isPending}
+                  isRejectingBreakdown={rejectStructuredActionMutation.isPending}
+                  onAcceptBreakdown={(proposalId) => acceptBreakdownMutation.mutate(proposalId)}
+                  onRejectBreakdown={(proposalId) => rejectStructuredActionMutation.mutate(proposalId)}
                   threadRegionId="thread-history-panel"
                   showHeader={false}
                   className="min-h-full"
@@ -1058,13 +1164,29 @@ function IdeaDetailPage() {
           aria-label="Thread messages"
           className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 [scrollbar-gutter:stable]"
         >
+          {threadActionGuide}
           <IdeaThreadHistory
-            visibleEvents={thread.visibleEvents}
+            visibleEvents={visibleEvents}
             threadStatus={thread.status}
             activeTurn={thread.activeTurn}
-            queuedTurns={thread.queuedTurns}
+            queuedTurns={queuedTurns}
             lastTurn={thread.lastTurn}
             streamingAssistantText={streamingAssistantText}
+            acceptedBreakdownSteps={safeAcceptedBreakdownSteps}
+            pendingBreakdownProposal={
+              pendingStructuredAction?.action === 'breakdown' && canUseRefinementActions
+                ? {
+                    proposalId: pendingStructuredAction.proposalId,
+                    action: 'breakdown',
+                    proposedSummary: pendingStructuredAction.proposedSummary,
+                    explanation: pendingStructuredAction.explanation,
+                  }
+                : null
+            }
+            isAcceptingBreakdown={acceptBreakdownMutation.isPending}
+            isRejectingBreakdown={rejectStructuredActionMutation.isPending}
+            onAcceptBreakdown={(proposalId) => acceptBreakdownMutation.mutate(proposalId)}
+            onRejectBreakdown={(proposalId) => rejectStructuredActionMutation.mutate(proposalId)}
             threadRegionId="thread-history-panel"
             showHeader={false}
             className="min-h-full rounded-[0] border-x-0 border-t-0 bg-transparent px-0 pb-0 pt-0 shadow-none"
@@ -1091,67 +1213,6 @@ function IdeaDetailPage() {
         onSubmit={handleDiscoverySubmit}
       >
         <label className="sr-only" htmlFor="idea-thread-reply">Reply in thread</label>
-        {threadActionRailItems.length > 0 ? (
-          <div className="pointer-events-none absolute inset-x-4 bottom-[calc(100%+0.75rem)] z-20">
-            <div className="panel pointer-events-auto mx-auto max-w-4xl rounded-[26px] border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_90%,white_10%)] p-3 shadow-[0_18px_48px_rgba(15,23,42,0.16)] backdrop-blur-xl">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Next steps</div>
-                  <div className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${stageBadgeClassName}`}>
-                    {stageLabel}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsThreadActionRailCollapsed((current) => !current)}
-                  aria-label={isThreadActionRailCollapsed ? 'Show next steps' : 'Hide next steps'}
-                  aria-expanded={!isThreadActionRailCollapsed}
-                  className="inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)] transition hover:border-[var(--brand)] hover:text-[var(--ink-strong)]"
-                >
-                  {isThreadActionRailCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                </button>
-              </div>
-              {isThreadActionRailCollapsed ? (
-                <button
-                  type="button"
-                  onClick={() => setIsThreadActionRailCollapsed(false)}
-                  aria-label="Expand next steps"
-                  className="mt-3 inline-flex w-full items-center justify-between rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-strong)] transition hover:border-[var(--brand)]"
-                >
-                  <span>Show next steps</span>
-                  <span className="text-[var(--ink-soft)]">
-                    {threadActionRailItems.length}
-                  </span>
-                </button>
-              ) : (
-                <div className="scrollbar-none mt-3 flex gap-2 overflow-x-auto overflow-y-hidden px-1 pb-1">
-                  {threadActionRailItems.map(({ action, label, tone }) => (
-                    <button
-                      key={action}
-                      type="button"
-                      onClick={() => {
-                        if (action === 'title' || action === 'summary') {
-                          requestRefinementMutation.mutate(action)
-                          return
-                        }
-
-                        if (action === 'convert-to-task') {
-                          requestConvertToTaskMutation.mutate()
-                          return
-                        }
-
-                        requestStructuredActionMutation.mutate(action)
-                      }}
-                      className={`inline-flex min-h-10 flex-none items-center justify-center rounded-full border px-4 text-sm font-semibold leading-none transition shadow-sm ${tone === 'emerald' ? 'min-w-[11rem] border-emerald-700 bg-emerald-700 text-white hover:border-emerald-800 hover:bg-emerald-800 dark:border-emerald-300 dark:bg-emerald-300 dark:text-slate-950 dark:hover:bg-emerald-200' : 'min-w-[11rem] border-cyan-700 bg-cyan-700 text-white hover:border-cyan-800 hover:bg-cyan-800 dark:border-cyan-300 dark:bg-cyan-300 dark:text-slate-950 dark:hover:bg-cyan-200'}`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        ) : null}
         <div className="flex items-end gap-2 rounded-[26px] border border-[var(--line)] bg-[var(--surface)] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]">
           <button
             type="button"

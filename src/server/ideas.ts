@@ -151,6 +151,33 @@ type ConvertIdeaToTaskDependencies = {
   ) => Promise<unknown>
 }
 
+type AcceptIdeaBreakdownDependencies = {
+  resolveUser: () => Promise<{
+    user: { id: string }
+  }>
+  getIdeaThread: (ideaId: string) => Promise<{
+    pendingStructuredAction?: {
+      action: 'breakdown'
+      proposedSummary: string
+    } | null
+  }>
+  acceptIdeaThreadStructuredAction: (
+    ideaId: string,
+    input: {
+      proposalId: string
+    },
+  ) => Promise<{
+    thread: GetIdeaThreadResponse
+  }>
+  createAcceptedBreakdownSteps: (
+    input: {
+      ideaId: string
+      steps: Array<{ stepOrder: number; stepText: string }>
+    },
+    userId: string,
+  ) => Promise<unknown>
+}
+
 export async function createIdeaAndBootstrapThread(
   data: Parameters<typeof ideaCreateSchema.parse>[0],
   dependencies: CreateIdeaAndThreadDependencies,
@@ -249,6 +276,25 @@ export async function persistIdeaRefinementAndSync(
   }
 }
 
+export async function listAcceptedBreakdownStepsForIdea(
+  ideaId: string,
+  dependencies: {
+    resolveUser: () => Promise<{
+      user: { id: string }
+    }>
+    listAcceptedBreakdownSteps: (ideaId: string, userId: string) => Promise<Array<{
+      id: string
+      ideaId: string
+      stepOrder: number
+      stepText: string
+      createdAt: Date
+      updatedAt: Date
+    }>>
+  },
+) {
+  return dependencies.resolveUser().then(({ user }) => dependencies.listAcceptedBreakdownSteps(ideaId, user.id))
+}
+
 export async function convertIdeaToTaskAndLink(
   input: {
     ideaId: string
@@ -299,6 +345,60 @@ export async function convertIdeaToTaskAndLink(
   }
 }
 
+function parseBreakdownSummaryToSteps(summary: string) {
+  return summary
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .map((line) => line.replace(/^(?:[-*•]|\d+[.)-])\s+/, '').trim())
+    .filter((line) => line.length > 0)
+    .map((stepText, index) => ({
+      stepOrder: index + 1,
+      stepText,
+    }))
+}
+
+export async function acceptIdeaBreakdownAndPersistSteps(
+  input: {
+    ideaId: string
+    proposalId: string
+  },
+  dependencies: AcceptIdeaBreakdownDependencies,
+) {
+  const { user } = await dependencies.resolveUser()
+  const currentThread = await dependencies.getIdeaThread(input.ideaId)
+  const proposedSummary = currentThread.pendingStructuredAction?.action === 'breakdown'
+    ? currentThread.pendingStructuredAction.proposedSummary
+    : null
+
+  if (!proposedSummary) {
+    throw new Error('No breakdown proposal summary available')
+  }
+
+  const acceptance = await dependencies.acceptIdeaThreadStructuredAction(input.ideaId, {
+    proposalId: input.proposalId,
+  })
+
+  const steps = parseBreakdownSummaryToSteps(proposedSummary)
+
+  if (steps.length === 0) {
+    throw new Error('Accepted breakdown summary did not contain any steps')
+  }
+
+  await dependencies.createAcceptedBreakdownSteps(
+    {
+      ideaId: input.ideaId,
+      steps,
+    },
+    user.id,
+  )
+
+  return {
+    ok: true as const,
+    steps,
+    thread: acceptance.thread,
+  }
+}
+
 export function markServerFnRawResponse(response: Response) {
   const headers = new Headers(response.headers)
   headers.set('x-tss-raw', 'true')
@@ -335,6 +435,15 @@ export const listIdeaExecutionLinks = createServerFn({ method: 'GET' })
       },
       user.id,
     )
+  })
+
+export const listAcceptedBreakdownSteps = createServerFn({ method: 'GET' })
+  .inputValidator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    return listAcceptedBreakdownStepsForIdea(data.id, {
+      resolveUser: () => resolveAuthenticatedPlannerUser(db),
+      listAcceptedBreakdownSteps: (ideaId, userId) => ideasService.listAcceptedBreakdownSteps(ideaId, userId),
+    })
   })
 
 export const createIdea = createServerFn({ method: 'POST' })
@@ -551,6 +660,28 @@ export const convertIdeaToTask = createServerFn({ method: 'POST' })
         createIdeaExecutionLink: (input, userId) => ideasService.createIdeaExecutionLink(input, userId),
         recordTaskCreatedForIdeaThread: (ideaId, input) =>
           assistantThreadService.recordTaskCreatedForIdeaThread(ideaId, input),
+      },
+    )
+  })
+
+export const acceptIdeaBreakdown = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string; proposalId: string }) => input)
+  .handler(async ({ data }) => {
+    return acceptIdeaBreakdownAndPersistSteps(
+      {
+        ideaId: data.id,
+        proposalId: data.proposalId,
+      },
+      {
+        resolveUser: async () => {
+          const { user } = await resolveAuthenticatedPlannerUser(db)
+          return { user }
+        },
+        getIdeaThread: (ideaId) => assistantThreadService.getIdeaThread(ideaId),
+        acceptIdeaThreadStructuredAction: (ideaId, input) =>
+          assistantThreadService.acceptIdeaThreadStructuredAction(ideaId, input),
+        createAcceptedBreakdownSteps: (input, userId) =>
+          ideasService.createAcceptedBreakdownSteps(input, userId),
       },
     )
   })

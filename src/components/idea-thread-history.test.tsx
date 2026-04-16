@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { IdeaThreadHistory } from './idea-thread-history'
+import { AcceptedBreakdownPlanCard, BreakdownProposalCard, IdeaThreadHistory, type AcceptedBreakdownStep, type PendingBreakdownProposal } from './idea-thread-history'
 
 vi.mock('@tanstack/react-router', async () => {
   const actual = await vi.importActual<typeof import('@tanstack/react-router')>('@tanstack/react-router')
@@ -222,5 +222,285 @@ describe('IdeaThreadHistory', () => {
 
     expect(markup).toContain('<time')
     expect(markup).toContain('dateTime="2026-04-12T00:00:30.000Z"')
+  })
+})
+
+const sampleBreakdownProposal: PendingBreakdownProposal = {
+  proposalId: 'prop-abc',
+  action: 'breakdown',
+  proposedSummary: 'Step 1: Research. Step 2: Prototype. Step 3: Ship.',
+  explanation: 'The idea is mature enough to break down into concrete steps.',
+}
+
+describe('BreakdownProposalCard', () => {
+  it('renders the proposal heading, summary, and explanation', () => {
+    const markup = renderToStaticMarkup(
+      <BreakdownProposalCard
+        proposal={sampleBreakdownProposal}
+        isAccepting={false}
+        isRejecting={false}
+        onAccept={() => {}}
+        onReject={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Breakdown proposal')
+    expect(markup).toContain('Step 1: Research. Step 2: Prototype. Step 3: Ship.')
+    expect(markup).toContain('The idea is mature enough to break down into concrete steps.')
+  })
+
+  it('renders Accept and Reject buttons', () => {
+    const markup = renderToStaticMarkup(
+      <BreakdownProposalCard
+        proposal={sampleBreakdownProposal}
+        isAccepting={false}
+        isRejecting={false}
+        onAccept={() => {}}
+        onReject={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Accept breakdown')
+    expect(markup).toContain('Reject breakdown')
+  })
+
+  it('shows accepting/rejecting states when mutations are pending', () => {
+    const acceptingMarkup = renderToStaticMarkup(
+      <BreakdownProposalCard
+        proposal={sampleBreakdownProposal}
+        isAccepting={true}
+        isRejecting={false}
+        onAccept={() => {}}
+        onReject={() => {}}
+      />,
+    )
+    expect(acceptingMarkup).toContain('Accepting…')
+
+    const rejectingMarkup = renderToStaticMarkup(
+      <BreakdownProposalCard
+        proposal={sampleBreakdownProposal}
+        isAccepting={false}
+        isRejecting={true}
+        onAccept={() => {}}
+        onReject={() => {}}
+      />,
+    )
+    expect(rejectingMarkup).toContain('Rejecting…')
+  })
+
+  it('disables both buttons when either mutation is pending', () => {
+    const markup = renderToStaticMarkup(
+      <BreakdownProposalCard
+        proposal={sampleBreakdownProposal}
+        isAccepting={true}
+        isRejecting={false}
+        onAccept={() => {}}
+        onReject={() => {}}
+      />,
+    )
+    // Both buttons carry disabled attr when isAccepting=true
+    const disabledCount = (markup.match(/disabled=""/g) ?? []).length
+    expect(disabledCount).toBe(2)
+  })
+
+  it('carries the accessible region label', () => {
+    const markup = renderToStaticMarkup(
+      <BreakdownProposalCard
+        proposal={sampleBreakdownProposal}
+        isAccepting={false}
+        isRejecting={false}
+        onAccept={() => {}}
+        onReject={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('aria-label="Pending breakdown proposal"')
+  })
+})
+
+describe('IdeaThreadHistory — inline breakdown proposal', () => {
+  it('renders the inline breakdown proposal when one is provided with callbacks', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        pendingBreakdownProposal={sampleBreakdownProposal}
+        isAcceptingBreakdown={false}
+        isRejectingBreakdown={false}
+        onAcceptBreakdown={() => {}}
+        onRejectBreakdown={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Breakdown proposal')
+    expect(markup).toContain('Step 1: Research. Step 2: Prototype. Step 3: Ship.')
+    expect(markup).toContain('Accept breakdown')
+    expect(markup).toContain('Reject breakdown')
+  })
+
+  it('does not render the breakdown card when pendingBreakdownProposal is null', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        pendingBreakdownProposal={null}
+        onAcceptBreakdown={() => {}}
+        onRejectBreakdown={() => {}}
+      />,
+    )
+
+    expect(markup).not.toContain('Breakdown proposal')
+    expect(markup).not.toContain('Accept breakdown')
+  })
+
+  it('does not render the breakdown card when callbacks are omitted', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        pendingBreakdownProposal={sampleBreakdownProposal}
+        // no onAcceptBreakdown / onRejectBreakdown
+      />,
+    )
+
+    expect(markup).not.toContain('Breakdown proposal')
+  })
+
+  it('renders proposal after existing thread events', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[
+          {
+            eventId: 'e1',
+            type: 'assistant_question',
+            createdAt: '2026-04-12T00:01:00.000Z',
+            summary: 'Who are the target users?',
+          },
+        ]}
+        pendingBreakdownProposal={sampleBreakdownProposal}
+        onAcceptBreakdown={() => {}}
+        onRejectBreakdown={() => {}}
+      />,
+    )
+
+    const questionIdx = markup.indexOf('Who are the target users?')
+    const proposalIdx = markup.indexOf('Breakdown proposal')
+    expect(questionIdx).toBeGreaterThan(-1)
+    expect(proposalIdx).toBeGreaterThan(questionIdx)
+  })
+})
+
+const sampleAcceptedSteps: AcceptedBreakdownStep[] = [
+  { id: 'step-1', stepText: 'Research the problem space.' },
+  { id: 'step-2', stepText: 'Prototype a minimal flow.' },
+  { id: 'step-3', stepText: 'Ship and measure.' },
+]
+
+describe('AcceptedBreakdownPlanCard', () => {
+  it('renders the accepted plan heading and all step texts', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard steps={sampleAcceptedSteps} />,
+    )
+
+    expect(markup).toContain('Accepted plan')
+    expect(markup).toContain('Research the problem space.')
+    expect(markup).toContain('Prototype a minimal flow.')
+    expect(markup).toContain('Ship and measure.')
+  })
+
+  it('shows the correct step count badge', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard steps={sampleAcceptedSteps} />,
+    )
+
+    expect(markup).toContain('3 steps')
+  })
+
+  it('shows singular "step" when there is only one step', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard steps={[{ id: 'step-1', stepText: 'Just this one thing.' }]} />,
+    )
+
+    expect(markup).toContain('1 step')
+    expect(markup).not.toContain('1 steps')
+  })
+
+  it('carries the accessible region label', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard steps={sampleAcceptedSteps} />,
+    )
+
+    expect(markup).toContain('aria-label="Accepted breakdown plan"')
+  })
+
+  it('renders numbered step indicators', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard steps={sampleAcceptedSteps} />,
+    )
+
+    expect(markup).toContain('>1<')
+    expect(markup).toContain('>2<')
+    expect(markup).toContain('>3<')
+  })
+})
+
+describe('IdeaThreadHistory — accepted breakdown plan card', () => {
+  it('renders the plan card in the thread when acceptedBreakdownSteps are provided', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        acceptedBreakdownSteps={sampleAcceptedSteps}
+      />,
+    )
+
+    expect(markup).toContain('Accepted plan')
+    expect(markup).toContain('Research the problem space.')
+    expect(markup).toContain('Prototype a minimal flow.')
+  })
+
+  it('does not render the plan card when acceptedBreakdownSteps is empty', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        acceptedBreakdownSteps={[]}
+      />,
+    )
+
+    expect(markup).not.toContain('Accepted plan')
+  })
+
+  it('does not render the plan card when a pending proposal is also present', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        acceptedBreakdownSteps={sampleAcceptedSteps}
+        pendingBreakdownProposal={sampleBreakdownProposal}
+        onAcceptBreakdown={() => {}}
+        onRejectBreakdown={() => {}}
+      />,
+    )
+
+    // Pending proposal should appear, accepted plan should be hidden while
+    // a new proposal is in review.
+    expect(markup).toContain('Breakdown proposal')
+    expect(markup).not.toContain('Accepted plan')
+  })
+
+  it('renders plan card after existing thread events', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[
+          {
+            eventId: 'e1',
+            type: 'assistant_question',
+            createdAt: '2026-04-12T00:01:00.000Z',
+            summary: 'Who are the target users?',
+          },
+        ]}
+        acceptedBreakdownSteps={sampleAcceptedSteps}
+      />,
+    )
+
+    const questionIdx = markup.indexOf('Who are the target users?')
+    const planIdx = markup.indexOf('Accepted plan')
+    expect(questionIdx).toBeGreaterThan(-1)
+    expect(planIdx).toBeGreaterThan(questionIdx)
   })
 })

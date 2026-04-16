@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { approveIdeaProposalAndPersist, convertIdeaToTaskAndLink, createIdeaAndBootstrapThread, markServerFnRawResponse, persistIdeaRefinementAndSync } from './ideas'
+import { acceptIdeaBreakdownAndPersistSteps, approveIdeaProposalAndPersist, convertIdeaToTaskAndLink, createIdeaAndBootstrapThread, listAcceptedBreakdownStepsForIdea, markServerFnRawResponse, persistIdeaRefinementAndSync } from './ideas'
 
 describe('ideas server flow', () => {
   it('creates the canonical idea and bootstraps the assistant thread in one app-side path', async () => {
@@ -334,6 +334,93 @@ describe('ideas server flow', () => {
     })
   })
 
+  it('accepts a breakdown proposal and persists ordered accepted steps from the pending summary', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const getIdeaThread = vi.fn().mockResolvedValue({
+      pendingStructuredAction: {
+        action: 'breakdown',
+        proposedSummary: '1. Validate the riskiest assumption\n- Draft the first experiment\n* Review the results',
+      },
+    })
+    const acceptIdeaThreadStructuredAction = vi.fn().mockResolvedValue({
+      thread: {
+        threadId: 'thread-user-1:idea-123',
+        ideaId: 'idea-123',
+        userId: 'user-1',
+        stage: 'developed',
+      },
+    })
+    const createAcceptedBreakdownSteps = vi.fn().mockResolvedValue({ ok: true as const })
+
+    const result = await acceptIdeaBreakdownAndPersistSteps(
+      {
+        ideaId: 'idea-123',
+        proposalId: 'proposal-1',
+      },
+      {
+        resolveUser,
+        getIdeaThread,
+        acceptIdeaThreadStructuredAction,
+        createAcceptedBreakdownSteps,
+      },
+    )
+
+    expect(getIdeaThread).toHaveBeenCalledWith('idea-123')
+    expect(acceptIdeaThreadStructuredAction).toHaveBeenCalledWith('idea-123', {
+      proposalId: 'proposal-1',
+    })
+    expect(createAcceptedBreakdownSteps).toHaveBeenCalledWith(
+      {
+        ideaId: 'idea-123',
+        steps: [
+          { stepOrder: 1, stepText: 'Validate the riskiest assumption' },
+          { stepOrder: 2, stepText: 'Draft the first experiment' },
+          { stepOrder: 3, stepText: 'Review the results' },
+        ],
+      },
+      'user-1',
+    )
+    expect(result).toEqual({
+      ok: true,
+      steps: [
+        { stepOrder: 1, stepText: 'Validate the riskiest assumption' },
+        { stepOrder: 2, stepText: 'Draft the first experiment' },
+        { stepOrder: 3, stepText: 'Review the results' },
+      ],
+      thread: {
+        threadId: 'thread-user-1:idea-123',
+        ideaId: 'idea-123',
+        userId: 'user-1',
+        stage: 'developed',
+      },
+    })
+  })
+
+  it('fails breakdown acceptance when the pending thread has no breakdown summary', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const getIdeaThread = vi.fn().mockResolvedValue({ pendingStructuredAction: null })
+    const acceptIdeaThreadStructuredAction = vi.fn()
+    const createAcceptedBreakdownSteps = vi.fn()
+
+    await expect(
+      acceptIdeaBreakdownAndPersistSteps(
+        {
+          ideaId: 'idea-123',
+          proposalId: 'proposal-1',
+        },
+        {
+          resolveUser,
+          getIdeaThread,
+          acceptIdeaThreadStructuredAction,
+          createAcceptedBreakdownSteps,
+        },
+      ),
+    ).rejects.toThrow('No breakdown proposal summary available')
+
+    expect(acceptIdeaThreadStructuredAction).not.toHaveBeenCalled()
+    expect(createAcceptedBreakdownSteps).not.toHaveBeenCalled()
+  })
+
   it('fails task conversion when the accepted structured action has no task payload', async () => {
     const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
     const acceptIdeaThreadStructuredAction = vi.fn().mockResolvedValue({
@@ -412,5 +499,28 @@ describe('ideas server flow', () => {
     expect(wrapped.headers.get('x-tss-raw')).toBe('true')
     expect(original.headers.get('x-tss-raw')).toBeNull()
     await expect(wrapped.text()).resolves.toContain('assistant_chunk')
+  })
+
+  it('lists accepted breakdown steps for the authenticated idea owner', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const listAcceptedBreakdownSteps = vi.fn().mockResolvedValue([
+      { id: 'step-1', ideaId: 'idea-123', stepOrder: 1, stepText: 'Validate the riskiest assumption', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'step-2', ideaId: 'idea-123', stepOrder: 2, stepText: 'Draft the first experiment', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'step-3', ideaId: 'idea-123', stepOrder: 3, stepText: 'Review the results', createdAt: new Date(), updatedAt: new Date() },
+    ])
+
+    const result = await listAcceptedBreakdownStepsForIdea('idea-123', {
+      resolveUser,
+      listAcceptedBreakdownSteps,
+    })
+
+    expect(resolveUser).toHaveBeenCalledTimes(1)
+    expect(listAcceptedBreakdownSteps).toHaveBeenCalledWith('idea-123', 'user-1')
+    expect(result.map((step) => step.stepOrder)).toEqual([1, 2, 3])
+    expect(result.map((step) => step.stepText)).toEqual([
+      'Validate the riskiest assumption',
+      'Draft the first experiment',
+      'Review the results',
+    ])
   })
 })

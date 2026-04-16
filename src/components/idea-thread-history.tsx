@@ -1,4 +1,4 @@
-import { CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, ClipboardList } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import {
   deriveThreadState,
@@ -16,6 +16,128 @@ type IdeaThreadVisibleEvent = {
   summary: string
 }
 
+export type PendingBreakdownProposal = {
+  proposalId: string
+  action: 'breakdown'
+  proposedSummary: string
+  explanation: string
+}
+
+export type AcceptedBreakdownStep = {
+  id: string
+  stepText: string
+}
+
+/**
+ * Read-only plan card rendered in the thread once a breakdown proposal has
+ * been accepted.  Visually distinct from the pending proposal card (cyan vs
+ * violet) and carries no per-step actions.
+ */
+export function AcceptedBreakdownPlanCard({ steps }: { steps: AcceptedBreakdownStep[] }) {
+  return (
+    <div
+      role="region"
+      aria-label="Accepted breakdown plan"
+      className="mx-auto w-full max-w-[92%] rounded-[22px] border border-cyan-200 bg-cyan-50/60 px-3.5 py-3 shadow-sm dark:border-cyan-500/30 dark:bg-cyan-500/10 sm:max-w-[85%]"
+    >
+      <div className="mb-2.5 flex items-center gap-2">
+        <ClipboardList size={14} className="shrink-0 text-cyan-600 dark:text-cyan-400" aria-hidden="true" />
+        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-700 dark:text-cyan-300">
+          Accepted plan
+        </span>
+        <span className="ml-auto rounded-full border border-cyan-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-cyan-700 dark:border-cyan-500/30 dark:bg-cyan-500/20 dark:text-cyan-300">
+          {steps.length} step{steps.length === 1 ? '' : 's'}
+        </span>
+      </div>
+      <ol className="m-0 list-none space-y-2 pl-0">
+        {steps.map((step, index) => (
+          <li key={step.id} className="flex items-start gap-2.5">
+            <span
+              aria-hidden="true"
+              className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-cyan-100 text-[11px] font-bold text-cyan-700 dark:bg-cyan-500/20 dark:text-cyan-300"
+            >
+              {index + 1}
+            </span>
+            <span className="text-sm leading-6 text-[var(--ink-strong)]">{step.stepText}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+/**
+ * Inline breakdown proposal card rendered directly in the thread.
+ * Reuses the same accept/reject callbacks as the Guided tab so mutations
+ * are shared and the Guided tab stays intact as a secondary surface.
+ */
+export function BreakdownProposalCard({
+  proposal,
+  isAccepting,
+  isRejecting,
+  onAccept,
+  onReject,
+}: {
+  proposal: PendingBreakdownProposal
+  isAccepting: boolean
+  isRejecting: boolean
+  onAccept: (proposalId: string) => void
+  onReject: (proposalId: string) => void
+}) {
+  const disabled = isAccepting || isRejecting
+
+  return (
+    <div
+      role="region"
+      aria-label="Pending breakdown proposal"
+      className="mx-auto w-full max-w-[92%] rounded-[22px] border border-violet-200 bg-violet-50/70 px-3.5 py-3 shadow-sm dark:border-violet-500/30 dark:bg-violet-500/10 sm:max-w-[85%]"
+    >
+      {/* heading */}
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-violet-700 dark:text-violet-300">
+          Breakdown proposal
+        </span>
+      </div>
+
+      {/* proposed summary */}
+      <div className="rounded-2xl border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/30 dark:bg-violet-500/10">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">Suggested</div>
+        <p className="m-0 mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">
+          {proposal.proposedSummary}
+        </p>
+      </div>
+
+      {/* explanation */}
+      <div className="mt-2 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-faint)]">Why</div>
+        <p className="m-0 mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">
+          {proposal.explanation}
+        </p>
+      </div>
+
+      {/* actions */}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onAccept(proposal.proposalId)}
+          className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isAccepting ? 'Accepting…' : 'Accept breakdown'}
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onReject(proposal.proposalId)}
+          className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isRejecting ? 'Rejecting…' : 'Reject breakdown'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function IdeaThreadHistory({
   visibleEvents,
   threadStatus = 'idle',
@@ -23,6 +145,12 @@ export function IdeaThreadHistory({
   queuedTurns = [],
   lastTurn = null,
   streamingAssistantText = '',
+  acceptedBreakdownSteps = [],
+  pendingBreakdownProposal = null,
+  isAcceptingBreakdown = false,
+  isRejectingBreakdown = false,
+  onAcceptBreakdown,
+  onRejectBreakdown,
   className = '',
   threadRegionId,
   showHeader = true,
@@ -33,6 +161,21 @@ export function IdeaThreadHistory({
   queuedTurns?: Array<ThreadTurnPresentation>
   lastTurn?: ThreadTurnPresentation | null
   streamingAssistantText?: string
+  /**
+   * When accepted breakdown steps exist they are rendered as a read-only plan
+   * card at the bottom of the event list, after all thread events and before
+   * the pending proposal card (if any).
+   */
+  acceptedBreakdownSteps?: AcceptedBreakdownStep[]
+  /**
+   * When a pending breakdown proposal exists it is rendered inline at the
+   * bottom of the event list so users can act on it without leaving the thread.
+   */
+  pendingBreakdownProposal?: PendingBreakdownProposal | null
+  isAcceptingBreakdown?: boolean
+  isRejectingBreakdown?: boolean
+  onAcceptBreakdown?: (proposalId: string) => void
+  onRejectBreakdown?: (proposalId: string) => void
   className?: string
   /** Optional id wired up to a tab's aria-controls for ARIA tab panel semantics */
   threadRegionId?: string
@@ -165,6 +308,24 @@ export function IdeaThreadHistory({
             <p className="m-0 mt-2 text-sm text-[var(--ink-soft)]">Reply to this idea and the assistant will start building context with you here.</p>
           </div>
         )}
+
+        {pendingBreakdownProposal && onAcceptBreakdown && onRejectBreakdown ? (
+          <div className="flex justify-start">
+            <BreakdownProposalCard
+              proposal={pendingBreakdownProposal}
+              isAccepting={isAcceptingBreakdown}
+              isRejecting={isRejectingBreakdown}
+              onAccept={onAcceptBreakdown}
+              onReject={onRejectBreakdown}
+            />
+          </div>
+        ) : null}
+
+        {acceptedBreakdownSteps.length > 0 && !pendingBreakdownProposal ? (
+          <div className="flex justify-start">
+            <AcceptedBreakdownPlanCard steps={acceptedBreakdownSteps} />
+          </div>
+        ) : null}
       </div>
     </section>
   )

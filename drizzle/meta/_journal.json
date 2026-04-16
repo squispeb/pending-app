@@ -29,6 +29,20 @@
       "when": 1776285668261,
       "tag": "0003_red_vulture",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1776285668262,
+      "tag": "0004_accepted_breakdown_steps",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1776346918628,
+      "tag": "0005_stiff_tempest",
+      "breakpoints": true
     }
   ]
 }

@@ -160,6 +160,30 @@ export const ideaExecutionLinks = sqliteTable(
   }),
 )
 
+export const acceptedBreakdownSteps = sqliteTable(
+  'accepted_breakdown_steps',
+  {
+    id: text('id').primaryKey(),
+    ideaId: text('idea_id')
+      .notNull()
+      .references(() => ideas.id, { onDelete: 'cascade' }),
+    stepOrder: integer('step_order').notNull(),
+    stepText: text('step_text').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    ideaStepOrderUniqueIdx: uniqueIndex('accepted_breakdown_step_idea_step_unique').on(
+      table.ideaId,
+      table.stepOrder,
+    ),
+  }),
+)
+
 export const habitCompletions = sqliteTable(
   'habit_completions',
   {
