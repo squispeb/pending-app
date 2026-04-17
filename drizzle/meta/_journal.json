@@ -43,6 +43,13 @@
       "when": 1776346918628,
       "tag": "0005_stiff_tempest",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1776373598853,
+      "tag": "0006_completed_at_accepted_breakdown_steps",
+      "breakpoints": true
     }
   ]
 }

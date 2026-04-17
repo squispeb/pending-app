@@ -176,6 +176,13 @@ type AcceptIdeaBreakdownDependencies = {
     },
     userId: string,
   ) => Promise<unknown>
+  recordBreakdownPlanForIdeaThread?: (
+    ideaId: string,
+    input: {
+      summary: string
+      stepCount: number
+    },
+  ) => Promise<unknown>
 }
 
 export async function createIdeaAndBootstrapThread(
@@ -193,6 +200,69 @@ export async function createIdeaAndBootstrapThread(
     threadId: thread.threadId,
     initialSnapshotId: thread.initialSnapshotId,
   }
+}
+
+type ConvertAcceptedBreakdownStepToTaskDependencies = {
+  resolveUser: () => Promise<{
+    user: { id: string }
+  }>
+  listAcceptedBreakdownSteps: (ideaId: string, userId: string) => Promise<Array<{
+    id: string
+    ideaId: string
+    stepOrder: number
+    stepText: string
+    createdAt: Date
+    updatedAt: Date
+  }>>
+  listIdeaExecutionLinks: (
+    input: {
+      ideaId: string
+      targetType?: 'task' | 'habit'
+    },
+    userId: string,
+  ) => Promise<Array<{
+    id: string
+    ideaId: string
+    targetType: 'task' | 'habit'
+    targetId: string
+    linkReason: string | null
+    createdAt: Date
+    updatedAt: Date
+  }>>
+  createTask: (
+    userId: string,
+    input: {
+      title: string
+      notes: string | undefined
+      priority: 'low' | 'medium' | 'high'
+      dueDate: string | undefined
+      dueTime: string | undefined
+      reminderAt: string | undefined
+      estimatedMinutes: number | undefined
+      preferredStartTime: string | undefined
+      preferredEndTime: string | undefined
+    },
+  ) => Promise<{
+    ok: true
+    id: string
+  }>
+  createIdeaExecutionLink: (
+    input: {
+      ideaId: string
+      targetType: 'task' | 'habit'
+      targetId: string
+      linkReason?: string | null
+    },
+    userId: string,
+  ) => Promise<unknown>
+  recordTaskCreatedForIdeaThread?: (
+    ideaId: string,
+    input: {
+      taskId: string
+      summary: string
+      stepOrder?: number
+    },
+  ) => Promise<unknown>
 }
 
 export async function approveIdeaProposalAndPersist(
@@ -287,13 +357,179 @@ export async function listAcceptedBreakdownStepsForIdea(
       ideaId: string
       stepOrder: number
       stepText: string
+      completedAt: Date | null
       createdAt: Date
       updatedAt: Date
     }>>
+    listIdeaExecutionLinks?: (
+      input: {
+        ideaId: string
+        targetType?: 'task' | 'habit'
+      },
+      userId: string,
+    ) => Promise<Array<{
+      targetType: 'task' | 'habit'
+      targetId: string
+      linkReason: string | null
+    }>>
+    listTasks?: (userId: string) => Promise<Array<{
+      id: string
+      status: string
+      completedAt: Date | null
+      archivedAt: Date | null
+    }>>
   },
 ) {
-  return dependencies.resolveUser().then(({ user }) => dependencies.listAcceptedBreakdownSteps(ideaId, user.id))
+  const { user } = await dependencies.resolveUser()
+  const steps = await dependencies.listAcceptedBreakdownSteps(ideaId, user.id)
+
+  if (!dependencies.listIdeaExecutionLinks || !dependencies.listTasks || steps.length === 0) {
+    return steps.map((step) => ({
+      ...step,
+      completedSource: step.completedAt ? 'manual' as const : null,
+    }))
+  }
+
+  const [links, tasks] = await Promise.all([
+    dependencies.listIdeaExecutionLinks({ ideaId, targetType: 'task' }, user.id),
+    dependencies.listTasks(user.id),
+  ])
+  const tasksById = new Map(tasks.map((task) => [task.id, task]))
+
+  return steps.map((step) => {
+    const taskLink = links.find((link) => link.linkReason === `Accepted breakdown step #${step.stepOrder} from idea.`)
+    const linkedTask = taskLink ? tasksById.get(taskLink.targetId) : undefined
+    const linkedTaskCompletedAt = linkedTask && (linkedTask.status === 'completed' || linkedTask.completedAt !== null)
+      ? linkedTask.completedAt ?? step.updatedAt
+      : null
+
+    if (linkedTaskCompletedAt) {
+      return {
+        ...step,
+        completedAt: linkedTaskCompletedAt,
+        completedSource: 'linked-task' as const,
+      }
+    }
+
+    if (step.completedAt) {
+      return {
+        ...step,
+        completedSource: 'manual' as const,
+      }
+    }
+
+    return {
+      ...step,
+      completedSource: null,
+    }
+  })
 }
+
+export async function completeAcceptedBreakdownStepForIdea(
+  input: {
+    ideaId: string
+    stepId: string
+  },
+  dependencies: {
+    resolveUser: () => Promise<{ user: { id: string } }>
+    completeAcceptedBreakdownStep: (input: { ideaId: string; stepId: string }, userId: string) => Promise<{ ok: true }>
+    listAcceptedBreakdownSteps: (ideaId: string, userId: string) => Promise<Array<{
+      id: string
+      stepOrder: number
+      stepText: string
+      completedAt: Date | null
+    }>>
+    recordProgressUpdateForIdeaThread?: (
+      ideaId: string,
+      input: { summary: string; stepOrder?: number; status?: 'completed' | 'reopened' },
+    ) => Promise<unknown>
+  },
+) {
+  const { user } = await dependencies.resolveUser()
+  const steps = await dependencies.listAcceptedBreakdownSteps(input.ideaId, user.id)
+  const step = steps.find((candidate) => candidate.id === input.stepId)
+
+  if (!step) {
+    throw new Error('Accepted breakdown step not found')
+  }
+
+  const result = await dependencies.completeAcceptedBreakdownStep(input, user.id)
+  await dependencies.recordProgressUpdateForIdeaThread?.(input.ideaId, {
+    summary: `Marked accepted breakdown step #${step.stepOrder} done: ${step.stepText}`,
+    stepOrder: step.stepOrder,
+    status: 'completed',
+  })
+
+  return result
+}
+
+export async function uncompleteAcceptedBreakdownStepForIdea(
+  input: {
+    ideaId: string
+    stepId: string
+  },
+  dependencies: {
+    resolveUser: () => Promise<{ user: { id: string } }>
+    uncompleteAcceptedBreakdownStep: (input: { ideaId: string; stepId: string }, userId: string) => Promise<{ ok: true }>
+    listAcceptedBreakdownSteps: (ideaId: string, userId: string) => Promise<Array<{
+      id: string
+      stepOrder: number
+      stepText: string
+      completedAt: Date | null
+    }>>
+    recordProgressUpdateForIdeaThread?: (
+      ideaId: string,
+      input: { summary: string; stepOrder?: number; status?: 'completed' | 'reopened' },
+    ) => Promise<unknown>
+  },
+) {
+  const { user } = await dependencies.resolveUser()
+  const steps = await dependencies.listAcceptedBreakdownSteps(input.ideaId, user.id)
+  const step = steps.find((candidate) => candidate.id === input.stepId)
+
+  if (!step) {
+    throw new Error('Accepted breakdown step not found')
+  }
+
+  const result = await dependencies.uncompleteAcceptedBreakdownStep(input, user.id)
+  await dependencies.recordProgressUpdateForIdeaThread?.(input.ideaId, {
+    summary: `Reopened accepted breakdown step #${step.stepOrder}: ${step.stepText}`,
+    stepOrder: step.stepOrder,
+    status: 'reopened',
+  })
+
+  return result
+}
+
+export const completeAcceptedBreakdownStep = createServerFn({ method: 'POST' })
+  .inputValidator((input: { ideaId: string; stepId: string }) => input)
+  .handler(async ({ data }) => {
+    return completeAcceptedBreakdownStepForIdea(data, {
+      resolveUser: async () => {
+        const { user } = await resolveAuthenticatedPlannerUser(db)
+        return { user }
+      },
+      completeAcceptedBreakdownStep: (input, userId) => ideasService.completeAcceptedBreakdownStep(input, userId),
+      listAcceptedBreakdownSteps: (ideaId, userId) => ideasService.listAcceptedBreakdownSteps(ideaId, userId),
+      recordProgressUpdateForIdeaThread: (ideaId, input) =>
+        assistantThreadService.recordProgressUpdateForIdeaThread(ideaId, input),
+    })
+  })
+
+export const uncompleteAcceptedBreakdownStep = createServerFn({ method: 'POST' })
+  .inputValidator((input: { ideaId: string; stepId: string }) => input)
+  .handler(async ({ data }) => {
+    return uncompleteAcceptedBreakdownStepForIdea(data, {
+      resolveUser: async () => {
+        const { user } = await resolveAuthenticatedPlannerUser(db)
+        return { user }
+      },
+      uncompleteAcceptedBreakdownStep: (input, userId) => ideasService.uncompleteAcceptedBreakdownStep(input, userId),
+      listAcceptedBreakdownSteps: (ideaId, userId) => ideasService.listAcceptedBreakdownSteps(ideaId, userId),
+      recordProgressUpdateForIdeaThread: (ideaId, input) =>
+        assistantThreadService.recordProgressUpdateForIdeaThread(ideaId, input),
+    })
+  })
 
 export async function convertIdeaToTaskAndLink(
   input: {
@@ -345,7 +581,79 @@ export async function convertIdeaToTaskAndLink(
   }
 }
 
-function parseBreakdownSummaryToSteps(summary: string) {
+export async function convertAcceptedBreakdownStepToTaskAndLink(
+  input: {
+    ideaId: string
+    stepId: string
+  },
+  dependencies: ConvertAcceptedBreakdownStepToTaskDependencies,
+) {
+  const { user } = await dependencies.resolveUser()
+  const acceptedSteps = await dependencies.listAcceptedBreakdownSteps(input.ideaId, user.id)
+  const selectedStep = acceptedSteps.find((step) => step.id === input.stepId)
+
+  if (!selectedStep) {
+    throw new Error('Accepted breakdown step not found')
+  }
+
+  const linkReason = `Accepted breakdown step #${selectedStep.stepOrder} from idea.`
+  const existingTaskLink = await dependencies.listIdeaExecutionLinks(
+    {
+      ideaId: input.ideaId,
+      targetType: 'task',
+    },
+    user.id,
+  )
+    .then((links) => links.find((link) => link.linkReason === linkReason))
+
+  if (existingTaskLink) {
+    return {
+      ok: true as const,
+      taskId: existingTaskLink.targetId,
+      step: selectedStep,
+    }
+  }
+
+  const taskTitle = selectedStep.stepText.length > 120
+    ? `${selectedStep.stepText.slice(0, 117).trimEnd()}...`
+    : selectedStep.stepText
+
+  const taskResult = await dependencies.createTask(user.id, {
+    title: taskTitle,
+    notes: selectedStep.stepText,
+    priority: 'medium',
+    dueDate: undefined,
+    dueTime: undefined,
+    reminderAt: undefined,
+    estimatedMinutes: undefined,
+    preferredStartTime: undefined,
+    preferredEndTime: undefined,
+  })
+
+  await dependencies.createIdeaExecutionLink(
+    {
+      ideaId: input.ideaId,
+      targetType: 'task',
+      targetId: taskResult.id,
+      linkReason,
+    },
+    user.id,
+  )
+
+  await dependencies.recordTaskCreatedForIdeaThread?.(input.ideaId, {
+    taskId: taskResult.id,
+    summary: `Created task ${selectedStep.stepText} from accepted breakdown step #${selectedStep.stepOrder}.`,
+    stepOrder: selectedStep.stepOrder,
+  })
+
+  return {
+    ok: true as const,
+    taskId: taskResult.id,
+    step: selectedStep,
+  }
+}
+
+export function parseBreakdownSummaryToSteps(summary: string) {
   return summary
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -391,6 +699,11 @@ export async function acceptIdeaBreakdownAndPersistSteps(
     },
     user.id,
   )
+
+  await dependencies.recordBreakdownPlanForIdeaThread?.(input.ideaId, {
+    summary: `Stored accepted breakdown plan with ${steps.length} ${steps.length === 1 ? 'step' : 'steps'}.`,
+    stepCount: steps.length,
+  })
 
   return {
     ok: true as const,
@@ -443,6 +756,22 @@ export const listAcceptedBreakdownSteps = createServerFn({ method: 'GET' })
     return listAcceptedBreakdownStepsForIdea(data.id, {
       resolveUser: () => resolveAuthenticatedPlannerUser(db),
       listAcceptedBreakdownSteps: (ideaId, userId) => ideasService.listAcceptedBreakdownSteps(ideaId, userId),
+      listIdeaExecutionLinks: (input, userId) => ideasService.listIdeaExecutionLinks(input, userId),
+      listTasks: (userId) => tasksService.listTasks(userId),
+    })
+  })
+
+export const convertAcceptedBreakdownStepToTask = createServerFn({ method: 'POST' })
+  .inputValidator((input: { ideaId: string; stepId: string }) => input)
+  .handler(async ({ data }) => {
+    return convertAcceptedBreakdownStepToTaskAndLink(data, {
+      resolveUser: () => resolveAuthenticatedPlannerUser(db),
+      listAcceptedBreakdownSteps: (ideaId, userId) => ideasService.listAcceptedBreakdownSteps(ideaId, userId),
+      listIdeaExecutionLinks: (input, userId) => ideasService.listIdeaExecutionLinks(input, userId),
+      createTask: (userId, input) => tasksService.createTask(userId, input),
+      createIdeaExecutionLink: (input, userId) => ideasService.createIdeaExecutionLink(input, userId),
+      recordTaskCreatedForIdeaThread: (ideaId, input) =>
+        assistantThreadService.recordTaskCreatedForIdeaThread(ideaId, input),
     })
   })
 
@@ -682,6 +1011,8 @@ export const acceptIdeaBreakdown = createServerFn({ method: 'POST' })
           assistantThreadService.acceptIdeaThreadStructuredAction(ideaId, input),
         createAcceptedBreakdownSteps: (input, userId) =>
           ideasService.createAcceptedBreakdownSteps(input, userId),
+        recordBreakdownPlanForIdeaThread: (ideaId, input) =>
+          assistantThreadService.recordBreakdownPlanForIdeaThread(ideaId, input),
       },
     )
   })

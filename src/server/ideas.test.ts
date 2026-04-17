@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { acceptIdeaBreakdownAndPersistSteps, approveIdeaProposalAndPersist, convertIdeaToTaskAndLink, createIdeaAndBootstrapThread, listAcceptedBreakdownStepsForIdea, markServerFnRawResponse, persistIdeaRefinementAndSync } from './ideas'
+import { acceptIdeaBreakdownAndPersistSteps, approveIdeaProposalAndPersist, completeAcceptedBreakdownStepForIdea, convertAcceptedBreakdownStepToTaskAndLink, convertIdeaToTaskAndLink, createIdeaAndBootstrapThread, listAcceptedBreakdownStepsForIdea, markServerFnRawResponse, parseBreakdownSummaryToSteps, persistIdeaRefinementAndSync, uncompleteAcceptedBreakdownStepForIdea } from './ideas'
 
 describe('ideas server flow', () => {
   it('creates the canonical idea and bootstraps the assistant thread in one app-side path', async () => {
@@ -351,6 +351,7 @@ describe('ideas server flow', () => {
       },
     })
     const createAcceptedBreakdownSteps = vi.fn().mockResolvedValue({ ok: true as const })
+    const recordBreakdownPlanForIdeaThread = vi.fn().mockResolvedValue({ ok: true as const })
 
     const result = await acceptIdeaBreakdownAndPersistSteps(
       {
@@ -362,6 +363,7 @@ describe('ideas server flow', () => {
         getIdeaThread,
         acceptIdeaThreadStructuredAction,
         createAcceptedBreakdownSteps,
+        recordBreakdownPlanForIdeaThread,
       },
     )
 
@@ -380,6 +382,10 @@ describe('ideas server flow', () => {
       },
       'user-1',
     )
+    expect(recordBreakdownPlanForIdeaThread).toHaveBeenCalledWith('idea-123', {
+      summary: 'Stored accepted breakdown plan with 3 steps.',
+      stepCount: 3,
+    })
     expect(result).toEqual({
       ok: true,
       steps: [
@@ -394,6 +400,230 @@ describe('ideas server flow', () => {
         stage: 'developed',
       },
     })
+  })
+
+  it('creates a canonical task from one accepted breakdown step and links it to the idea', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const listAcceptedBreakdownSteps = vi.fn().mockResolvedValue([
+      { id: 'step-1', ideaId: 'idea-123', stepOrder: 1, stepText: 'Validate the riskiest assumption', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'step-2', ideaId: 'idea-123', stepOrder: 2, stepText: 'Draft the first experiment', createdAt: new Date(), updatedAt: new Date() },
+    ])
+    const listIdeaExecutionLinks = vi.fn().mockResolvedValue([])
+    const createTask = vi.fn().mockResolvedValue({ ok: true as const, id: 'task-123' })
+    const createIdeaExecutionLink = vi.fn().mockResolvedValue({ ok: true })
+    const recordTaskCreatedForIdeaThread = vi.fn().mockResolvedValue({ ok: true })
+
+    const result = await convertAcceptedBreakdownStepToTaskAndLink(
+      {
+        ideaId: 'idea-123',
+        stepId: 'step-2',
+      },
+      {
+        resolveUser,
+        listAcceptedBreakdownSteps,
+        listIdeaExecutionLinks,
+        createTask,
+        createIdeaExecutionLink,
+        recordTaskCreatedForIdeaThread,
+      },
+    )
+
+    expect(resolveUser).toHaveBeenCalledTimes(1)
+    expect(listAcceptedBreakdownSteps).toHaveBeenCalledWith('idea-123', 'user-1')
+    expect(listIdeaExecutionLinks).toHaveBeenCalledWith(
+      {
+        ideaId: 'idea-123',
+        targetType: 'task',
+      },
+      'user-1',
+    )
+    expect(createTask).toHaveBeenCalledWith('user-1', {
+      title: 'Draft the first experiment',
+      notes: 'Draft the first experiment',
+      priority: 'medium',
+      dueDate: undefined,
+      dueTime: undefined,
+      reminderAt: undefined,
+      estimatedMinutes: undefined,
+      preferredStartTime: undefined,
+      preferredEndTime: undefined,
+    })
+    expect(createIdeaExecutionLink).toHaveBeenCalledWith(
+      {
+        ideaId: 'idea-123',
+        targetType: 'task',
+        targetId: 'task-123',
+        linkReason: 'Accepted breakdown step #2 from idea.',
+      },
+      'user-1',
+    )
+    expect(recordTaskCreatedForIdeaThread).toHaveBeenCalledWith('idea-123', {
+      taskId: 'task-123',
+      summary: 'Created task Draft the first experiment from accepted breakdown step #2.',
+      stepOrder: 2,
+    })
+    expect(result).toEqual({
+      ok: true,
+      taskId: 'task-123',
+      step: {
+        id: 'step-2',
+        ideaId: 'idea-123',
+        stepOrder: 2,
+        stepText: 'Draft the first experiment',
+        createdAt: expect.any(Date),
+        updatedAt: expect.any(Date),
+      },
+    })
+  })
+
+  it('parses numbered breakdown summaries into ordered steps', () => {
+    expect(parseBreakdownSummaryToSteps('1. Validate the riskiest assumption\n2. Draft the first experiment\n3. Review the results')).toEqual([
+      { stepOrder: 1, stepText: 'Validate the riskiest assumption' },
+      { stepOrder: 2, stepText: 'Draft the first experiment' },
+      { stepOrder: 3, stepText: 'Review the results' },
+    ])
+  })
+
+  it('parses bullet breakdown summaries into ordered steps', () => {
+    expect(parseBreakdownSummaryToSteps('- Validate the riskiest assumption\n* Draft the first experiment\n• Review the results')).toEqual([
+      { stepOrder: 1, stepText: 'Validate the riskiest assumption' },
+      { stepOrder: 2, stepText: 'Draft the first experiment' },
+      { stepOrder: 3, stepText: 'Review the results' },
+    ])
+  })
+
+  it('treats single-paragraph breakdown summaries as a single step', () => {
+    expect(parseBreakdownSummaryToSteps('Validate the riskiest assumption. Draft the first experiment. Review the results.')).toEqual([
+      {
+        stepOrder: 1,
+        stepText: 'Validate the riskiest assumption. Draft the first experiment. Review the results.',
+      },
+    ])
+  })
+
+  it('returns an existing linked task when the accepted breakdown step was already converted', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const listAcceptedBreakdownSteps = vi.fn().mockResolvedValue([
+      { id: 'step-2', ideaId: 'idea-123', stepOrder: 2, stepText: 'Draft the first experiment', createdAt: new Date(), updatedAt: new Date() },
+    ])
+    const listIdeaExecutionLinks = vi.fn().mockResolvedValue([
+      {
+        id: 'link-1',
+        ideaId: 'idea-123',
+        targetType: 'task' as const,
+        targetId: 'task-123',
+        linkReason: 'Accepted breakdown step #2 from idea.',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ])
+    const createTask = vi.fn()
+    const createIdeaExecutionLink = vi.fn()
+    const recordTaskCreatedForIdeaThread = vi.fn()
+
+    const result = await convertAcceptedBreakdownStepToTaskAndLink(
+      {
+        ideaId: 'idea-123',
+        stepId: 'step-2',
+      },
+      {
+        resolveUser,
+        listAcceptedBreakdownSteps,
+        listIdeaExecutionLinks,
+        createTask,
+        createIdeaExecutionLink,
+        recordTaskCreatedForIdeaThread,
+      },
+    )
+
+    expect(listIdeaExecutionLinks).toHaveBeenCalledWith(
+      {
+        ideaId: 'idea-123',
+        targetType: 'task',
+      },
+      'user-1',
+    )
+    expect(createTask).not.toHaveBeenCalled()
+    expect(createIdeaExecutionLink).not.toHaveBeenCalled()
+    expect(recordTaskCreatedForIdeaThread).not.toHaveBeenCalled()
+    expect(result).toEqual({
+      ok: true,
+      taskId: 'task-123',
+      step: {
+        id: 'step-2',
+        ideaId: 'idea-123',
+        stepOrder: 2,
+        stepText: 'Draft the first experiment',
+        createdAt: expect.any(Date),
+        updatedAt: expect.any(Date),
+      },
+    })
+  })
+
+  it('truncates long accepted breakdown steps for task titles and keeps the full step in notes', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const longStepText = 'Focus onboarding improvements on customer flows for independent nutritionists in Peru (age ~20–35). Measure activation, time-to-first-value and retention; validate current pain points via short interviews.'
+    const listAcceptedBreakdownSteps = vi.fn().mockResolvedValue([
+      { id: 'step-1', ideaId: 'idea-123', stepOrder: 1, stepText: longStepText, createdAt: new Date(), updatedAt: new Date() },
+    ])
+    const listIdeaExecutionLinks = vi.fn().mockResolvedValue([])
+    const createTask = vi.fn().mockResolvedValue({ ok: true as const, id: 'task-999' })
+    const createIdeaExecutionLink = vi.fn().mockResolvedValue({ ok: true })
+    const recordTaskCreatedForIdeaThread = vi.fn().mockResolvedValue({ ok: true })
+
+    await convertAcceptedBreakdownStepToTaskAndLink(
+      {
+        ideaId: 'idea-123',
+        stepId: 'step-1',
+      },
+      {
+        resolveUser,
+        listAcceptedBreakdownSteps,
+        listIdeaExecutionLinks,
+        createTask,
+        createIdeaExecutionLink,
+        recordTaskCreatedForIdeaThread,
+      },
+    )
+
+    expect(createTask).toHaveBeenCalledWith('user-1', {
+      title: `${longStepText.slice(0, 117).trimEnd()}...`,
+      notes: longStepText,
+      priority: 'medium',
+      dueDate: undefined,
+      dueTime: undefined,
+      reminderAt: undefined,
+      estimatedMinutes: undefined,
+      preferredStartTime: undefined,
+      preferredEndTime: undefined,
+    })
+  })
+
+  it('fails when the requested accepted breakdown step does not exist', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const listAcceptedBreakdownSteps = vi.fn().mockResolvedValue([
+      { id: 'step-1', ideaId: 'idea-123', stepOrder: 1, stepText: 'Validate the riskiest assumption', createdAt: new Date(), updatedAt: new Date() },
+    ])
+    const createTask = vi.fn()
+    const createIdeaExecutionLink = vi.fn()
+
+    await expect(
+      convertAcceptedBreakdownStepToTaskAndLink(
+        {
+          ideaId: 'idea-123',
+          stepId: 'missing-step',
+        },
+        {
+          resolveUser,
+          listAcceptedBreakdownSteps,
+          createTask,
+          createIdeaExecutionLink,
+        },
+      ),
+    ).rejects.toThrow('Accepted breakdown step not found')
+
+    expect(createTask).not.toHaveBeenCalled()
+    expect(createIdeaExecutionLink).not.toHaveBeenCalled()
   })
 
   it('fails breakdown acceptance when the pending thread has no breakdown summary', async () => {
@@ -504,9 +734,9 @@ describe('ideas server flow', () => {
   it('lists accepted breakdown steps for the authenticated idea owner', async () => {
     const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
     const listAcceptedBreakdownSteps = vi.fn().mockResolvedValue([
-      { id: 'step-1', ideaId: 'idea-123', stepOrder: 1, stepText: 'Validate the riskiest assumption', createdAt: new Date(), updatedAt: new Date() },
-      { id: 'step-2', ideaId: 'idea-123', stepOrder: 2, stepText: 'Draft the first experiment', createdAt: new Date(), updatedAt: new Date() },
-      { id: 'step-3', ideaId: 'idea-123', stepOrder: 3, stepText: 'Review the results', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'step-1', ideaId: 'idea-123', stepOrder: 1, stepText: 'Validate the riskiest assumption', completedAt: null, createdAt: new Date(), updatedAt: new Date() },
+      { id: 'step-2', ideaId: 'idea-123', stepOrder: 2, stepText: 'Draft the first experiment', completedAt: new Date(), createdAt: new Date(), updatedAt: new Date() },
+      { id: 'step-3', ideaId: 'idea-123', stepOrder: 3, stepText: 'Review the results', completedAt: null, createdAt: new Date(), updatedAt: new Date() },
     ])
 
     const result = await listAcceptedBreakdownStepsForIdea('idea-123', {
@@ -522,5 +752,131 @@ describe('ideas server flow', () => {
       'Draft the first experiment',
       'Review the results',
     ])
+    expect(result.map((step) => step.completedAt)).toEqual([null, expect.any(Date), null])
+    expect(result.map((step) => step.completedSource)).toEqual([null, 'manual', null])
+  })
+
+  it('derives accepted breakdown step completion from a linked completed task', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const updatedAt = new Date('2026-04-16T10:00:00.000Z')
+    const linkedCompletedAt = new Date('2026-04-16T12:00:00.000Z')
+    const listAcceptedBreakdownSteps = vi.fn().mockResolvedValue([
+      { id: 'step-1', ideaId: 'idea-123', stepOrder: 1, stepText: 'Validate the riskiest assumption', completedAt: null, createdAt: new Date(), updatedAt },
+      { id: 'step-2', ideaId: 'idea-123', stepOrder: 2, stepText: 'Draft the first experiment', completedAt: null, createdAt: new Date(), updatedAt: new Date() },
+    ])
+    const listIdeaExecutionLinks = vi.fn().mockResolvedValue([
+      { targetType: 'task' as const, targetId: 'task-123', linkReason: 'Accepted breakdown step #1 from idea.' },
+    ])
+    const listTasks = vi.fn().mockResolvedValue([
+      { id: 'task-123', status: 'completed', completedAt: linkedCompletedAt, archivedAt: null },
+      { id: 'task-999', status: 'active', completedAt: null, archivedAt: null },
+    ])
+
+    const result = await listAcceptedBreakdownStepsForIdea('idea-123', {
+      resolveUser,
+      listAcceptedBreakdownSteps,
+      listIdeaExecutionLinks,
+      listTasks,
+    })
+
+    expect(listIdeaExecutionLinks).toHaveBeenCalledWith({ ideaId: 'idea-123', targetType: 'task' }, 'user-1')
+    expect(listTasks).toHaveBeenCalledWith('user-1')
+    expect(result[0]).toMatchObject({
+      id: 'step-1',
+      completedAt: linkedCompletedAt,
+      completedSource: 'linked-task',
+    })
+    expect(result[1]).toMatchObject({
+      id: 'step-2',
+      completedAt: null,
+      completedSource: null,
+    })
+  })
+
+  it('falls back to the step updatedAt when a linked completed task has no completedAt timestamp', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const updatedAt = new Date('2026-04-16T10:00:00.000Z')
+    const listAcceptedBreakdownSteps = vi.fn().mockResolvedValue([
+      { id: 'step-1', ideaId: 'idea-123', stepOrder: 1, stepText: 'Validate the riskiest assumption', completedAt: null, createdAt: new Date(), updatedAt },
+    ])
+    const listIdeaExecutionLinks = vi.fn().mockResolvedValue([
+      { targetType: 'task' as const, targetId: 'task-123', linkReason: 'Accepted breakdown step #1 from idea.' },
+    ])
+    const listTasks = vi.fn().mockResolvedValue([
+      { id: 'task-123', status: 'completed', completedAt: null, archivedAt: null },
+    ])
+
+    const [step] = await listAcceptedBreakdownStepsForIdea('idea-123', {
+      resolveUser,
+      listAcceptedBreakdownSteps,
+      listIdeaExecutionLinks,
+      listTasks,
+    })
+
+    expect(step?.completedAt).toEqual(updatedAt)
+    expect(step?.completedSource).toBe('linked-task')
+  })
+
+  it('completes an accepted breakdown step for the authenticated idea owner', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const completeAcceptedBreakdownStep = vi.fn().mockResolvedValue({ ok: true as const })
+    const listAcceptedBreakdownSteps = vi.fn().mockResolvedValue([
+      { id: 'step-1', stepOrder: 1, stepText: 'Validate the riskiest assumption', completedAt: null },
+    ])
+    const recordProgressUpdateForIdeaThread = vi.fn().mockResolvedValue({ ok: true as const })
+
+    const result = await completeAcceptedBreakdownStepForIdea(
+      { ideaId: 'idea-123', stepId: 'step-1' },
+      { resolveUser, completeAcceptedBreakdownStep, listAcceptedBreakdownSteps, recordProgressUpdateForIdeaThread },
+    )
+
+    expect(resolveUser).toHaveBeenCalledTimes(1)
+    expect(listAcceptedBreakdownSteps).toHaveBeenCalledWith('idea-123', 'user-1')
+    expect(completeAcceptedBreakdownStep).toHaveBeenCalledWith({ ideaId: 'idea-123', stepId: 'step-1' }, 'user-1')
+    expect(recordProgressUpdateForIdeaThread).toHaveBeenCalledWith('idea-123', {
+      summary: 'Marked accepted breakdown step #1 done: Validate the riskiest assumption',
+      stepOrder: 1,
+      status: 'completed',
+    })
+    expect(result).toEqual({ ok: true })
+  })
+
+  it('uncompletes an accepted breakdown step for the authenticated idea owner', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const uncompleteAcceptedBreakdownStep = vi.fn().mockResolvedValue({ ok: true as const })
+    const listAcceptedBreakdownSteps = vi.fn().mockResolvedValue([
+      { id: 'step-1', stepOrder: 1, stepText: 'Validate the riskiest assumption', completedAt: new Date() },
+    ])
+    const recordProgressUpdateForIdeaThread = vi.fn().mockResolvedValue({ ok: true as const })
+
+    const result = await uncompleteAcceptedBreakdownStepForIdea(
+      { ideaId: 'idea-123', stepId: 'step-1' },
+      { resolveUser, uncompleteAcceptedBreakdownStep, listAcceptedBreakdownSteps, recordProgressUpdateForIdeaThread },
+    )
+
+    expect(resolveUser).toHaveBeenCalledTimes(1)
+    expect(listAcceptedBreakdownSteps).toHaveBeenCalledWith('idea-123', 'user-1')
+    expect(uncompleteAcceptedBreakdownStep).toHaveBeenCalledWith({ ideaId: 'idea-123', stepId: 'step-1' }, 'user-1')
+    expect(recordProgressUpdateForIdeaThread).toHaveBeenCalledWith('idea-123', {
+      summary: 'Reopened accepted breakdown step #1: Validate the riskiest assumption',
+      stepOrder: 1,
+      status: 'reopened',
+    })
+    expect(result).toEqual({ ok: true })
+  })
+
+  it('fails completion when the accepted breakdown step cannot be found', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const completeAcceptedBreakdownStep = vi.fn().mockResolvedValue({ ok: true as const })
+    const listAcceptedBreakdownSteps = vi.fn().mockResolvedValue([])
+
+    await expect(
+      completeAcceptedBreakdownStepForIdea(
+        { ideaId: 'idea-123', stepId: 'missing-step' },
+        { resolveUser, completeAcceptedBreakdownStep, listAcceptedBreakdownSteps },
+      ),
+    ).rejects.toThrow('Accepted breakdown step not found')
+
+    expect(completeAcceptedBreakdownStep).not.toHaveBeenCalled()
   })
 })

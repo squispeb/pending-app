@@ -1,6 +1,15 @@
-import { AlertTriangle, CheckCircle2, HelpCircle, Lightbulb, MessageSquareText, Sparkles, TrendingUp } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ClipboardList, HelpCircle, Lightbulb, MessageSquareText, Sparkles, TrendingUp } from 'lucide-react'
 
-export type ThreadEventType = 'thread_created' | 'user_turn_added' | 'assistant_question' | 'assistant_synthesis' | 'stage_changed' | 'assistant_failed' | 'task_created'
+export type ThreadEventType =
+  | 'thread_created'
+  | 'user_turn_added'
+  | 'assistant_question'
+  | 'assistant_synthesis'
+  | 'stage_changed'
+  | 'assistant_failed'
+  | 'breakdown_plan_recorded'
+  | 'step_status_changed'
+  | 'task_created'
 
 export type ThreadStatus = 'idle' | 'queued' | 'processing' | 'streaming' | 'failed'
 
@@ -30,6 +39,10 @@ export function formatThreadEventLabel(type: ThreadEventType) {
       return 'Stage changed'
     case 'assistant_failed':
       return 'Assistant failed'
+    case 'breakdown_plan_recorded':
+      return 'Plan recorded'
+    case 'step_status_changed':
+      return 'Step updated'
     case 'task_created':
       return 'Task created'
   }
@@ -71,6 +84,20 @@ export function getThreadEventPresentation(type: ThreadEventType) {
         icon: AlertTriangle,
         iconClassName: 'text-red-500',
         cardClassName: 'border-red-200 bg-red-50/70 dark:border-red-500/30 dark:bg-red-500/10',
+      }
+    case 'breakdown_plan_recorded':
+      return {
+        label: formatThreadEventLabel(type),
+        icon: ClipboardList,
+        iconClassName: 'text-cyan-500',
+        cardClassName: 'border-cyan-200 bg-cyan-50/80 dark:border-cyan-500/30 dark:bg-cyan-500/10',
+      }
+    case 'step_status_changed':
+      return {
+        label: formatThreadEventLabel(type),
+        icon: CheckCircle2,
+        iconClassName: 'text-emerald-500',
+        cardClassName: 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-500/30 dark:bg-emerald-500/10',
       }
     case 'task_created':
       return {
@@ -157,6 +184,18 @@ export function deriveThreadState(
       return {
         label: 'Stage updated',
         badgeClassName: 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300',
+        helperText: null,
+      }
+    case 'breakdown_plan_recorded':
+      return {
+        label: 'Plan recorded',
+        badgeClassName: 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-300',
+        helperText: null,
+      }
+    case 'step_status_changed':
+      return {
+        label: 'Step updated',
+        badgeClassName: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300',
         helperText: null,
       }
     case 'task_created':

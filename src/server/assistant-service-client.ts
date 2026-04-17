@@ -1,13 +1,35 @@
 import { z } from 'zod'
 import { env } from '../lib/env'
 
-const threadEventSchema = z.object({
+const visibleThreadEventBaseSchema = z.object({
   eventId: z.string().min(1),
-  type: z.enum(['thread_created', 'user_turn_added', 'assistant_question', 'assistant_synthesis', 'stage_changed', 'assistant_failed', 'task_created']),
   createdAt: z.string().min(1),
   summary: z.string().min(1),
   visibleToUser: z.literal(true),
 })
+
+const threadEventSchema = z.discriminatedUnion('type', [
+  visibleThreadEventBaseSchema.extend({ type: z.literal('thread_created') }),
+  visibleThreadEventBaseSchema.extend({ type: z.literal('user_turn_added') }),
+  visibleThreadEventBaseSchema.extend({ type: z.literal('assistant_question') }),
+  visibleThreadEventBaseSchema.extend({ type: z.literal('assistant_synthesis') }),
+  visibleThreadEventBaseSchema.extend({ type: z.literal('stage_changed') }),
+  visibleThreadEventBaseSchema.extend({ type: z.literal('assistant_failed') }),
+  visibleThreadEventBaseSchema.extend({
+    type: z.literal('breakdown_plan_recorded'),
+    stepCount: z.number().int().positive(),
+  }),
+  visibleThreadEventBaseSchema.extend({
+    type: z.literal('step_status_changed'),
+    stepOrder: z.number().int().positive(),
+    status: z.enum(['completed', 'reopened']),
+  }),
+  visibleThreadEventBaseSchema.extend({
+    type: z.literal('task_created'),
+    taskId: z.string().min(1),
+    stepOrder: z.number().int().positive().optional(),
+  }),
+])
 
 const workingIdeaSchema = z.object({
   provisionalTitle: z.string().min(1).nullable(),
@@ -139,6 +161,20 @@ const acceptStructuredActionResponseSchema = z.object({
 })
 
 const recordTaskCreatedResponseSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('recorded'),
+  thread: ideaThreadViewSchema,
+  threadEventId: z.string().min(1),
+})
+
+const recordProgressUpdateResponseSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('recorded'),
+  thread: ideaThreadViewSchema,
+  threadEventId: z.string().min(1),
+})
+
+const recordBreakdownPlanResponseSchema = z.object({
   ok: z.literal(true),
   outcome: z.literal('recorded'),
   thread: ideaThreadViewSchema,
@@ -545,6 +581,7 @@ export async function recordTaskCreatedForIdeaThread(
     authHeaders: HeadersInit
     taskId: string
     summary: string
+    stepOrder?: number
   },
   options?: { fetchImpl?: typeof fetch; baseUrl?: string },
 ) {
@@ -560,11 +597,72 @@ export async function recordTaskCreatedForIdeaThread(
   const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/actions/record-task-created`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ taskId: input.taskId, summary: input.summary }),
+    body: JSON.stringify({ taskId: input.taskId, summary: input.summary, ...(input.stepOrder ? { stepOrder: input.stepOrder } : {}) }),
   })
   const payload = await parseAssistantResponse(response)
 
   return recordTaskCreatedResponseSchema.parse(payload)
+}
+
+export async function recordProgressUpdateForIdeaThread(
+  input: {
+    ideaId: string
+    authHeaders: HeadersInit
+    summary: string
+    stepOrder?: number
+    status?: 'completed' | 'reopened'
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+
+  if (!baseUrl) {
+    throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  }
+
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/actions/record-progress-update`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      summary: input.summary,
+      ...(input.stepOrder ? { stepOrder: input.stepOrder } : {}),
+      ...(input.status ? { status: input.status } : {}),
+    }),
+  })
+  const payload = await parseAssistantResponse(response)
+
+  return recordProgressUpdateResponseSchema.parse(payload)
+}
+
+export async function recordBreakdownPlanForIdeaThread(
+  input: {
+    ideaId: string
+    authHeaders: HeadersInit
+    summary: string
+    stepCount: number
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+
+  if (!baseUrl) {
+    throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  }
+
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/actions/record-breakdown-plan`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ summary: input.summary, stepCount: input.stepCount }),
+  })
+  const payload = await parseAssistantResponse(response)
+
+  return recordBreakdownPlanResponseSchema.parse(payload)
 }
 
 export async function rejectIdeaThreadStructuredAction(

@@ -115,6 +115,7 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
       idea_id text NOT NULL,
       step_order integer NOT NULL,
       step_text text NOT NULL,
+      completed_at integer,
       created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
       updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
       FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE cascade
@@ -551,6 +552,49 @@ describe('ideas service', () => {
 
     expect(steps.map((step) => step.stepOrder)).toEqual([1, 2])
     expect(steps.map((step) => step.stepText)).toEqual(['First step', 'Second step'])
+    expect(steps.map((step) => step.completedAt)).toEqual([null, null])
+  })
+
+  it('replaces previously accepted breakdown steps for the same idea when a new plan is stored', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Breakdown replacement target',
+      body: 'Replace older accepted steps.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    await service.createAcceptedBreakdownSteps(
+      {
+        ideaId: created.id,
+        steps: [
+          { stepOrder: 1, stepText: 'Old first step' },
+          { stepOrder: 2, stepText: 'Old second step' },
+        ],
+      },
+      primaryUserId,
+    )
+
+    await service.createAcceptedBreakdownSteps(
+      {
+        ideaId: created.id,
+        steps: [
+          { stepOrder: 1, stepText: 'New first step' },
+          { stepOrder: 2, stepText: 'New second step' },
+          { stepOrder: 3, stepText: 'New third step' },
+        ],
+      },
+      primaryUserId,
+    )
+
+    const steps = await service.listAcceptedBreakdownSteps(created.id, primaryUserId)
+
+    expect(steps.map((step) => step.stepOrder)).toEqual([1, 2, 3])
+    expect(steps.map((step) => step.stepText)).toEqual([
+      'New first step',
+      'New second step',
+      'New third step',
+    ])
+    expect(steps.map((step) => step.completedAt)).toEqual([null, null, null])
   })
 
   it('scopes accepted breakdown steps to the owning user', async () => {
@@ -579,6 +623,36 @@ describe('ideas service', () => {
         secondaryUserId,
       ),
     ).rejects.toThrow('Idea not found')
+  })
+
+  it('can complete and uncomplete an accepted breakdown step', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Completion target',
+      body: 'Track completion state.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    await service.createAcceptedBreakdownSteps(
+      {
+        ideaId: created.id,
+        steps: [{ stepOrder: 1, stepText: 'Do the thing' }],
+      },
+      primaryUserId,
+    )
+
+    const [step] = await service.listAcceptedBreakdownSteps(created.id, primaryUserId)
+    expect(step?.completedAt).toBeNull()
+
+    await service.completeAcceptedBreakdownStep({ ideaId: created.id, stepId: step!.id }, primaryUserId)
+
+    const [completed] = await service.listAcceptedBreakdownSteps(created.id, primaryUserId)
+    expect(completed?.completedAt).toBeInstanceOf(Date)
+
+    await service.uncompleteAcceptedBreakdownStep({ ideaId: created.id, stepId: step!.id }, primaryUserId)
+
+    const [reopened] = await service.listAcceptedBreakdownSteps(created.id, primaryUserId)
+    expect(reopened?.completedAt).toBeNull()
   })
 
   it('applies an approved proposal as the next accepted canonical snapshot', async () => {

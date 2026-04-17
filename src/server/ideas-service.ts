@@ -191,6 +191,8 @@ export function createIdeasService(database: Database) {
         return { ok: true as const }
       }
 
+      await database.delete(acceptedBreakdownSteps).where(eq(acceptedBreakdownSteps.ideaId, input.ideaId))
+
       await database.insert(acceptedBreakdownSteps).values(
         input.steps.map((step) => ({
           id: crypto.randomUUID(),
@@ -217,6 +219,60 @@ export function createIdeasService(database: Database) {
         where: eq(acceptedBreakdownSteps.ideaId, ideaId),
         orderBy: [asc(acceptedBreakdownSteps.stepOrder)],
       })
+    },
+    async completeAcceptedBreakdownStep(
+      input: {
+        ideaId: string
+        stepId: string
+      },
+      userId: string,
+    ) {
+      const idea = await database.query.ideas.findFirst({
+        where: and(eq(ideas.id, input.ideaId), eq(ideas.userId, userId), isNull(ideas.archivedAt)),
+      })
+
+      if (!idea) {
+        throw new Error('Idea not found')
+      }
+
+      const now = new Date()
+
+      await database
+        .update(acceptedBreakdownSteps)
+        .set({
+          completedAt: now,
+          updatedAt: now,
+        })
+        .where(and(eq(acceptedBreakdownSteps.id, input.stepId), eq(acceptedBreakdownSteps.ideaId, input.ideaId)))
+
+      return { ok: true as const }
+    },
+    async uncompleteAcceptedBreakdownStep(
+      input: {
+        ideaId: string
+        stepId: string
+      },
+      userId: string,
+    ) {
+      const idea = await database.query.ideas.findFirst({
+        where: and(eq(ideas.id, input.ideaId), eq(ideas.userId, userId), isNull(ideas.archivedAt)),
+      })
+
+      if (!idea) {
+        throw new Error('Idea not found')
+      }
+
+      const now = new Date()
+
+      await database
+        .update(acceptedBreakdownSteps)
+        .set({
+          completedAt: null,
+          updatedAt: now,
+        })
+        .where(and(eq(acceptedBreakdownSteps.id, input.stepId), eq(acceptedBreakdownSteps.ideaId, input.ideaId)))
+
+      return { ok: true as const }
     },
     async getLatestIdeaSnapshot(ideaId: string, userId: string) {
       const idea = await database.query.ideas.findFirst({

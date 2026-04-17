@@ -429,6 +429,7 @@ describe('assistant service client', () => {
               summary: 'Created task Reduce onboarding drop-off from the accepted idea conversion.',
               visibleToUser: true,
               taskId: 'task-123',
+              stepOrder: 2,
             },
           ],
         }),
@@ -442,6 +443,7 @@ describe('assistant service client', () => {
       authHeaders: { cookie: 'better-auth.session_token=test-session' },
       taskId: 'task-123',
       summary: 'Created task Reduce onboarding drop-off from the accepted idea conversion.',
+      stepOrder: 2,
     }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
 
     expect(result.outcome).toBe('recorded')
@@ -470,6 +472,78 @@ describe('assistant service client', () => {
     expect(result.outcome).toBe('rejected')
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123/actions/reject-structured')
+    expect(init?.method).toBe('POST')
+  })
+
+  it('records a progress update through the dedicated thread contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        outcome: 'recorded',
+        thread: makeThread({
+          visibleEvents: [
+            {
+              eventId: 'event-1',
+              type: 'step_status_changed',
+              createdAt: '2026-04-12T00:00:30.000Z',
+              summary: 'Marked accepted breakdown step #2 done: Run quick discovery.',
+              visibleToUser: true,
+              stepOrder: 2,
+              status: 'completed',
+            },
+          ],
+        }),
+        threadEventId: 'event-progress-1',
+      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const { recordProgressUpdateForIdeaThread } = await import('./assistant-service-client')
+    const result = await recordProgressUpdateForIdeaThread({
+      ideaId: 'idea-123',
+      authHeaders: { cookie: 'better-auth.session_token=test-session' },
+      summary: 'Marked accepted breakdown step #2 done: Run quick discovery.',
+      stepOrder: 2,
+      status: 'completed',
+    }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
+
+    expect(result.outcome).toBe('recorded')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/record-progress-update')
+    expect(init?.method).toBe('POST')
+  })
+
+  it('records accepted breakdown plan storage through the dedicated thread contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        outcome: 'recorded',
+        thread: makeThread({
+          visibleEvents: [
+            {
+              eventId: 'event-1',
+              type: 'breakdown_plan_recorded',
+              createdAt: '2026-04-12T00:00:30.000Z',
+              summary: 'Stored accepted breakdown plan with 4 steps.',
+              visibleToUser: true,
+              stepCount: 4,
+            },
+          ],
+        }),
+        threadEventId: 'event-plan-1',
+      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const { recordBreakdownPlanForIdeaThread } = await import('./assistant-service-client')
+    const result = await recordBreakdownPlanForIdeaThread({
+      ideaId: 'idea-123',
+      authHeaders: { cookie: 'better-auth.session_token=test-session' },
+      summary: 'Stored accepted breakdown plan with 4 steps.',
+      stepCount: 4,
+    }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
+
+    expect(result.outcome).toBe('recorded')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/record-breakdown-plan')
     expect(init?.method).toBe('POST')
   })
 

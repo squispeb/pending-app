@@ -1,4 +1,4 @@
-import { CheckCircle2, ClipboardList } from 'lucide-react'
+import { CheckCircle2, ClipboardList, CheckCheck } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import {
   deriveThreadState,
@@ -14,7 +14,12 @@ type IdeaThreadVisibleEvent = {
   type: ThreadEventType
   createdAt: string
   summary: string
-}
+} & Partial<{
+  taskId: string
+  stepOrder: number
+  stepCount: number
+  status: 'completed' | 'reopened'
+}>
 
 export type PendingBreakdownProposal = {
   proposalId: string
@@ -26,14 +31,49 @@ export type PendingBreakdownProposal = {
 export type AcceptedBreakdownStep = {
   id: string
   stepText: string
+  /** ISO string or Date when the step was marked complete; null/undefined = incomplete. */
+  completedAt?: string | Date | null
+  completedSource?: 'manual' | 'linked-task' | null
+}
+
+type StepActionInFlight = {
+  stepId: string
+  action: 'create-task' | 'complete' | 'uncomplete'
 }
 
 /**
- * Read-only plan card rendered in the thread once a breakdown proposal has
- * been accepted.  Visually distinct from the pending proposal card (cyan vs
- * violet) and carries no per-step actions.
+ * Plan card rendered in the thread once a breakdown proposal has been
+ * accepted.  Visually distinct from the pending proposal card (cyan vs
+ * violet). When callbacks are provided, incomplete steps can be marked
+ * done or converted into tasks. Linked steps still show a "Task created"
+ * chip, but they continue to participate in next-step progression until
+ * they are explicitly completed.
  */
-export function AcceptedBreakdownPlanCard({ steps }: { steps: AcceptedBreakdownStep[] }) {
+export function AcceptedBreakdownPlanCard({
+  steps,
+  onCreateTaskFromStep,
+  onCompleteStep,
+  onUncompleteStep,
+  stepActionInFlight = null,
+  linkedStepIds = [],
+}: {
+  steps: AcceptedBreakdownStep[]
+  onCreateTaskFromStep?: (stepId: string) => void
+  onCompleteStep?: (stepId: string) => void
+  onUncompleteStep?: (stepId: string) => void
+  stepActionInFlight?: StepActionInFlight | null
+  /** IDs of steps that already have a linked task. */
+  linkedStepIds?: string[]
+}) {
+  const linkedSet = new Set(linkedStepIds)
+
+  /**
+   * First incomplete step, regardless of whether a task has already been
+   * created from it. Creating a task should not remove the step from the
+   * progression flow; only completion should do that.
+   */
+  const nextCandidateId = steps.find((step) => !step.completedAt)?.id ?? null
+
   return (
     <div
       role="region"
@@ -50,17 +90,113 @@ export function AcceptedBreakdownPlanCard({ steps }: { steps: AcceptedBreakdownS
         </span>
       </div>
       <ol className="m-0 list-none space-y-2 pl-0">
-        {steps.map((step, index) => (
-          <li key={step.id} className="flex items-start gap-2.5">
-            <span
-              aria-hidden="true"
-              className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-cyan-100 text-[11px] font-bold text-cyan-700 dark:bg-cyan-500/20 dark:text-cyan-300"
+        {steps.map((step, index) => {
+          const isCreating = stepActionInFlight?.stepId === step.id && stepActionInFlight.action === 'create-task'
+          const isCompleting = stepActionInFlight?.stepId === step.id && stepActionInFlight.action === 'complete'
+          const isUncompleting = stepActionInFlight?.stepId === step.id && stepActionInFlight.action === 'uncomplete'
+          const isLinked = linkedSet.has(step.id)
+          const isCompleted = Boolean(step.completedAt)
+          const isNext = step.id === nextCandidateId
+          const hasPendingAction = stepActionInFlight !== null
+
+          return (
+            <li
+              key={step.id}
+              aria-label={isCompleted ? `Step ${index + 1} completed` : isNext ? `Step ${index + 1} next recommended` : undefined}
+              className={`flex items-start gap-2.5 ${isCompleted ? 'opacity-60' : ''}`}
             >
-              {index + 1}
-            </span>
-            <span className="text-sm leading-6 text-[var(--ink-strong)]">{step.stepText}</span>
-          </li>
-        ))}
+              <span
+                aria-hidden="true"
+                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+                  isLinked
+                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300'
+                    : isCompleted
+                      ? 'bg-slate-100 text-slate-500 dark:bg-slate-500/20 dark:text-slate-400'
+                      : 'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/20 dark:text-cyan-300'
+                }`}
+              >
+                {isLinked ? (
+                  <CheckCheck size={11} aria-hidden="true" />
+                ) : isCompleted ? (
+                  <CheckCircle2 size={11} aria-hidden="true" />
+                ) : (
+                  index + 1
+                )}
+              </span>
+              <span className="flex flex-1 flex-wrap items-baseline gap-x-2.5 gap-y-1">
+                <span
+                  className={`text-sm leading-6 ${isCompleted ? 'text-[var(--ink-faint)] line-through' : 'text-[var(--ink-strong)]'}`}
+                >
+                  {step.stepText}
+                </span>
+                {/* Status chips and action buttons */}
+                {isCompleted ? (
+                  <>
+                    <span
+                      aria-label={`Step ${index + 1} done`}
+                      className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500 dark:border-slate-500/30 dark:bg-slate-500/10 dark:text-slate-400"
+                    >
+                      Done
+                    </span>
+                    {onUncompleteStep && step.completedSource !== 'linked-task' ? (
+                      <button
+                        type="button"
+                        disabled={hasPendingAction}
+                        onClick={() => onUncompleteStep(step.id)}
+                        aria-label={`Mark step ${index + 1} as not done`}
+                        className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-500/40 dark:bg-slate-500/10 dark:text-slate-300 dark:hover:bg-slate-500/20"
+                      >
+                        {isUncompleting ? 'Undoing…' : 'Undo'}
+                      </button>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    {isLinked ? (
+                      <span
+                        aria-label={`Step ${index + 1} task already created`}
+                        className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+                      >
+                        <CheckCircle2 size={11} aria-hidden="true" />
+                        Task created
+                      </span>
+                    ) : null}
+                    {isNext ? (
+                      <span
+                        aria-label={`Step ${index + 1} is the next recommended step`}
+                        className="inline-flex items-center rounded-full border border-cyan-300 bg-cyan-100 px-2 py-0.5 text-[11px] font-semibold text-cyan-700 dark:border-cyan-500/40 dark:bg-cyan-500/20 dark:text-cyan-300"
+                      >
+                        Next
+                      </span>
+                    ) : null}
+                    {onCompleteStep ? (
+                      <button
+                        type="button"
+                        disabled={hasPendingAction}
+                        onClick={() => onCompleteStep(step.id)}
+                        aria-label={`Mark step ${index + 1} done`}
+                        className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-500/40 dark:bg-slate-500/10 dark:text-slate-200 dark:hover:bg-slate-500/20"
+                      >
+                        {isCompleting ? 'Marking…' : 'Mark done'}
+                      </button>
+                    ) : null}
+                    {!isLinked && onCreateTaskFromStep ? (
+                      <button
+                        type="button"
+                        disabled={hasPendingAction}
+                        onClick={() => onCreateTaskFromStep(step.id)}
+                        aria-label={`Create task from step ${index + 1}`}
+                        className="inline-flex items-center justify-center rounded-full border border-cyan-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-cyan-700 transition hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-cyan-500/40 dark:bg-cyan-500/10 dark:text-cyan-300 dark:hover:bg-cyan-500/20"
+                      >
+                        {isCreating ? 'Creating…' : 'Create task'}
+                      </button>
+                    ) : null}
+                  </>
+                )}
+              </span>
+            </li>
+          )
+        })}
       </ol>
     </div>
   )
@@ -151,6 +287,11 @@ export function IdeaThreadHistory({
   isRejectingBreakdown = false,
   onAcceptBreakdown,
   onRejectBreakdown,
+  onCreateTaskFromStep,
+  onCompleteStep,
+  onUncompleteStep,
+  stepActionInFlight = null,
+  linkedStepIds = [],
   className = '',
   threadRegionId,
   showHeader = true,
@@ -162,9 +303,9 @@ export function IdeaThreadHistory({
   lastTurn?: ThreadTurnPresentation | null
   streamingAssistantText?: string
   /**
-   * When accepted breakdown steps exist they are rendered as a read-only plan
-   * card at the bottom of the event list, after all thread events and before
-   * the pending proposal card (if any).
+ * When accepted breakdown steps exist they are rendered as a plan card at
+ * the bottom of the event list. When callbacks are provided, each step can
+ * gain completion toggles and/or a per-step "Create task" button.
    */
   acceptedBreakdownSteps?: AcceptedBreakdownStep[]
   /**
@@ -176,6 +317,16 @@ export function IdeaThreadHistory({
   isRejectingBreakdown?: boolean
   onAcceptBreakdown?: (proposalId: string) => void
   onRejectBreakdown?: (proposalId: string) => void
+  /** Called when the user clicks "Create task" for a specific accepted step. */
+  onCreateTaskFromStep?: (stepId: string) => void
+  /** Called when the user marks an accepted step as done. */
+  onCompleteStep?: (stepId: string) => void
+  /** Called when the user reopens a completed accepted step. */
+  onUncompleteStep?: (stepId: string) => void
+  /** Current in-flight step action, if any. */
+  stepActionInFlight?: StepActionInFlight | null
+  /** IDs of accepted breakdown steps that already have a linked task. */
+  linkedStepIds?: string[]
   className?: string
   /** Optional id wired up to a tab's aria-controls for ARIA tab panel semantics */
   threadRegionId?: string
@@ -258,6 +409,7 @@ export function IdeaThreadHistory({
             const Icon = presentation.icon
             const isUserTurn = event.type === 'user_turn_added'
             const isTaskCreated = event.type === 'task_created'
+            const isProgressEvent = event.type === 'breakdown_plan_recorded' || event.type === 'step_status_changed'
             const isSystemEvent = event.type === 'thread_created' || event.type === 'stage_changed'
 
             return (
@@ -276,6 +428,25 @@ export function IdeaThreadHistory({
                       <Link to="/tasks" className="font-semibold text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-300">
                         View in Tasks →
                       </Link>
+                    </div>
+                  </div>
+                ) : isProgressEvent ? (
+                  <div className={`max-w-[92%] rounded-[22px] border px-3.5 py-3 shadow-sm sm:max-w-[85%] ${presentation.cardClassName}`}>
+                    <div className="flex items-center gap-2 text-xs font-semibold text-[var(--ink-soft)]" aria-hidden="true">
+                      <Icon size={14} className={presentation.iconClassName} aria-hidden="true" />
+                      <span>{presentation.label}</span>
+                    </div>
+                    <p className="m-0 mt-1.5 text-sm leading-6 text-[var(--ink-strong)]">
+                      {event.summary}
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--ink-faint)]">
+                      {event.type === 'breakdown_plan_recorded' && event.stepCount ? (
+                        <span>{event.stepCount} {event.stepCount === 1 ? 'step' : 'steps'}</span>
+                      ) : null}
+                      {event.type === 'step_status_changed' && event.stepOrder ? (
+                        <span>Step {event.stepOrder} {event.status === 'reopened' ? 'reopened' : 'completed'}</span>
+                      ) : null}
+                      <time dateTime={event.createdAt}>{formatDisplayDateTime(event.createdAt)}</time>
                     </div>
                   </div>
                 ) : isSystemEvent ? (
@@ -323,7 +494,14 @@ export function IdeaThreadHistory({
 
         {acceptedBreakdownSteps.length > 0 && !pendingBreakdownProposal ? (
           <div className="flex justify-start">
-            <AcceptedBreakdownPlanCard steps={acceptedBreakdownSteps} />
+            <AcceptedBreakdownPlanCard
+              steps={acceptedBreakdownSteps}
+              onCreateTaskFromStep={onCreateTaskFromStep}
+              onCompleteStep={onCompleteStep}
+              onUncompleteStep={onUncompleteStep}
+              stepActionInFlight={stepActionInFlight}
+              linkedStepIds={linkedStepIds}
+            />
           </div>
         ) : null}
       </div>

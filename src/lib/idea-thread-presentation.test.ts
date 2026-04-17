@@ -105,10 +105,23 @@ describe('idea thread presentation', () => {
       label: 'Assistant failed',
       iconClassName: 'text-red-500',
     })
+    expect(getThreadEventPresentation('breakdown_plan_recorded')).toMatchObject({
+      label: 'Plan recorded',
+      iconClassName: 'text-cyan-500',
+    })
+    expect(getThreadEventPresentation('step_status_changed')).toMatchObject({
+      label: 'Step updated',
+      iconClassName: 'text-emerald-500',
+    })
     expect(getThreadEventPresentation('task_created')).toMatchObject({
       label: 'Task created',
       iconClassName: 'text-emerald-500',
       cardClassName: 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-500/30 dark:bg-emerald-500/10',
     })
+  })
+
+  it('derives plan and step progress states distinctly', () => {
+    expect(deriveThreadState([{ type: 'breakdown_plan_recorded' }]).label).toBe('Plan recorded')
+    expect(deriveThreadState([{ type: 'step_status_changed' }]).label).toBe('Step updated')
   })
 })

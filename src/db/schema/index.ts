@@ -169,6 +169,7 @@ export const acceptedBreakdownSteps = sqliteTable(
       .references(() => ideas.id, { onDelete: 'cascade' }),
     stepOrder: integer('step_order').notNull(),
     stepText: text('step_text').notNull(),
+    completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .notNull()
       .default(sql`(unixepoch() * 1000)`),

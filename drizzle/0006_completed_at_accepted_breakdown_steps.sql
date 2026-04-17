@@ -1,0 +1,1 @@
+ALTER TABLE `accepted_breakdown_steps` ADD `completed_at` integer;

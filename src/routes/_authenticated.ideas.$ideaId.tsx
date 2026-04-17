@@ -19,6 +19,8 @@ import { parseIdeaThreadStreamFrames } from '../lib/idea-thread-stream'
 import {
   acceptIdeaBreakdown,
   acceptIdeaStructuredAction,
+  completeAcceptedBreakdownStep,
+  convertAcceptedBreakdownStepToTask,
   convertIdeaToTask,
   getIdea,
   getIdeaThread,
@@ -32,6 +34,7 @@ import {
   streamIdeaThread,
   submitIdeaThreadTurn,
   toggleIdeaStar,
+  uncompleteAcceptedBreakdownStep,
 } from '../server/ideas'
 
 type IdeaPageTab = 'thread' | 'context' | 'guided' | 'source'
@@ -114,24 +117,53 @@ function IdeaDetailPage() {
   const visibleEvents = thread.visibleEvents ?? []
   const safeAcceptedBreakdownSteps = acceptedBreakdownSteps ?? []
   const safeTaskLinks = taskLinks ?? []
+  const workingIdea = thread.workingIdea ?? {
+    provisionalTitle: null,
+    currentSummary: null,
+    purpose: null,
+    scope: null,
+    expectedImpact: null,
+    targetUsers: [],
+    researchAreas: [],
+    constraints: [],
+    openQuestions: [],
+  }
   const isThreadBusy = thread.status === 'queued' || thread.status === 'processing' || thread.status === 'streaming'
   const queuedTurnCount = queuedTurns.length
   const latestQueuedTurn = queuedTurns.at(-1) ?? null
+
+  /**
+   * Derive which accepted breakdown steps already have a linked task.
+   * The service stores linkReason as "Accepted breakdown step #N from idea."
+   * where N is the 1-based stepOrder. We map that back to step IDs so the
+   * plan card can suppress the "Create task" button for already-linked steps.
+   */
+  const linkedStepIds = safeAcceptedBreakdownSteps
+    .filter((step) =>
+      safeTaskLinks.some(
+        (link) => link.linkReason === `Accepted breakdown step #${step.stepOrder} from idea.`,
+      ),
+    )
+    .map((step) => step.id)
 
   if (!idea) {
     throw notFound()
   }
 
+  const ideaTitle = idea.title ?? 'Untitled idea'
+  const ideaThreadSummary = idea.threadSummary ?? null
+  const ideaBody = idea.body ?? ''
+
   const canUseRefinementActions = canUseIdeaRefinementActions(thread.stage)
-  const suggestedTitle = thread.workingIdea.provisionalTitle
-    && thread.workingIdea.provisionalTitle !== idea.title
-    && thread.workingIdea.provisionalTitle !== dismissedRefinements.title
-    ? thread.workingIdea.provisionalTitle
+  const suggestedTitle = workingIdea.provisionalTitle
+    && workingIdea.provisionalTitle !== ideaTitle
+    && workingIdea.provisionalTitle !== dismissedRefinements.title
+    ? workingIdea.provisionalTitle
     : null
-  const suggestedSummary = thread.workingIdea.currentSummary
-    && thread.workingIdea.currentSummary !== idea.threadSummary
-    && thread.workingIdea.currentSummary !== dismissedRefinements.summary
-    ? thread.workingIdea.currentSummary
+  const suggestedSummary = workingIdea.currentSummary
+    && workingIdea.currentSummary !== ideaThreadSummary
+    && workingIdea.currentSummary !== dismissedRefinements.summary
+    ? workingIdea.currentSummary
     : null
   const pendingStructuredAction = thread.pendingStructuredAction ?? null
   const latestTaskLink = safeTaskLinks[0] ?? null
@@ -141,7 +173,7 @@ function IdeaDetailPage() {
     .reverse()
     .find((event) => event.type === 'assistant_question' || event.type === 'assistant_synthesis') ?? null
   const latestAssistantQuestion = latestAssistantEvent?.type === 'assistant_question' ? latestAssistantEvent.summary : null
-  const currentThreadTitle = thread.workingIdea.provisionalTitle ?? idea.title
+  const currentThreadTitle = workingIdea.provisionalTitle ?? ideaTitle
   const composerStatusText = thread.status === 'queued'
     ? latestQueuedTurn
       ? `Queued after the current turn: ${latestQueuedTurn.userMessage}`
@@ -155,23 +187,23 @@ function IdeaDetailPage() {
         : 'Add the next piece of context and the assistant will continue the conversation.'
 
   const missingDiscoveryAreas = [
-    !thread.workingIdea.purpose ? 'purpose' : null,
-    thread.workingIdea.targetUsers.length === 0 ? 'users' : null,
-    !thread.workingIdea.expectedImpact ? 'impact' : null,
-    !thread.workingIdea.scope ? 'scope' : null,
-    thread.workingIdea.researchAreas.length === 0 ? 'research' : null,
-    thread.workingIdea.constraints.length === 0 ? 'constraints' : null,
-    thread.workingIdea.openQuestions.length === 0 ? 'open questions' : null,
+    !workingIdea.purpose ? 'purpose' : null,
+    workingIdea.targetUsers.length === 0 ? 'users' : null,
+    !workingIdea.expectedImpact ? 'impact' : null,
+    !workingIdea.scope ? 'scope' : null,
+    workingIdea.researchAreas.length === 0 ? 'research' : null,
+    workingIdea.constraints.length === 0 ? 'constraints' : null,
+    workingIdea.openQuestions.length === 0 ? 'open questions' : null,
   ].filter((value): value is string => value !== null)
 
   const populatedWorkingIdeaEntries = [
-    thread.workingIdea.purpose ? ['Purpose', thread.workingIdea.purpose] : null,
-    thread.workingIdea.scope ? ['Scope', thread.workingIdea.scope] : null,
-    thread.workingIdea.expectedImpact ? ['Expected impact', thread.workingIdea.expectedImpact] : null,
-    thread.workingIdea.targetUsers.length > 0 ? ['Target users', thread.workingIdea.targetUsers.join(', ')] : null,
-    thread.workingIdea.researchAreas.length > 0 ? ['Research areas', thread.workingIdea.researchAreas.join(', ')] : null,
-    thread.workingIdea.constraints.length > 0 ? ['Constraints', thread.workingIdea.constraints.join(', ')] : null,
-    thread.workingIdea.openQuestions.length > 0 ? ['Open questions', thread.workingIdea.openQuestions.join(', ')] : null,
+    workingIdea.purpose ? ['Purpose', workingIdea.purpose] : null,
+    workingIdea.scope ? ['Scope', workingIdea.scope] : null,
+    workingIdea.expectedImpact ? ['Expected impact', workingIdea.expectedImpact] : null,
+    workingIdea.targetUsers.length > 0 ? ['Target users', workingIdea.targetUsers.join(', ')] : null,
+    workingIdea.researchAreas.length > 0 ? ['Research areas', workingIdea.researchAreas.join(', ')] : null,
+    workingIdea.constraints.length > 0 ? ['Constraints', workingIdea.constraints.join(', ')] : null,
+    workingIdea.openQuestions.length > 0 ? ['Open questions', workingIdea.openQuestions.join(', ')] : null,
   ].filter((entry): entry is [string, string] => entry !== null)
   const stageLabel = getIdeaStageLabel(thread.stage)
   const stageBadgeClassName = getIdeaStageBadgeClassName(thread.stage)
@@ -475,6 +507,68 @@ function IdeaDetailPage() {
     },
   })
 
+  const convertBreakdownStepToTaskMutation = useMutation({
+    mutationFn: async (stepId: string) => convertAcceptedBreakdownStepToTask({
+      data: { ideaId, stepId },
+    }),
+    onSuccess: async () => {
+      setDiscoveryError(null)
+      setDiscoveryNotice('Task created from the breakdown step.')
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] }),
+        queryClient.invalidateQueries({ queryKey: ['idea-execution-links', ideaId, 'task'] }),
+      ])
+    },
+    onError: (error) => {
+      setDiscoveryNotice(null)
+      setDiscoveryError(error instanceof Error ? error.message : 'Failed to create task from breakdown step.')
+    },
+  })
+
+  const completeBreakdownStepMutation = useMutation({
+    mutationFn: async (stepId: string) => completeAcceptedBreakdownStep({
+      data: { ideaId, stepId },
+    }),
+    onSuccess: async () => {
+      setDiscoveryError(null)
+      setDiscoveryNotice('Step marked done.')
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['idea-accepted-breakdown-steps', ideaId] }),
+        queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] }),
+      ])
+    },
+    onError: (error) => {
+      setDiscoveryNotice(null)
+      setDiscoveryError(error instanceof Error ? error.message : 'Failed to mark breakdown step done.')
+    },
+  })
+
+  const uncompleteBreakdownStepMutation = useMutation({
+    mutationFn: async (stepId: string) => uncompleteAcceptedBreakdownStep({
+      data: { ideaId, stepId },
+    }),
+    onSuccess: async () => {
+      setDiscoveryError(null)
+      setDiscoveryNotice('Step reopened.')
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['idea-accepted-breakdown-steps', ideaId] }),
+        queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] }),
+      ])
+    },
+    onError: (error) => {
+      setDiscoveryNotice(null)
+      setDiscoveryError(error instanceof Error ? error.message : 'Failed to reopen breakdown step.')
+    },
+  })
+
+  const stepActionInFlight = convertBreakdownStepToTaskMutation.isPending
+    ? { stepId: convertBreakdownStepToTaskMutation.variables ?? '', action: 'create-task' as const }
+    : completeBreakdownStepMutation.isPending
+      ? { stepId: completeBreakdownStepMutation.variables ?? '', action: 'complete' as const }
+      : uncompleteBreakdownStepMutation.isPending
+        ? { stepId: uncompleteBreakdownStepMutation.variables ?? '', action: 'uncomplete' as const }
+        : null
+
   const refineActionsDisabled = isThreadBusy || requestRefinementMutation.isPending || persistRefinementMutation.isPending
   const structuredActionsDisabled = isThreadBusy || requestRefinementMutation.isPending || requestStructuredActionMutation.isPending || persistRefinementMutation.isPending || requestConvertToTaskMutation.isPending || convertToTaskMutation.isPending
 
@@ -689,15 +783,15 @@ function IdeaDetailPage() {
             <div className="mt-3 space-y-3">
               <div>
                 <div className="font-medium text-[var(--ink-strong)]">Title</div>
-                <div className="mt-1">{idea.title}</div>
+                <div className="mt-1">{ideaTitle}</div>
               </div>
               <div>
                 <div className="font-medium text-[var(--ink-strong)]">Summary</div>
-                <div className="mt-1 whitespace-pre-wrap leading-6">{idea.threadSummary ?? 'No saved summary yet.'}</div>
+                <div className="mt-1 whitespace-pre-wrap leading-6">{ideaThreadSummary ?? 'No saved summary yet.'}</div>
               </div>
               <div>
                 <div className="font-medium text-[var(--ink-strong)]">Description</div>
-                <div className="mt-1 whitespace-pre-wrap leading-6">{idea.body || 'No description has been saved yet.'}</div>
+                <div className="mt-1 whitespace-pre-wrap leading-6">{ideaBody || 'No description has been saved yet.'}</div>
               </div>
             </div>
           </div>
@@ -707,11 +801,11 @@ function IdeaDetailPage() {
             <div className="mt-3 space-y-3">
               <div>
                 <div className="font-medium text-[var(--ink-strong)]">Working title</div>
-                <div className="mt-1">{thread.workingIdea.provisionalTitle ?? idea.title}</div>
+                <div className="mt-1">{workingIdea.provisionalTitle ?? ideaTitle}</div>
               </div>
               <div>
                 <div className="font-medium text-[var(--ink-strong)]">Working summary</div>
-                <div className="mt-1 whitespace-pre-wrap leading-6">{thread.workingIdea.currentSummary ?? 'No working summary yet.'}</div>
+                <div className="mt-1 whitespace-pre-wrap leading-6">{workingIdea.currentSummary ?? 'No working summary yet.'}</div>
               </div>
             </div>
           </div>
@@ -879,7 +973,7 @@ function IdeaDetailPage() {
               {suggestedTitle ? (
                 <div className="space-y-2">
                   <div className="font-medium text-[var(--ink-strong)]">Title suggestion</div>
-                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2"><div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Current</div><div className="mt-1">{idea.title}</div></div>
+                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2"><div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Current</div><div className="mt-1">{ideaTitle}</div></div>
                   <div className="rounded-2xl border border-emerald-200 bg-white px-3 py-2 dark:border-emerald-500/30 dark:bg-emerald-500/10"><div className="text-xs uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">Suggested</div><div className="mt-1 text-[var(--ink-strong)]">{suggestedTitle}</div></div>
                   <div className="flex flex-wrap gap-2">
                     <button type="button" disabled={isThreadBusy || persistRefinementMutation.isPending} onClick={() => persistRefinementMutation.mutate('title')} className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60">Save title</button>
@@ -1000,10 +1094,15 @@ function IdeaDetailPage() {
                   isRejectingBreakdown={rejectStructuredActionMutation.isPending}
                   onAcceptBreakdown={(proposalId) => acceptBreakdownMutation.mutate(proposalId)}
                   onRejectBreakdown={(proposalId) => rejectStructuredActionMutation.mutate(proposalId)}
+                  onCreateTaskFromStep={(stepId) => convertBreakdownStepToTaskMutation.mutate(stepId)}
+                  onCompleteStep={(stepId) => completeBreakdownStepMutation.mutate(stepId)}
+                  onUncompleteStep={(stepId) => uncompleteBreakdownStepMutation.mutate(stepId)}
+                  stepActionInFlight={stepActionInFlight}
+                  linkedStepIds={linkedStepIds}
                   threadRegionId="thread-history-panel"
                   showHeader={false}
                   className="min-h-full"
-                />
+                 />
               </div>
 
               {!isThreadAtBottom ? (
@@ -1187,6 +1286,11 @@ function IdeaDetailPage() {
             isRejectingBreakdown={rejectStructuredActionMutation.isPending}
             onAcceptBreakdown={(proposalId) => acceptBreakdownMutation.mutate(proposalId)}
             onRejectBreakdown={(proposalId) => rejectStructuredActionMutation.mutate(proposalId)}
+            onCreateTaskFromStep={(stepId) => convertBreakdownStepToTaskMutation.mutate(stepId)}
+            onCompleteStep={(stepId) => completeBreakdownStepMutation.mutate(stepId)}
+            onUncompleteStep={(stepId) => uncompleteBreakdownStepMutation.mutate(stepId)}
+            stepActionInFlight={stepActionInFlight}
+            linkedStepIds={linkedStepIds}
             threadRegionId="thread-history-panel"
             showHeader={false}
             className="min-h-full rounded-[0] border-x-0 border-t-0 bg-transparent px-0 pb-0 pt-0 shadow-none"

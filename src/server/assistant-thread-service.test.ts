@@ -778,6 +778,58 @@ describe('assistant thread service', () => {
     expect(init?.method).toBe('POST')
   })
 
+  it('records accepted breakdown plan storage for the authenticated idea owner', async () => {
+    await db.insert(schema.users).values({
+      id: 'user-1',
+      email: 'user-1@example.com',
+      displayName: 'User One',
+      timezone: 'UTC',
+    })
+    await db.insert(schema.ideas).values({
+      id: 'idea-123',
+      userId: 'user-1',
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'manual',
+    })
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          session: { id: 'session-1', userId: 'user-1' },
+          user: { id: 'user-1', email: 'user-1@example.com', name: 'User One' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          ok: true,
+          outcome: 'recorded',
+          thread: makeThread({ stage: 'developed' }),
+          threadEventId: 'event-plan-1',
+        }),
+      )
+
+    const service = createAssistantThreadService(db)
+    const result = await service.recordBreakdownPlanForIdeaThread(
+      'idea-123',
+      {
+        summary: 'Stored accepted breakdown plan with 4 steps.',
+        stepCount: 4,
+      },
+      {
+        requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+        fetchImpl: fetchMock as unknown as typeof fetch,
+        assistantServiceBaseUrl: 'https://assistant.example',
+      },
+    )
+
+    expect(result.outcome).toBe('recorded')
+    const [url, init] = fetchMock.mock.calls[1] ?? []
+    expect(url).toBe('https://assistant.example/threads/idea-123/actions/record-breakdown-plan')
+    expect(init?.method).toBe('POST')
+  })
+
   it('rejects a structured action for the authenticated idea owner', async () => {
     await db.insert(schema.users).values({
       id: 'user-1',

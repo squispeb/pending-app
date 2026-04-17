@@ -1,7 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { AcceptedBreakdownPlanCard, BreakdownProposalCard, IdeaThreadHistory, type AcceptedBreakdownStep, type PendingBreakdownProposal } from './idea-thread-history'
-
 vi.mock('@tanstack/react-router', async () => {
   const actual = await vi.importActual<typeof import('@tanstack/react-router')>('@tanstack/react-router')
 
@@ -107,9 +106,26 @@ describe('IdeaThreadHistory', () => {
           },
           {
             eventId: 'event-7',
+            type: 'breakdown_plan_recorded',
+            createdAt: '2026-04-12T00:04:30.000Z',
+            summary: 'Stored accepted breakdown plan with 4 steps.',
+            stepCount: 4,
+          },
+          {
+            eventId: 'event-8',
+            type: 'step_status_changed',
+            createdAt: '2026-04-12T00:04:45.000Z',
+            summary: 'Marked accepted breakdown step #2 done: Run quick discovery.',
+            stepOrder: 2,
+            status: 'completed',
+          },
+          {
+            eventId: 'event-9',
             type: 'task_created',
             createdAt: '2026-04-12T00:05:00.000Z',
             summary: 'Created task Reduce onboarding drop-off from the accepted idea conversion.',
+            taskId: 'task-123',
+            stepOrder: 2,
           },
         ]}
       />,
@@ -123,6 +139,11 @@ describe('IdeaThreadHistory', () => {
     expect(markup).toContain('Stage changed')
     expect(markup).toContain('Assistant failed')
     expect(markup).toContain('Assistant could not complete the request.')
+    expect(markup).toContain('Plan recorded')
+    expect(markup).toContain('Stored accepted breakdown plan with 4 steps.')
+    expect(markup).toContain('4 steps')
+    expect(markup).toContain('Step updated')
+    expect(markup).toContain('Step 2 completed')
     expect(markup).toContain('Task created')
     expect(markup).toContain('View in Tasks')
     expect(markup).toContain('Created task Reduce onboarding drop-off from the accepted idea conversion.')
@@ -502,5 +523,552 @@ describe('IdeaThreadHistory — accepted breakdown plan card', () => {
     const planIdx = markup.indexOf('Accepted plan')
     expect(questionIdx).toBeGreaterThan(-1)
     expect(planIdx).toBeGreaterThan(questionIdx)
+  })
+})
+
+describe('AcceptedBreakdownPlanCard — Create task buttons', () => {
+  it('renders a "Create task" button for each step when onCreateTaskFromStep is provided', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={sampleAcceptedSteps}
+        onCreateTaskFromStep={() => {}}
+        stepActionInFlight={null}
+      />,
+    )
+
+    // One button per step — match button text only (not aria-label)
+    const matches = markup.match(/>Create task</g) ?? []
+    expect(matches).toHaveLength(sampleAcceptedSteps.length)
+  })
+
+  it('does NOT render "Create task" buttons when onCreateTaskFromStep is omitted', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard steps={sampleAcceptedSteps} />,
+    )
+
+    expect(markup).not.toContain('Create task')
+  })
+
+  it('shows "Creating…" label for the in-flight step', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={sampleAcceptedSteps}
+        onCreateTaskFromStep={() => {}}
+        stepActionInFlight={{ stepId: 'step-2', action: 'create-task' }}
+      />,
+    )
+
+    expect(markup).toContain('Creating…')
+    // The other two steps still say "Create task" (button text only)
+    const matches = markup.match(/>Create task</g) ?? []
+    expect(matches).toHaveLength(sampleAcceptedSteps.length - 1)
+  })
+
+  it('disables all "Create task" buttons when any step creation is in-flight', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={sampleAcceptedSteps}
+        onCreateTaskFromStep={() => {}}
+        stepActionInFlight={{ stepId: 'step-1', action: 'create-task' }}
+      />,
+    )
+
+    const disabledCount = (markup.match(/disabled=""/g) ?? []).length
+    expect(disabledCount).toBe(sampleAcceptedSteps.length)
+  })
+
+  it('carries an accessible aria-label for each step button', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={sampleAcceptedSteps}
+        onCreateTaskFromStep={() => {}}
+        stepActionInFlight={null}
+      />,
+    )
+
+    expect(markup).toContain('aria-label="Create task from step 1"')
+    expect(markup).toContain('aria-label="Create task from step 2"')
+    expect(markup).toContain('aria-label="Create task from step 3"')
+  })
+})
+
+describe('IdeaThreadHistory — Create task from accepted breakdown step', () => {
+  it('passes onCreateTaskFromStep through to the plan card', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        acceptedBreakdownSteps={sampleAcceptedSteps}
+        onCreateTaskFromStep={() => {}}
+        stepActionInFlight={null}
+      />,
+    )
+
+    expect(markup).toContain('Create task')
+    const matches = markup.match(/>Create task</g) ?? []
+    expect(matches).toHaveLength(sampleAcceptedSteps.length)
+  })
+
+  it('does not render Create task buttons when onCreateTaskFromStep is not passed', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        acceptedBreakdownSteps={sampleAcceptedSteps}
+      />,
+    )
+
+    expect(markup).not.toContain('Create task')
+  })
+
+  it('shows in-flight "Creating…" label forwarded from stepActionInFlight', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        acceptedBreakdownSteps={sampleAcceptedSteps}
+        onCreateTaskFromStep={() => {}}
+        stepActionInFlight={{ stepId: 'step-2', action: 'create-task' }}
+      />,
+    )
+
+    expect(markup).toContain('Creating…')
+  })
+})
+
+describe('AcceptedBreakdownPlanCard — linked step state', () => {
+  it('shows "Task created" chip instead of "Create task" button for a linked step', () => {
+    const markup = renderToStaticMarkup(
+        <AcceptedBreakdownPlanCard
+          steps={sampleAcceptedSteps}
+          onCompleteStep={() => {}}
+          onCreateTaskFromStep={() => {}}
+          stepActionInFlight={null}
+          linkedStepIds={['step-1']}
+        />,
+    )
+
+    // step-1 should show "Task created" chip, not "Create task" button
+    expect(markup).toContain('Task created')
+    expect(markup).toContain('Mark done')
+    // Other two steps still show "Create task"
+    const createMatches = markup.match(/>Create task</g) ?? []
+    expect(createMatches).toHaveLength(2)
+  })
+
+  it('shows "Task created" chip for all linked steps', () => {
+    const markup = renderToStaticMarkup(
+        <AcceptedBreakdownPlanCard
+          steps={sampleAcceptedSteps}
+          onCreateTaskFromStep={() => {}}
+          stepActionInFlight={null}
+          linkedStepIds={['step-1', 'step-2', 'step-3']}
+        />,
+    )
+
+    // No "Create task" buttons at all — all replaced by chips
+    expect(markup).not.toContain('>Create task<')
+    const taskCreatedCount = (markup.match(/Task created/g) ?? []).length
+    expect(taskCreatedCount).toBe(sampleAcceptedSteps.length)
+  })
+
+  it('carries accessible aria-label for the linked-step chip', () => {
+    const markup = renderToStaticMarkup(
+        <AcceptedBreakdownPlanCard
+          steps={sampleAcceptedSteps}
+          onCreateTaskFromStep={() => {}}
+          stepActionInFlight={null}
+          linkedStepIds={['step-2']}
+        />,
+    )
+
+    expect(markup).toContain('aria-label="Step 2 task already created"')
+  })
+
+  it('shows a different step-number indicator style for linked steps', () => {
+    const markupLinked = renderToStaticMarkup(
+        <AcceptedBreakdownPlanCard
+          steps={[{ id: 'step-1', stepText: 'Do the thing.' }]}
+          onCreateTaskFromStep={() => {}}
+          stepActionInFlight={null}
+          linkedStepIds={['step-1']}
+        />,
+    )
+    const markupUnlinked = renderToStaticMarkup(
+        <AcceptedBreakdownPlanCard
+          steps={[{ id: 'step-1', stepText: 'Do the thing.' }]}
+          onCreateTaskFromStep={() => {}}
+          stepActionInFlight={null}
+          linkedStepIds={[]}
+        />,
+    )
+
+    // Linked step uses emerald classes, unlinked uses cyan
+    expect(markupLinked).toContain('bg-emerald-100')
+    expect(markupUnlinked).toContain('bg-cyan-100')
+    expect(markupUnlinked).not.toContain('bg-emerald-100')
+  })
+
+  it('does not render "Create task" button for a linked step even when onCreateTaskFromStep is provided', () => {
+    const markup = renderToStaticMarkup(
+        <AcceptedBreakdownPlanCard
+          steps={[{ id: 'step-1', stepText: 'Research the space.' }]}
+          onCreateTaskFromStep={() => {}}
+          stepActionInFlight={null}
+          linkedStepIds={['step-1']}
+        />,
+    )
+
+    expect(markup).not.toContain('>Create task<')
+    expect(markup).not.toContain('aria-label="Create task from step 1"')
+    expect(markup).toContain('Task created')
+  })
+
+  it('renders no linked chip when linkedStepIds is empty', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={sampleAcceptedSteps}
+        onCreateTaskFromStep={() => {}}
+        stepActionInFlight={null}
+        linkedStepIds={[]}
+      />,
+    )
+
+    expect(markup).not.toContain('Task created')
+  })
+})
+
+describe('AcceptedBreakdownPlanCard — completed steps and next candidate', () => {
+  const stepsWithCompletion: AcceptedBreakdownStep[] = [
+    { id: 'step-1', stepText: 'Research the problem space.', completedAt: '2026-04-10T08:00:00.000Z' },
+    { id: 'step-2', stepText: 'Prototype a minimal flow.', completedAt: new Date('2026-04-11T09:00:00.000Z') },
+    { id: 'step-3', stepText: 'Ship and measure.', completedAt: null },
+    { id: 'step-4', stepText: 'Gather feedback.', completedAt: null },
+  ]
+
+  it('renders a "Done" chip for completed steps', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard steps={stepsWithCompletion} />,
+    )
+
+    const doneCount = (markup.match(/\bDone\b/g) ?? []).length
+    expect(doneCount).toBe(2)
+  })
+
+  it('renders "Mark done" buttons for incomplete steps when onCompleteStep is provided', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={stepsWithCompletion}
+        onCompleteStep={() => {}}
+      />,
+    )
+
+    const matches = markup.match(/>Mark done</g) ?? []
+    expect(matches).toHaveLength(2)
+  })
+
+  it('renders "Undo" for completed steps when onUncompleteStep is provided', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={stepsWithCompletion}
+        onUncompleteStep={() => {}}
+      />,
+    )
+
+    const matches = markup.match(/>Undo</g) ?? []
+    expect(matches).toHaveLength(2)
+  })
+
+  it('does not render Undo for linked-task-derived completion', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={[
+          {
+            id: 'step-1',
+            stepText: 'Completed through linked task.',
+            completedAt: '2026-04-10T08:00:00.000Z',
+            completedSource: 'linked-task',
+          },
+        ]}
+        onUncompleteStep={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('>Done<')
+    expect(markup).not.toContain('>Undo<')
+  })
+
+  it('shows pending labels for completion mutations', () => {
+    const completingMarkup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={sampleAcceptedSteps}
+        onCompleteStep={() => {}}
+        stepActionInFlight={{ stepId: 'step-2', action: 'complete' }}
+      />,
+    )
+    const uncompletingMarkup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={[{ id: 'step-1', stepText: 'Done.', completedAt: '2026-04-10T08:00:00.000Z' }]}
+        onUncompleteStep={() => {}}
+        stepActionInFlight={{ stepId: 'step-1', action: 'uncomplete' }}
+      />,
+    )
+
+    expect(completingMarkup).toContain('Marking…')
+    expect(uncompletingMarkup).toContain('Undoing…')
+  })
+
+  it('carries accessible aria-labels for completion toggle buttons', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={[
+          { id: 'step-1', stepText: 'Pending.', completedAt: null },
+          { id: 'step-2', stepText: 'Done.', completedAt: '2026-04-10T08:00:00.000Z' },
+        ]}
+        onCompleteStep={() => {}}
+        onUncompleteStep={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('aria-label="Mark step 1 done"')
+    expect(markup).toContain('aria-label="Mark step 2 as not done"')
+  })
+
+  it('disables all step buttons while any step action is pending', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={sampleAcceptedSteps}
+        onCompleteStep={() => {}}
+        onCreateTaskFromStep={() => {}}
+        stepActionInFlight={{ stepId: 'step-1', action: 'complete' }}
+      />,
+    )
+
+    const disabledCount = (markup.match(/disabled=""/g) ?? []).length
+    expect(disabledCount).toBe(sampleAcceptedSteps.length * 2)
+  })
+
+  it('applies line-through styling to completed step text', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard steps={stepsWithCompletion} />,
+    )
+
+    expect(markup).toContain('line-through')
+  })
+
+  it('renders slate indicator for completed steps (not cyan or emerald)', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={[{ id: 'step-1', stepText: 'Done thing.', completedAt: '2026-04-10T08:00:00.000Z' }]}
+      />,
+    )
+
+    expect(markup).toContain('bg-slate-100')
+    expect(markup).not.toContain('bg-cyan-100')
+    expect(markup).not.toContain('bg-emerald-100')
+  })
+
+  it('marks the first incomplete, non-linked step as Next', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard steps={stepsWithCompletion} />,
+    )
+
+    // step-3 is the first incomplete step
+    expect(markup).toContain('Next')
+    expect(markup).toContain('Step 3 is the next recommended step')
+  })
+
+  it('does not mark a completed step as Next', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={[
+          { id: 'step-1', stepText: 'Done.', completedAt: '2026-04-10T08:00:00.000Z' },
+          { id: 'step-2', stepText: 'Not done.', completedAt: null },
+        ]}
+      />,
+    )
+
+    // Next badge must be on step-2, not step-1
+    expect(markup).toContain('Step 2 is the next recommended step')
+    expect(markup).not.toContain('Step 1 is the next recommended step')
+  })
+
+  it('keeps a linked incomplete step as Next when it is first in progression', () => {
+    const steps: AcceptedBreakdownStep[] = [
+      { id: 'step-1', stepText: 'Linked but not completed.', completedAt: null },
+      { id: 'step-2', stepText: 'Real next step.', completedAt: null },
+    ]
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard steps={steps} linkedStepIds={['step-1']} />,
+    )
+
+    expect(markup).toContain('Step 1 is the next recommended step')
+    expect(markup).not.toContain('Step 2 is the next recommended step')
+  })
+
+  it('shows no Next badge when all steps are completed', () => {
+    const allDone: AcceptedBreakdownStep[] = [
+      { id: 'step-1', stepText: 'Done 1.', completedAt: '2026-04-10T08:00:00.000Z' },
+      { id: 'step-2', stepText: 'Done 2.', completedAt: '2026-04-11T08:00:00.000Z' },
+    ]
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard steps={allDone} />,
+    )
+
+    expect(markup).not.toContain('>Next<')
+    expect(markup).not.toContain('next recommended step')
+  })
+
+  it('still shows Next when all steps are linked but incomplete', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={sampleAcceptedSteps}
+        linkedStepIds={['step-1', 'step-2', 'step-3']}
+      />,
+    )
+
+    expect(markup).toContain('>Next<')
+    expect(markup).toContain('Step 1 is the next recommended step')
+  })
+
+  it('does not render Done chip for steps with null completedAt', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={[{ id: 'step-1', stepText: 'Pending step.', completedAt: null }]}
+      />,
+    )
+
+    expect(markup).not.toContain('>Done<')
+    expect(markup).not.toContain('line-through')
+  })
+
+  it('does not render Done chip for steps with undefined completedAt', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={[{ id: 'step-1', stepText: 'No completedAt field.' }]}
+      />,
+    )
+
+    expect(markup).not.toContain('>Done<')
+  })
+
+  it('marks first step as Next when none are completed or linked', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard steps={sampleAcceptedSteps} />,
+    )
+
+    expect(markup).toContain('Step 1 is the next recommended step')
+    expect(markup).not.toContain('Step 2 is the next recommended step')
+  })
+
+  it('carries accessible aria-label for Done chip', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={[{ id: 'step-1', stepText: 'Done thing.', completedAt: '2026-04-10T08:00:00.000Z' }]}
+      />,
+    )
+
+    expect(markup).toContain('aria-label="Step 1 done"')
+  })
+
+  it('carries accessible aria-label for Next badge', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={[{ id: 'step-1', stepText: 'First step.', completedAt: null }]}
+      />,
+    )
+
+    expect(markup).toContain('aria-label="Step 1 is the next recommended step"')
+  })
+
+  it('renders completed step with reduced opacity class', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={[{ id: 'step-1', stepText: 'Completed.', completedAt: '2026-04-10T00:00:00.000Z' }]}
+      />,
+    )
+
+    expect(markup).toContain('opacity-60')
+  })
+
+  it('renders Next badge on step-2 when step-1 is completed and step-3 is linked', () => {
+    const steps: AcceptedBreakdownStep[] = [
+      { id: 'step-1', stepText: 'Done.', completedAt: '2026-04-10T08:00:00.000Z' },
+      { id: 'step-2', stepText: 'Do next.', completedAt: null },
+      { id: 'step-3', stepText: 'Later.', completedAt: null },
+    ]
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard steps={steps} linkedStepIds={[]} />,
+    )
+
+    expect(markup).toContain('Step 2 is the next recommended step')
+    expect(markup).not.toContain('Step 3 is the next recommended step')
+  })
+})
+
+describe('IdeaThreadHistory — linked step forwarding', () => {
+  it('forwards linkedStepIds so linked steps show "Task created" chip', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        acceptedBreakdownSteps={sampleAcceptedSteps}
+        onCompleteStep={() => {}}
+        onCreateTaskFromStep={() => {}}
+        stepActionInFlight={null}
+        linkedStepIds={['step-1']}
+      />,
+    )
+
+    expect(markup).toContain('Task created')
+    expect(markup).toContain('Mark done')
+    // step-2 and step-3 still get Create task buttons
+    const createMatches = markup.match(/>Create task</g) ?? []
+    expect(createMatches).toHaveLength(2)
+  })
+
+  it('shows no "Task created" chips when linkedStepIds is empty', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        acceptedBreakdownSteps={sampleAcceptedSteps}
+        onCreateTaskFromStep={() => {}}
+        stepActionInFlight={null}
+        linkedStepIds={[]}
+      />,
+    )
+
+    // No chips, all steps actionable
+    expect(markup).not.toContain('Task created')
+    const createMatches = markup.match(/>Create task</g) ?? []
+    expect(createMatches).toHaveLength(sampleAcceptedSteps.length)
+  })
+})
+
+describe('IdeaThreadHistory — completion action forwarding', () => {
+  it('forwards completion controls to the accepted plan card', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        acceptedBreakdownSteps={[
+          { id: 'step-1', stepText: 'Pending.', completedAt: null },
+          { id: 'step-2', stepText: 'Done.', completedAt: '2026-04-10T08:00:00.000Z' },
+        ]}
+        onCompleteStep={() => {}}
+        onUncompleteStep={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Mark done')
+    expect(markup).toContain('Undo')
+  })
+
+  it('forwards the stepActionInFlight state to show pending completion labels', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        acceptedBreakdownSteps={sampleAcceptedSteps}
+        onCompleteStep={() => {}}
+        stepActionInFlight={{ stepId: 'step-2', action: 'complete' }}
+      />,
+    )
+
+    expect(markup).toContain('Marking…')
   })
 })
