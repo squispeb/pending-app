@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import type { Database } from '../db/client'
-import { tasks } from '../db/schema'
+import { taskExecutionArtifacts, tasks } from '../db/schema'
 import {
   normalizeTaskValuesForStorage,
   taskCreateSchema,
@@ -80,6 +80,52 @@ export function createTasksService(database: Database) {
         .where(and(eq(tasks.id, id), eq(tasks.userId, userId), isNull(tasks.archivedAt)))
 
       return { ok: true as const }
+    },
+    async listTaskExecutionArtifacts(taskId: string, userId: string) {
+      return database.query.taskExecutionArtifacts.findMany({
+        where: and(
+          eq(taskExecutionArtifacts.taskId, taskId),
+          eq(taskExecutionArtifacts.userId, userId),
+        ),
+        orderBy: [desc(taskExecutionArtifacts.createdAt)],
+      })
+    },
+    async createTaskExecutionArtifact(
+      input: {
+        taskId: string
+        artifactType: 'result' | 'evidence' | 'review'
+        source?: 'user' | 'assistant' | 'system'
+        content: string
+      },
+      userId: string,
+    ) {
+      const task = await database.query.tasks.findFirst({
+        where: and(
+          eq(tasks.id, input.taskId),
+          eq(tasks.userId, userId),
+          isNull(tasks.archivedAt),
+        ),
+      })
+
+      if (!task) {
+        throw new Error('Task not found')
+      }
+
+      const now = new Date()
+      const id = crypto.randomUUID()
+
+      await database.insert(taskExecutionArtifacts).values({
+        id,
+        taskId: input.taskId,
+        userId,
+        artifactType: input.artifactType,
+        source: input.source ?? 'user',
+        content: input.content,
+        createdAt: now,
+        updatedAt: now,
+      })
+
+      return { ok: true as const, id }
     },
     async reopenTask(id: string, userId: string) {
       await database

@@ -817,6 +817,38 @@ describe('ideas server flow', () => {
     expect(step?.completedSource).toBe('linked-task')
   })
 
+  it('keeps a linked step incomplete when the linked task is still active, even if the step was manually marked done', async () => {
+    const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
+    const manualCompletedAt = new Date('2026-04-16T09:00:00.000Z')
+    const listAcceptedBreakdownSteps = vi.fn().mockResolvedValue([
+      {
+        id: 'step-1',
+        ideaId: 'idea-123',
+        stepOrder: 1,
+        stepText: 'Validate the riskiest assumption',
+        completedAt: manualCompletedAt,
+        createdAt: new Date(),
+        updatedAt: new Date('2026-04-16T10:00:00.000Z'),
+      },
+    ])
+    const listIdeaExecutionLinks = vi.fn().mockResolvedValue([
+      { targetType: 'task' as const, targetId: 'task-123', linkReason: 'Accepted breakdown step #1 from idea.' },
+    ])
+    const listTasks = vi.fn().mockResolvedValue([
+      { id: 'task-123', status: 'active', completedAt: null, archivedAt: null },
+    ])
+
+    const [step] = await listAcceptedBreakdownStepsForIdea('idea-123', {
+      resolveUser,
+      listAcceptedBreakdownSteps,
+      listIdeaExecutionLinks,
+      listTasks,
+    })
+
+    expect(step?.completedAt).toBeNull()
+    expect(step?.completedSource).toBeNull()
+  })
+
   it('completes an accepted breakdown step for the authenticated idea owner', async () => {
     const resolveUser = vi.fn().mockResolvedValue({ user: { id: 'user-1' } })
     const completeAcceptedBreakdownStep = vi.fn().mockResolvedValue({ ok: true as const })

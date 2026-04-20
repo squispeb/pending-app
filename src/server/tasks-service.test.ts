@@ -47,6 +47,21 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
   `)
 
   await db.run(sql`
+    CREATE TABLE task_execution_artifacts (
+      id text PRIMARY KEY NOT NULL,
+      task_id text NOT NULL,
+      user_id text NOT NULL,
+      artifact_type text NOT NULL,
+      source text DEFAULT 'user' NOT NULL,
+      content text NOT NULL,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE cascade,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
     CREATE TABLE planning_item_calendar_links (
       id text PRIMARY KEY NOT NULL,
       user_id text NOT NULL,
@@ -331,5 +346,66 @@ describe('tasks service', () => {
 
     const [task] = await service.listTasks(primaryUserId)
     expect(task?.status).toBe('active')
+  })
+
+  it('creates and lists task execution artifacts for the owning user', async () => {
+    const created = await service.createTask(primaryUserId, {
+      title: 'Run interviews',
+      notes: '',
+      priority: 'medium',
+      dueDate: '2026-04-10',
+      dueTime: '',
+      reminderAt: '',
+      estimatedMinutes: undefined,
+      preferredStartTime: '',
+      preferredEndTime: '',
+    })
+
+    const resultArtifact = await service.createTaskExecutionArtifact({
+      taskId: created.id,
+      artifactType: 'result',
+      content: 'Interviewed 10 nutritionists and identified pricing trust as the main drop-off driver.',
+    }, primaryUserId)
+    const evidenceArtifact = await service.createTaskExecutionArtifact({
+      taskId: created.id,
+      artifactType: 'evidence',
+      content: '7 of 10 interviewees asked for visible proof of outcomes and testimonials before paying.',
+    }, primaryUserId)
+
+    const artifacts = await service.listTaskExecutionArtifacts(created.id, primaryUserId)
+
+    expect(resultArtifact.ok).toBe(true)
+    expect(evidenceArtifact.ok).toBe(true)
+    expect(artifacts).toHaveLength(2)
+    expect(artifacts.map((artifact) => artifact.artifactType).sort()).toEqual(['evidence', 'result'])
+    expect(artifacts.map((artifact) => artifact.content).join(' ')).toContain('7 of 10 interviewees')
+    expect(artifacts.map((artifact) => artifact.content).join(' ')).toContain('pricing trust')
+  })
+
+  it('scopes task execution artifacts to the owning user', async () => {
+    const created = await service.createTask(primaryUserId, {
+      title: 'Run interviews',
+      notes: '',
+      priority: 'medium',
+      dueDate: '2026-04-10',
+      dueTime: '',
+      reminderAt: '',
+      estimatedMinutes: undefined,
+      preferredStartTime: '',
+      preferredEndTime: '',
+    })
+
+    await service.createTaskExecutionArtifact({
+      taskId: created.id,
+      artifactType: 'result',
+      content: 'Interviewed 10 nutritionists.',
+    }, primaryUserId)
+
+    await expect(service.listTaskExecutionArtifacts(created.id, secondaryUserId)).resolves.toEqual([])
+    await expect(service.createTaskExecutionArtifact({
+      taskId: created.id,
+      artifactType: 'result',
+      content: 'Cross-user write attempt.',
+    }, secondaryUserId)).rejects.toThrow('Task not found')
   })
 })

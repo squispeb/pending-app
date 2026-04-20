@@ -39,6 +39,25 @@ export const tasks = sqliteTable('tasks', {
     .default(sql`(unixepoch() * 1000)`),
 })
 
+export const taskExecutionArtifacts = sqliteTable('task_execution_artifacts', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id')
+    .notNull()
+    .references(() => tasks.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  artifactType: text('artifact_type').notNull(),
+  source: text('source').notNull().default('user'),
+  content: text('content').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+})
+
 export const habits = sqliteTable('habits', {
   id: text('id').primaryKey(),
   userId: text('user_id')
@@ -360,6 +379,7 @@ export const reminderEvents = sqliteTable('reminder_events', {
 
 export type User = typeof users.$inferSelect
 export type Task = typeof tasks.$inferSelect
+export type TaskExecutionArtifact = typeof taskExecutionArtifacts.$inferSelect
 export type Habit = typeof habits.$inferSelect
 export type Idea = typeof ideas.$inferSelect
 export type IdeaSnapshot = typeof ideaSnapshots.$inferSelect

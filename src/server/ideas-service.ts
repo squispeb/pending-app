@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, isNotNull, isNull, like, or } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, like, or } from 'drizzle-orm'
 import type { Database } from '../db/client'
-import { acceptedBreakdownSteps, ideaExecutionLinks, ideaSnapshots, ideaThreadRefs, ideas } from '../db/schema'
+import { acceptedBreakdownSteps, ideaExecutionLinks, ideaSnapshots, ideaThreadRefs, ideas, taskExecutionArtifacts, tasks } from '../db/schema'
 import {
   ideaCreateSchema,
   ideaStageSchema,
@@ -9,6 +9,42 @@ import {
   sortIdeas,
   type CreateIdeaInput,
 } from '../lib/ideas'
+
+export type ExecutionSummary = {
+  ideaId: string
+  stage: 'discovery' | 'framing' | 'developed'
+  latestSnapshot: {
+    version: number
+    title: string
+    threadSummary: string | null
+  } | null
+  acceptedBreakdownSteps: Array<{
+    stepOrder: number
+    stepText: string
+    completedAt: string | null
+    linkedTaskId: string | null
+  }>
+  linkedTasks: Array<{
+    taskId: string
+    title: string
+    status: string
+    completedAt: string | null
+    linkReason: string | null
+    artifactSummaries: Array<{
+      artifactId: string
+      artifactType: string
+      source: string
+      summary: string
+    }>
+  }>
+}
+
+function summarizeExecutionArtifactContent(content: string) {
+  return content
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160)
+}
 
 export function createIdeasService(database: Database) {
   return {
@@ -290,6 +326,92 @@ export function createIdeasService(database: Database) {
       })
 
       return snapshots[0]
+    },
+    async getExecutionSummary(ideaId: string, userId: string) {
+      const idea = await database.query.ideas.findFirst({
+        where: and(eq(ideas.id, ideaId), eq(ideas.userId, userId), isNull(ideas.archivedAt)),
+      })
+
+      if (!idea) {
+        return undefined
+      }
+
+      const [latestSnapshot, breakdownSteps, executionLinks] = await Promise.all([
+        this.getLatestIdeaSnapshot(ideaId, userId),
+        this.listAcceptedBreakdownSteps(ideaId, userId),
+        this.listIdeaExecutionLinks({ ideaId, targetType: 'task' }, userId),
+      ])
+
+      const taskLinks = executionLinks.filter((link) => link.targetType === 'task')
+      const taskIds = taskLinks.map((link) => link.targetId)
+      const [linkedTasks, linkedTaskArtifacts] = await Promise.all([
+        taskIds.length
+          ? database.query.tasks.findMany({
+              where: and(eq(tasks.userId, userId), inArray(tasks.id, taskIds), isNull(tasks.archivedAt)),
+              orderBy: [desc(tasks.createdAt)],
+            })
+          : Promise.resolve([]),
+        Promise.all(
+          taskIds.map(async (taskId) => ({
+            taskId,
+            artifacts: await database.query.taskExecutionArtifacts.findMany({
+              where: and(eq(taskExecutionArtifacts.taskId, taskId), eq(taskExecutionArtifacts.userId, userId)),
+              orderBy: [desc(taskExecutionArtifacts.createdAt)],
+            }),
+          })),
+        ),
+      ])
+
+      const tasksById = new Map(linkedTasks.map((task) => [task.id, task]))
+      const artifactsByTaskId = new Map(linkedTaskArtifacts.map((row) => [row.taskId, row.artifacts]))
+
+      return {
+        ideaId,
+        stage: idea.stage,
+        latestSnapshot: latestSnapshot
+          ? {
+              version: latestSnapshot.version,
+              title: latestSnapshot.title,
+              threadSummary: latestSnapshot.threadSummary,
+            }
+          : null,
+        acceptedBreakdownSteps: breakdownSteps.map((step) => {
+          const linkReason = `Accepted breakdown step #${step.stepOrder} from idea.`
+          const linkedTask = taskLinks.find((link) => link.linkReason === linkReason)
+
+          return {
+            stepOrder: step.stepOrder,
+            stepText: step.stepText,
+            completedAt: step.completedAt ? step.completedAt.toISOString() : null,
+            linkedTaskId: linkedTask?.targetId ?? null,
+          }
+        }),
+        linkedTasks: taskLinks
+          .map((link) => {
+            const task = tasksById.get(link.targetId)
+
+            if (!task) {
+              return null
+            }
+
+            const artifacts = artifactsByTaskId.get(link.targetId) ?? []
+
+            return {
+              taskId: task.id,
+              title: task.title,
+              status: task.status,
+              completedAt: task.completedAt ? task.completedAt.toISOString() : null,
+              linkReason: link.linkReason,
+              artifactSummaries: artifacts.slice(0, 3).map((artifact) => ({
+                artifactId: artifact.id,
+                artifactType: artifact.artifactType,
+                source: artifact.source,
+                summary: summarizeExecutionArtifactContent(artifact.content),
+              })),
+            }
+          })
+          .filter((task): task is NonNullable<typeof task> => task !== null),
+      } satisfies ExecutionSummary
     },
     async applyApprovedProposal(
       input: {

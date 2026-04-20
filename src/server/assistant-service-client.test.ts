@@ -211,12 +211,25 @@ describe('assistant service client', () => {
       currentTitle: 'Idea title',
       currentBody: 'Idea body',
       currentSummary: null,
+      executionSummary: {
+        ideaId: 'idea-123',
+        stage: 'discovery',
+        latestSnapshot: null,
+        acceptedBreakdownSteps: [],
+        linkedTasks: [],
+      },
     }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
 
     expect(result.outcome).toBe('proposal_created')
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123/actions/elaborate')
     expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      executionSummary: {
+        ideaId: 'idea-123',
+        stage: 'discovery',
+      },
+    })
   })
 
   it('requests a title improvement through the dedicated action contract', async () => {
@@ -251,12 +264,20 @@ describe('assistant service client', () => {
       currentTitle: 'Idea title',
       currentBody: 'Idea body',
       currentSummary: 'Current summary',
+      executionSummary: {
+        ideaId: 'idea-123',
+        stage: 'developed',
+        latestSnapshot: { version: 2, title: 'Idea title', threadSummary: 'Current summary' },
+        acceptedBreakdownSteps: [],
+        linkedTasks: [],
+      },
     }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
 
     expect(result.action).toBe('title')
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123/actions/improve-title')
     expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toMatchObject({ executionSummary: { ideaId: 'idea-123' } })
   })
 
   it('parses task creation payloads when accepting a convert-to-task proposal', async () => {
@@ -326,12 +347,20 @@ describe('assistant service client', () => {
       currentTitle: 'Idea title',
       currentBody: 'Idea body',
       currentSummary: 'Current summary',
+      executionSummary: {
+        ideaId: 'idea-123',
+        stage: 'developed',
+        latestSnapshot: { version: 2, title: 'Idea title', threadSummary: 'Current summary' },
+        acceptedBreakdownSteps: [],
+        linkedTasks: [],
+      },
     }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
 
     expect(result.action).toBe('summary')
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123/actions/improve-summary')
     expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toMatchObject({ executionSummary: { ideaId: 'idea-123' } })
   })
 
   it('requests a restructure action through the dedicated action contract', async () => {
@@ -355,12 +384,23 @@ describe('assistant service client', () => {
       currentTitle: 'Idea title',
       currentBody: 'Idea body',
       currentSummary: 'Current summary',
+      executionSummary: {
+        ideaId: 'idea-123',
+        stage: 'developed',
+        latestSnapshot: { version: 2, title: 'Idea title', threadSummary: 'Current summary' },
+        acceptedBreakdownSteps: [],
+        linkedTasks: [],
+      },
     }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
 
     expect(result.action).toBe('restructure')
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123/actions/restructure')
     expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      currentSnapshotVersion: 2,
+      executionSummary: { ideaId: 'idea-123' },
+    })
   })
 
   it('requests a breakdown action through the dedicated action contract', async () => {
@@ -384,12 +424,23 @@ describe('assistant service client', () => {
       currentTitle: 'Idea title',
       currentBody: 'Idea body',
       currentSummary: 'Current summary',
+      executionSummary: {
+        ideaId: 'idea-123',
+        stage: 'developed',
+        latestSnapshot: { version: 2, title: 'Idea title', threadSummary: 'Current summary' },
+        acceptedBreakdownSteps: [],
+        linkedTasks: [],
+      },
     }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
 
     expect(result.action).toBe('breakdown')
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123/actions/breakdown')
     expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      currentSnapshotVersion: 2,
+      executionSummary: { ideaId: 'idea-123' },
+    })
   })
 
   it('accepts a structured action through the dedicated review contract', async () => {
@@ -625,6 +676,13 @@ describe('assistant service client', () => {
       ideaId: 'idea-123',
       authHeaders: { cookie: 'better-auth.session_token=test-session' },
       message: 'Reduce onboarding drop-off for first-time users.',
+      executionSummary: {
+        ideaId: 'idea-123',
+        stage: 'discovery',
+        latestSnapshot: null,
+        acceptedBreakdownSteps: [],
+        linkedTasks: [],
+      },
     }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
 
     expect(result.thread.workingIdea.purpose).toBe('Reduce onboarding drop-off for first-time users.')
@@ -634,7 +692,13 @@ describe('assistant service client', () => {
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123/turns')
     expect(init?.method).toBe('POST')
-    expect(init?.body).toBe(JSON.stringify({ message: 'Reduce onboarding drop-off for first-time users.' }))
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      message: 'Reduce onboarding drop-off for first-time users.',
+      executionSummary: {
+        ideaId: 'idea-123',
+        stage: 'discovery',
+      },
+    })
   })
 
   it('passes the last event id when reconnecting a thread stream', async () => {

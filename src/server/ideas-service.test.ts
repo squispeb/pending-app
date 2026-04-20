@@ -126,6 +126,43 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
     CREATE UNIQUE INDEX accepted_breakdown_step_idea_step_unique
       ON accepted_breakdown_steps (idea_id, step_order);
   `)
+
+  await db.run(sql`
+    CREATE TABLE tasks (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL,
+      title text NOT NULL,
+      notes text,
+      status text DEFAULT 'active' NOT NULL,
+      priority text DEFAULT 'medium' NOT NULL,
+      due_date text,
+      due_time text,
+      reminder_at integer,
+      estimated_minutes integer,
+      preferred_start_time text,
+      preferred_end_time text,
+      completed_at integer,
+      archived_at integer,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
+    CREATE TABLE task_execution_artifacts (
+      id text PRIMARY KEY NOT NULL,
+      task_id text NOT NULL,
+      user_id text NOT NULL,
+      artifact_type text NOT NULL,
+      source text DEFAULT 'user' NOT NULL,
+      content text NOT NULL,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE cascade,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+    );
+  `)
 }
 
 describe('ideas service', () => {
@@ -324,6 +361,90 @@ describe('ideas service', () => {
 
     expect(results.map((idea) => idea.id)).toEqual([second.id, first.id])
     expect(results.every((idea) => idea.starredAt instanceof Date)).toBe(true)
+  })
+
+  it('builds a compact execution summary from canonical idea and task records', async () => {
+    const created = await service.createIdea(primaryUserId, {
+      title: 'Execution summary idea',
+      body: 'Canonical state stays in the app DB.',
+      sourceType: 'manual',
+      sourceInput: '',
+    })
+
+    await service.createInitialSnapshotAndThreadRef({ ideaId: created.id, threadId: 'thread-user-1:idea-123' }, primaryUserId)
+    await service.createAcceptedBreakdownSteps({
+      ideaId: created.id,
+      steps: [
+        { stepOrder: 1, stepText: 'Validate the riskiest assumption' },
+        { stepOrder: 2, stepText: 'Run the first experiment' },
+      ],
+    }, primaryUserId)
+    await service.createIdeaExecutionLink({
+      ideaId: created.id,
+      targetType: 'task',
+      targetId: 'task-1',
+      linkReason: 'Accepted breakdown step #2 from idea.',
+    }, primaryUserId)
+
+    await db.insert(schema.tasks).values({
+      id: 'task-1',
+      userId: primaryUserId,
+      title: 'Run the first experiment',
+      notes: 'Experiment notes',
+      status: 'completed',
+      completedAt: new Date('2026-04-12T00:10:00.000Z'),
+    })
+    await db.insert(schema.taskExecutionArtifacts).values({
+      id: 'artifact-1',
+      taskId: 'task-1',
+      userId: primaryUserId,
+      artifactType: 'result',
+      source: 'assistant',
+      content: 'Completed experiment with two signups and one clear follow-up.',
+    })
+
+    const summary = await service.getExecutionSummary(created.id, primaryUserId)
+
+    expect(summary).toEqual({
+      ideaId: created.id,
+      stage: 'discovery',
+      latestSnapshot: {
+        version: 1,
+        title: 'Execution summary idea',
+        threadSummary: null,
+      },
+      acceptedBreakdownSteps: [
+        {
+          stepOrder: 1,
+          stepText: 'Validate the riskiest assumption',
+          completedAt: null,
+          linkedTaskId: null,
+        },
+        {
+          stepOrder: 2,
+          stepText: 'Run the first experiment',
+          completedAt: null,
+          linkedTaskId: 'task-1',
+        },
+      ],
+      linkedTasks: [
+        {
+          taskId: 'task-1',
+          title: 'Run the first experiment',
+          status: 'completed',
+          completedAt: '2026-04-12T00:10:00.000Z',
+          linkReason: 'Accepted breakdown step #2 from idea.',
+          artifactSummaries: [
+            {
+              artifactId: 'artifact-1',
+              artifactType: 'result',
+              source: 'assistant',
+              summary: 'Completed experiment with two signups and one clear follow-up.',
+            },
+          ],
+        },
+      ],
+    })
   })
 
   it('toggles star state off when an already starred idea is toggled again', async () => {

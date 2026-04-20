@@ -64,6 +64,45 @@ const taskCreationPayloadSchema = z.object({
   suggestedSteps: z.array(z.string().min(1)).max(10),
 })
 
+const executionSummarySchema = z.object({
+  ideaId: z.string().min(1),
+  stage: z.enum(['discovery', 'framing', 'developed']),
+  latestSnapshot: z
+    .object({
+      version: z.number().int().positive(),
+      title: z.string().min(1),
+      threadSummary: z.string().nullable(),
+    })
+    .nullable(),
+  acceptedBreakdownSteps: z.array(
+    z.object({
+      stepOrder: z.number().int().positive(),
+      stepText: z.string().min(1),
+      completedAt: z.string().nullable(),
+      linkedTaskId: z.string().nullable(),
+    }),
+  ),
+  linkedTasks: z.array(
+    z.object({
+      taskId: z.string().min(1),
+      title: z.string().min(1),
+      status: z.string().min(1),
+      completedAt: z.string().nullable(),
+      linkReason: z.string().nullable(),
+      artifactSummaries: z.array(
+        z.object({
+          artifactId: z.string().min(1),
+          artifactType: z.string().min(1),
+          source: z.string().min(1),
+          summary: z.string(),
+        }),
+      ),
+    }),
+  ),
+})
+
+export type ExecutionSummary = z.infer<typeof executionSummarySchema>
+
 const threadTurnSchema = z.object({
   turnId: z.string().min(1),
   source: z.literal('text'),
@@ -257,6 +296,7 @@ export async function requestIdeaThreadElaboration(
     currentTitle: string
     currentBody: string
     currentSummary: string | null
+    executionSummary?: ExecutionSummary
   },
   options?: { fetchImpl?: typeof fetch; baseUrl?: string },
 ) {
@@ -278,6 +318,7 @@ export async function requestIdeaThreadElaboration(
       currentTitle: input.currentTitle,
       currentBody: input.currentBody,
       currentSummary: input.currentSummary,
+      ...(input.executionSummary ? { executionSummary: input.executionSummary } : {}),
     }),
   })
   const payload = await parseAssistantResponse(response)
@@ -294,6 +335,7 @@ async function requestIdeaImprovement(
     currentTitle: string
     currentBody: string
     currentSummary: string | null
+    executionSummary?: ExecutionSummary
   },
   options?: { fetchImpl?: typeof fetch; baseUrl?: string },
 ) {
@@ -314,6 +356,7 @@ async function requestIdeaImprovement(
       currentTitle: input.currentTitle,
       currentBody: input.currentBody,
       currentSummary: input.currentSummary,
+      ...(input.executionSummary ? { executionSummary: input.executionSummary } : {}),
     }),
   })
   const payload = await parseAssistantResponse(response)
@@ -329,6 +372,7 @@ export async function requestIdeaThreadTitleImprovement(
     currentTitle: string
     currentBody: string
     currentSummary: string | null
+    executionSummary?: ExecutionSummary
   },
   options?: { fetchImpl?: typeof fetch; baseUrl?: string },
 ) {
@@ -343,6 +387,7 @@ export async function requestIdeaThreadSummaryImprovement(
     currentTitle: string
     currentBody: string
     currentSummary: string | null
+    executionSummary?: ExecutionSummary
   },
   options?: { fetchImpl?: typeof fetch; baseUrl?: string },
 ) {
@@ -358,6 +403,7 @@ async function requestIdeaTransform(
     currentTitle: string
     currentBody: string
     currentSummary: string | null
+    executionSummary?: ExecutionSummary
   },
   options?: { fetchImpl?: typeof fetch; baseUrl?: string },
 ) {
@@ -378,6 +424,7 @@ async function requestIdeaTransform(
       currentTitle: input.currentTitle,
       currentBody: input.currentBody,
       currentSummary: input.currentSummary,
+      ...(input.executionSummary ? { executionSummary: input.executionSummary } : {}),
     }),
   })
   const payload = await parseAssistantResponse(response)
@@ -393,6 +440,7 @@ export async function requestIdeaThreadRestructure(
     currentTitle: string
     currentBody: string
     currentSummary: string | null
+    executionSummary?: ExecutionSummary
   },
   options?: { fetchImpl?: typeof fetch; baseUrl?: string },
 ) {
@@ -432,6 +480,7 @@ export async function submitIdeaDiscoveryTurn(
     ideaId: string
     authHeaders: HeadersInit
     message: string
+    executionSummary?: ExecutionSummary
   },
   options?: { fetchImpl?: typeof fetch; baseUrl?: string },
 ) {
@@ -447,7 +496,10 @@ export async function submitIdeaDiscoveryTurn(
   const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/turns`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ message: input.message }),
+    body: JSON.stringify({
+      message: input.message,
+      ...(input.executionSummary ? { executionSummary: input.executionSummary } : {}),
+    }),
   })
   const payload = await parseAssistantResponse(response)
 

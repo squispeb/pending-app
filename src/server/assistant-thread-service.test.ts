@@ -90,6 +90,70 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
     CREATE UNIQUE INDEX idea_thread_ref_thread_unique
       ON idea_thread_refs (thread_id);
   `)
+
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS idea_execution_links (
+      id text PRIMARY KEY NOT NULL,
+      idea_id text NOT NULL,
+      target_type text NOT NULL,
+      target_id text NOT NULL,
+      link_reason text,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS accepted_breakdown_steps (
+      id text PRIMARY KEY NOT NULL,
+      idea_id text NOT NULL,
+      step_order integer NOT NULL,
+      step_text text NOT NULL,
+      completed_at integer,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL,
+      title text NOT NULL,
+      notes text,
+      status text DEFAULT 'active' NOT NULL,
+      priority text DEFAULT 'medium' NOT NULL,
+      due_date text,
+      due_time text,
+      reminder_at integer,
+      estimated_minutes integer,
+      preferred_start_time text,
+      preferred_end_time text,
+      completed_at integer,
+      archived_at integer,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+    );
+  `)
+
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS task_execution_artifacts (
+      id text PRIMARY KEY NOT NULL,
+      task_id text NOT NULL,
+      user_id text NOT NULL,
+      artifact_type text NOT NULL,
+      source text DEFAULT 'user' NOT NULL,
+      content text NOT NULL,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE cascade,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+    );
+  `)
+
 }
 
 describe('assistant thread service', () => {
@@ -151,7 +215,6 @@ describe('assistant thread service', () => {
       body: 'Private idea body',
       sourceType: 'manual',
     })
-
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -229,6 +292,20 @@ describe('assistant thread service', () => {
       body: 'Private idea body',
       sourceType: 'manual',
     })
+    await db.insert(schema.ideaExecutionLinks).values({
+      id: 'link-1',
+      ideaId: 'idea-123',
+      targetType: 'task',
+      targetId: 'task-1',
+      linkReason: 'Accepted breakdown step #1 from idea.',
+    })
+    await db.insert(schema.acceptedBreakdownSteps).values({
+      id: 'step-1',
+      ideaId: 'idea-123',
+      stepOrder: 1,
+      stepText: 'Validate the riskiest assumption',
+      completedAt: null,
+    })
 
     const fetchMock = vi.fn().mockResolvedValueOnce(
       Response.json({
@@ -247,6 +324,81 @@ describe('assistant thread service', () => {
       }),
     ).rejects.toThrow('Idea not found')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('passes a compact execution summary into assistant work requests', async () => {
+    await db.insert(schema.users).values({
+      id: 'user-1',
+      email: 'user-1@example.com',
+      displayName: 'User One',
+      timezone: 'UTC',
+    })
+    await db.insert(schema.ideas).values({
+      id: 'idea-123',
+      userId: 'user-1',
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'manual',
+    })
+    await db.insert(schema.ideaExecutionLinks).values({
+      id: 'link-1',
+      ideaId: 'idea-123',
+      targetType: 'task',
+      targetId: 'task-1',
+      linkReason: 'Accepted breakdown step #1 from idea.',
+    })
+    await db.insert(schema.acceptedBreakdownSteps).values({
+      id: 'step-1',
+      ideaId: 'idea-123',
+      stepOrder: 1,
+      stepText: 'Validate the riskiest assumption',
+      completedAt: null,
+    })
+    await db.insert(schema.ideaSnapshots).values({
+      id: 'snapshot-1',
+      ideaId: 'idea-123',
+      version: 1,
+      title: 'Owned idea',
+      body: 'Private idea body',
+      sourceType: 'manual',
+      stage: 'developed',
+    })
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          session: { id: 'session-1', userId: 'user-1' },
+          user: { id: 'user-1', email: 'user-1@example.com', name: 'User One' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          ok: true,
+          outcome: 'proposal_created',
+          thread: makeThread({ stage: 'developed' }),
+          proposal: { explanation: 'Generated a richer version of the idea.' },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+    const service = createAssistantThreadService(db)
+
+    await service.requestIdeaThreadElaboration('idea-123', {
+      actionInput: null,
+      currentSnapshotVersion: 1,
+      currentTitle: 'Owned idea',
+      currentBody: 'Private idea body',
+      currentSummary: null,
+    }, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      assistantServiceBaseUrl: 'https://assistant.example',
+      requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+    })
+
+    const [, init] = fetchMock.mock.calls.at(-1) ?? []
+    expect(JSON.parse(String(init?.body))).toHaveProperty('executionSummary')
   })
 
   it('bootstraps and stores thread linkage for a newly created idea', async () => {
@@ -323,6 +475,20 @@ describe('assistant thread service', () => {
       body: 'Private idea body',
       sourceType: 'manual',
     })
+    await db.insert(schema.ideaExecutionLinks).values({
+      id: 'link-1',
+      ideaId: 'idea-123',
+      targetType: 'task',
+      targetId: 'task-1',
+      linkReason: 'Accepted breakdown step #1 from idea.',
+    })
+    await db.insert(schema.acceptedBreakdownSteps).values({
+      id: 'step-1',
+      ideaId: 'idea-123',
+      stepOrder: 1,
+      stepText: 'Validate the riskiest assumption',
+      completedAt: null,
+    })
     await db.insert(schema.ideaSnapshots).values({
       id: 'snapshot-1',
       ideaId: 'idea-123',
@@ -373,6 +539,20 @@ describe('assistant thread service', () => {
       title: 'Owned idea',
       body: 'Private idea body',
       sourceType: 'manual',
+    })
+    await db.insert(schema.ideaExecutionLinks).values({
+      id: 'link-1',
+      ideaId: 'idea-123',
+      targetType: 'task',
+      targetId: 'task-1',
+      linkReason: 'Accepted breakdown step #1 from idea.',
+    })
+    await db.insert(schema.acceptedBreakdownSteps).values({
+      id: 'step-1',
+      ideaId: 'idea-123',
+      stepOrder: 1,
+      stepText: 'Validate the riskiest assumption',
+      completedAt: null,
     })
 
     const fetchMock = vi
@@ -994,6 +1174,20 @@ describe('assistant thread service', () => {
       title: 'Owned idea',
       body: 'Private idea body',
       sourceType: 'manual',
+    })
+    await db.insert(schema.ideaExecutionLinks).values({
+      id: 'link-1',
+      ideaId: 'idea-123',
+      targetType: 'task',
+      targetId: 'task-1',
+      linkReason: 'Accepted breakdown step #1 from idea.',
+    })
+    await db.insert(schema.acceptedBreakdownSteps).values({
+      id: 'step-1',
+      ideaId: 'idea-123',
+      stepOrder: 1,
+      stepText: 'Validate the riskiest assumption',
+      completedAt: null,
     })
     await db.insert(schema.ideaSnapshots).values({
       id: 'snapshot-1',

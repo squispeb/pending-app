@@ -21,6 +21,9 @@ import {
 import { resolveAuthenticatedPlannerUser } from './authenticated-user'
 import { createIdeasService } from './ideas-service'
 
+type IdeasService = ReturnType<typeof createIdeasService>
+type ExecutionSummary = Awaited<ReturnType<IdeasService['getExecutionSummary']>>
+
 type ResolveIdeaThreadOptions = {
   requestHeaders?: HeadersInit
   fetchImpl?: typeof fetch
@@ -72,6 +75,10 @@ export function createAssistantThreadService(database: Database) {
       },
       userId,
     )
+  }
+
+  async function getExecutionSummary(ideaId: string, userId: string) {
+    return ideasService.getExecutionSummary(ideaId, userId)
   }
 
   return {
@@ -204,6 +211,7 @@ export function createAssistantThreadService(database: Database) {
         currentTitle: string
         currentBody: string
         currentSummary: string | null
+        executionSummary?: ExecutionSummary
       },
       options?: ResolveIdeaThreadOptions,
     ) {
@@ -218,11 +226,14 @@ export function createAssistantThreadService(database: Database) {
         throw new Error('Idea not found')
       }
 
+      const executionSummary = input.executionSummary ?? (await getExecutionSummary(ideaId, user.id))
+
       return requestIdeaThreadElaboration(
         {
           ideaId,
           authHeaders,
           ...input,
+          executionSummary: executionSummary ?? undefined,
         },
         {
           fetchImpl: options?.fetchImpl,
@@ -237,6 +248,7 @@ export function createAssistantThreadService(database: Database) {
         currentTitle: string
         currentBody: string
         currentSummary: string | null
+        executionSummary?: ExecutionSummary
       },
       options?: ResolveIdeaThreadOptions,
     ) {
@@ -251,11 +263,14 @@ export function createAssistantThreadService(database: Database) {
         throw new Error('Idea not found')
       }
 
+      const executionSummary = input.executionSummary ?? (await getExecutionSummary(ideaId, user.id))
+
       return requestIdeaThreadTitleImprovementFromAssistant(
         {
           ideaId,
           authHeaders,
           ...input,
+          executionSummary: executionSummary ?? undefined,
         },
         {
           fetchImpl: options?.fetchImpl,
@@ -270,6 +285,7 @@ export function createAssistantThreadService(database: Database) {
         currentTitle: string
         currentBody: string
         currentSummary: string | null
+        executionSummary?: ExecutionSummary
       },
       options?: ResolveIdeaThreadOptions,
     ) {
@@ -284,11 +300,14 @@ export function createAssistantThreadService(database: Database) {
         throw new Error('Idea not found')
       }
 
+      const executionSummary = input.executionSummary ?? (await getExecutionSummary(ideaId, user.id))
+
       return requestIdeaThreadSummaryImprovementFromAssistant(
         {
           ideaId,
           authHeaders,
           ...input,
+          executionSummary: executionSummary ?? undefined,
         },
         {
           fetchImpl: options?.fetchImpl,
@@ -303,6 +322,7 @@ export function createAssistantThreadService(database: Database) {
         currentTitle: string
         currentBody: string
         currentSummary: string | null
+        executionSummary?: ExecutionSummary
       },
       options?: ResolveIdeaThreadOptions,
     ) {
@@ -317,11 +337,14 @@ export function createAssistantThreadService(database: Database) {
         throw new Error('Idea not found')
       }
 
+      const executionSummary = input.executionSummary ?? (await getExecutionSummary(ideaId, user.id))
+
       return requestIdeaThreadRestructureFromAssistant(
         {
           ideaId,
           authHeaders,
           ...input,
+          executionSummary: executionSummary ?? undefined,
         },
         {
           fetchImpl: options?.fetchImpl,
@@ -336,6 +359,7 @@ export function createAssistantThreadService(database: Database) {
         currentTitle: string
         currentBody: string
         currentSummary: string | null
+        executionSummary?: ExecutionSummary
       },
       options?: ResolveIdeaThreadOptions,
     ) {
@@ -350,11 +374,14 @@ export function createAssistantThreadService(database: Database) {
         throw new Error('Idea not found')
       }
 
+      const executionSummary = input.executionSummary ?? (await getExecutionSummary(ideaId, user.id))
+
       return requestIdeaThreadBreakdownFromAssistant(
         {
           ideaId,
           authHeaders,
           ...input,
+          executionSummary: executionSummary ?? undefined,
         },
         {
           fetchImpl: options?.fetchImpl,
@@ -369,6 +396,7 @@ export function createAssistantThreadService(database: Database) {
         currentTitle: string
         currentBody: string
         currentSummary: string | null
+        executionSummary?: ExecutionSummary
       },
       options?: ResolveIdeaThreadOptions,
     ) {
@@ -383,11 +411,14 @@ export function createAssistantThreadService(database: Database) {
         throw new Error('Idea not found')
       }
 
+      const executionSummary = input.executionSummary ?? (await getExecutionSummary(ideaId, user.id))
+
       return requestIdeaThreadConvertToTaskFromAssistant(
         {
           ideaId,
           authHeaders,
           ...input,
+          executionSummary: executionSummary ?? undefined,
         },
         {
           fetchImpl: options?.fetchImpl,
@@ -399,6 +430,7 @@ export function createAssistantThreadService(database: Database) {
       ideaId: string,
       input: {
         message: string
+        executionSummary?: ExecutionSummary
       },
       options?: ResolveIdeaThreadOptions,
     ) {

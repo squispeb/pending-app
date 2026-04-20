@@ -12,6 +12,7 @@ import type { Task } from '../db/schema'
 import {
   applyTaskFilter,
   getReminderLabel,
+  isStepLinkedTask,
   getTaskSummary,
   getTaskTimingLabel,
   groupActiveTasks,
@@ -72,6 +73,8 @@ type TaskWithCalendarLinks = Task & {
   calendarLinks?: Array<PlanningItemCalendarLinkView>
 }
 
+const STEP_LINKED_TASK_MARKER = 'Accepted breakdown step #'
+
 function TasksPage() {
   const queryClient = useQueryClient()
   const { data: tasks } = useSuspenseQuery(tasksQueryOptions())
@@ -95,6 +98,11 @@ function TasksPage() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [showForm, setShowForm] = useState(false)
+  const [showCompletionReview, setShowCompletionReview] = useState(false)
+  const [completionTask, setCompletionTask] = useState<TaskWithCalendarLinks | null>(null)
+  const [completionResult, setCompletionResult] = useState('')
+  const [completionEvidence, setCompletionEvidence] = useState('')
+  const [completionError, setCompletionError] = useState<string | null>(null)
   const [showSortMenu, setShowSortMenu] = useState(false)
   const sortButtonRef = useRef<HTMLButtonElement>(null)
   const [sortMenuPos, setSortMenuPos] = useState<{ top: number; left: number } | null>(null)
@@ -173,17 +181,28 @@ function TasksPage() {
   })
 
   const completeTaskMutation = useMutation({
-    mutationFn: async (task: Task) => {
+    mutationFn: async (task: TaskWithCalendarLinks) => {
       setActiveTaskId(task.id)
 
       if (isTaskCompleted(task)) {
         await reopenTask({ data: { id: task.id } })
       } else {
-        await completeTask({ data: { id: task.id } })
+        await completeTask({
+          data: {
+            id: task.id,
+            resultArtifactContent: completionResult.trim() || undefined,
+            evidenceArtifactContent: completionEvidence.trim() || undefined,
+          },
+        })
       }
     },
     onSuccess: async () => {
       setActiveTaskId(null)
+      setCompletionTask(null)
+      setCompletionResult('')
+      setCompletionEvidence('')
+      setCompletionError(null)
+      setShowCompletionReview(false)
       setFeedbackTone('success')
       setFeedbackMessage('Task status updated.')
       await invalidateTasks()
@@ -269,6 +288,48 @@ function TasksPage() {
     setFieldErrors({})
     setShowAdvanced(false)
     setShowForm(false)
+  }
+
+  function resetCompletionReview() {
+    setCompletionTask(null)
+    setCompletionResult('')
+    setCompletionEvidence('')
+    setCompletionError(null)
+    setShowCompletionReview(false)
+  }
+
+  function handleToggleComplete(task: TaskWithCalendarLinks) {
+    if (isTaskCompleted(task)) {
+      completeTaskMutation.mutate(task)
+      return
+    }
+
+    if (isStepLinkedTask(task)) {
+      setCompletionTask(task)
+      setCompletionResult('')
+      setCompletionEvidence('')
+      setCompletionError(null)
+      setShowCompletionReview(true)
+      return
+    }
+
+    completeTaskMutation.mutate(task)
+  }
+
+  function submitCompletionReview(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!completionTask) {
+      return
+    }
+
+    if (completionResult.trim().length === 0) {
+      setCompletionError('Add a short result before completing this step-linked task.')
+      return
+    }
+
+    setCompletionError(null)
+    completeTaskMutation.mutate(completionTask)
   }
 
   return (
@@ -422,14 +483,14 @@ function TasksPage() {
             ) : (
               <div className="space-y-3">
                 {filteredTasks.map((task) => (
-                  <TaskCard
-                    key={task.id}
-                    task={task}
-                    onEdit={() => beginEdit(task)}
-                    onToggleComplete={() => completeTaskMutation.mutate(task)}
-                    onArchive={() => archiveTaskMutation.mutate(task.id)}
-                    isMutating={activeTaskId === task.id}
-                  />
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      onEdit={() => beginEdit(task)}
+                      onToggleComplete={() => handleToggleComplete(task)}
+                      onArchive={() => archiveTaskMutation.mutate(task.id)}
+                      isMutating={activeTaskId === task.id}
+                    />
                 ))}
               </div>
             )}
@@ -707,6 +768,92 @@ function TasksPage() {
                 </div>
               </form>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        onClick={resetCompletionReview}
+        className={`fixed inset-0 z-40 bg-black/40 transition-opacity duration-300 ${showCompletionReview ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+      />
+
+      <div
+        className={`fixed inset-x-0 bottom-0 z-50 duration-300 lg:inset-0 lg:flex lg:items-center lg:justify-center ${
+          showCompletionReview
+            ? 'translate-y-0 opacity-100 transition-[transform,opacity] lg:pointer-events-auto'
+            : 'translate-y-full opacity-0 transition-[transform,opacity] lg:translate-y-0 lg:pointer-events-none'
+        }`}
+      >
+        <div className="mx-auto w-full max-w-2xl lg:px-4">
+          <div className="panel rounded-t-[2rem] px-6 pb-10 pt-3 lg:rounded-[2rem]">
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[var(--line)] lg:hidden" />
+
+            <div className="mb-5 flex items-center justify-between gap-4">
+              <div>
+                <h2 className="m-0 text-xl font-semibold text-[var(--ink-strong)]">Complete step-linked task</h2>
+                <p className="m-0 mt-1 text-sm leading-6 text-[var(--ink-soft)]">
+                  Record what happened so the idea thread can reason over the result.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={resetCompletionReview}
+                aria-label="Close completion review"
+                className="flex size-8 cursor-pointer items-center justify-center rounded-full text-[var(--ink-soft)] transition hover:bg-[var(--surface-strong)] hover:text-[var(--ink-strong)]"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form className="space-y-4" onSubmit={submitCompletionReview}>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
+                  What happened?
+                </span>
+                <textarea
+                  value={completionResult}
+                  onChange={(event) => setCompletionResult(event.target.value)}
+                  rows={4}
+                  placeholder="Summarize the result of the work."
+                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">
+                  Evidence / notes
+                </span>
+                <textarea
+                  value={completionEvidence}
+                  onChange={(event) => setCompletionEvidence(event.target.value)}
+                  rows={3}
+                  placeholder="Optional supporting observations, metrics, or evidence."
+                  className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                />
+              </label>
+
+              {completionError ? (
+                <p className="m-0 text-sm font-medium text-red-600">{completionError}</p>
+              ) : null}
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={completeTaskMutation.isPending}
+                  className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {completeTaskMutation.isPending ? 'Completing...' : 'Complete task'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={resetCompletionReview}
+                  className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       </div>

@@ -181,6 +181,10 @@ export function isTaskCompleted(task: Task) {
   return task.status === 'completed' || task.completedAt !== null
 }
 
+export function isStepLinkedTask(task: Pick<Task, 'notes'>) {
+  return task.notes?.includes('Accepted breakdown step #') ?? false
+}
+
 export function isTaskDueToday(task: Task, now = new Date()) {
   if (!task.dueDate || isTaskArchived(task) || isTaskCompleted(task)) {
     return false

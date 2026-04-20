@@ -638,6 +638,7 @@ describe('AcceptedBreakdownPlanCard — linked step state', () => {
     const markup = renderToStaticMarkup(
         <AcceptedBreakdownPlanCard
           steps={sampleAcceptedSteps}
+          onCompleteLinkedTask={() => {}}
           onCompleteStep={() => {}}
           onCreateTaskFromStep={() => {}}
           stepActionInFlight={null}
@@ -647,7 +648,8 @@ describe('AcceptedBreakdownPlanCard — linked step state', () => {
 
     // step-1 should show "Task created" chip, not "Create task" button
     expect(markup).toContain('Task created')
-    expect(markup).toContain('Mark done')
+    expect(markup).not.toContain('aria-label="Mark step 1 done"')
+    expect(markup).toContain('aria-label="Complete linked task for step 1"')
     // Other two steps still show "Create task"
     const createMatches = markup.match(/>Create task</g) ?? []
     expect(createMatches).toHaveLength(2)
@@ -774,6 +776,26 @@ describe('AcceptedBreakdownPlanCard — completed steps and next candidate', () 
 
     const matches = markup.match(/>Undo</g) ?? []
     expect(matches).toHaveLength(2)
+  })
+
+  it('renders linked task result and evidence summaries when provided', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={[{ id: 'step-1', stepText: 'Run quick discovery.', completedAt: null }]}
+        linkedStepIds={['step-1']}
+        artifactSummariesByStepId={{
+          'step-1': {
+            result: 'Interviewed 10 nutritionists and identified pricing trust as the main blocker.',
+            evidence: '7 of 10 asked for stronger social proof before paying.',
+          },
+        }}
+      />,
+    )
+
+    expect(markup).toContain('Result:')
+    expect(markup).toContain('pricing trust as the main blocker')
+    expect(markup).toContain('Evidence:')
+    expect(markup).toContain('7 of 10 asked for stronger social proof')
   })
 
   it('does not render Undo for linked-task-derived completion', () => {
@@ -1009,6 +1031,7 @@ describe('IdeaThreadHistory — linked step forwarding', () => {
       <IdeaThreadHistory
         visibleEvents={[]}
         acceptedBreakdownSteps={sampleAcceptedSteps}
+        onCompleteLinkedTask={() => {}}
         onCompleteStep={() => {}}
         onCreateTaskFromStep={() => {}}
         stepActionInFlight={null}
@@ -1017,7 +1040,8 @@ describe('IdeaThreadHistory — linked step forwarding', () => {
     )
 
     expect(markup).toContain('Task created')
-    expect(markup).toContain('Mark done')
+    expect(markup).not.toContain('aria-label="Mark step 1 done"')
+    expect(markup).toContain('aria-label="Complete linked task for step 1"')
     // step-2 and step-3 still get Create task buttons
     const createMatches = markup.match(/>Create task</g) ?? []
     expect(createMatches).toHaveLength(2)
@@ -1057,6 +1081,24 @@ describe('IdeaThreadHistory — completion action forwarding', () => {
 
     expect(markup).toContain('Mark done')
     expect(markup).toContain('Undo')
+  })
+
+  it('forwards artifact summaries to the accepted plan card', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        acceptedBreakdownSteps={[{ id: 'step-1', stepText: 'Run quick discovery.', completedAt: null }]}
+        linkedStepIds={['step-1']}
+        artifactSummariesByStepId={{
+          'step-1': {
+            result: 'Interviewed 10 nutritionists and identified pricing trust as the main blocker.',
+          },
+        }}
+      />,
+    )
+
+    expect(markup).toContain('Result:')
+    expect(markup).toContain('pricing trust as the main blocker')
   })
 
   it('forwards the stepActionInFlight state to show pending completion labels', () => {

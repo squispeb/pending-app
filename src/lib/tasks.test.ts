@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getTaskSummary, isTaskDueToday, isTaskOverdue, taskFormSchema } from './tasks'
+import { getTaskSummary, isStepLinkedTask, isTaskDueToday, isTaskOverdue, taskFormSchema } from './tasks'
 import type { Task } from '../db/schema'
 
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -84,5 +84,13 @@ describe('task form schema', () => {
     })
 
     expect(result.success).toBe(true)
+  })
+})
+
+describe('step-linked task detection', () => {
+  it('detects accepted breakdown step markers from task notes', () => {
+    expect(isStepLinkedTask(makeTask({ notes: 'Accepted breakdown step #2 from idea.' }))).toBe(true)
+    expect(isStepLinkedTask(makeTask({ notes: 'Accepted task conversion from developed idea.' }))).toBe(false)
+    expect(isStepLinkedTask(makeTask({ notes: null }))).toBe(false)
   })
 })

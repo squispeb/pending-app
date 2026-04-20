@@ -36,6 +36,16 @@ export type AcceptedBreakdownStep = {
   completedSource?: 'manual' | 'linked-task' | null
 }
 
+export type AcceptedBreakdownStepArtifactSummary = {
+  result?: string | null
+  evidence?: string | null
+}
+
+export type AcceptedBreakdownLinkedTask = {
+  taskId: string
+  completedAt?: string | Date | null
+}
+
 type StepActionInFlight = {
   stepId: string
   action: 'create-task' | 'complete' | 'uncomplete'
@@ -52,18 +62,24 @@ type StepActionInFlight = {
 export function AcceptedBreakdownPlanCard({
   steps,
   onCreateTaskFromStep,
+  onCompleteLinkedTask,
   onCompleteStep,
   onUncompleteStep,
   stepActionInFlight = null,
   linkedStepIds = [],
+  artifactSummariesByStepId = {},
+  linkedTasksByStepId = {},
 }: {
   steps: AcceptedBreakdownStep[]
   onCreateTaskFromStep?: (stepId: string) => void
+  onCompleteLinkedTask?: (stepId: string) => void
   onCompleteStep?: (stepId: string) => void
   onUncompleteStep?: (stepId: string) => void
   stepActionInFlight?: StepActionInFlight | null
   /** IDs of steps that already have a linked task. */
   linkedStepIds?: string[]
+  artifactSummariesByStepId?: Record<string, AcceptedBreakdownStepArtifactSummary>
+  linkedTasksByStepId?: Record<string, AcceptedBreakdownLinkedTask>
 }) {
   const linkedSet = new Set(linkedStepIds)
 
@@ -98,6 +114,8 @@ export function AcceptedBreakdownPlanCard({
           const isCompleted = Boolean(step.completedAt)
           const isNext = step.id === nextCandidateId
           const hasPendingAction = stepActionInFlight !== null
+          const artifactSummary = artifactSummariesByStepId[step.id]
+          const linkedTask = linkedTasksByStepId[step.id]
 
           return (
             <li
@@ -124,10 +142,24 @@ export function AcceptedBreakdownPlanCard({
                 )}
               </span>
               <span className="flex flex-1 flex-wrap items-baseline gap-x-2.5 gap-y-1">
-                <span
-                  className={`text-sm leading-6 ${isCompleted ? 'text-[var(--ink-faint)] line-through' : 'text-[var(--ink-strong)]'}`}
-                >
-                  {step.stepText}
+                <span className="flex min-w-0 flex-1 flex-col gap-1">
+                  <span
+                    className={`text-sm leading-6 ${isCompleted ? 'text-[var(--ink-faint)] line-through' : 'text-[var(--ink-strong)]'}`}
+                  >
+                    {step.stepText}
+                  </span>
+                  {artifactSummary?.result ? (
+                    <span className="rounded-2xl border border-emerald-200/80 bg-white/80 px-3 py-2 text-xs leading-5 text-[var(--ink-soft)] dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                      <span className="mr-1 font-semibold text-emerald-700 dark:text-emerald-300">Result:</span>
+                      {artifactSummary.result}
+                    </span>
+                  ) : null}
+                  {artifactSummary?.evidence ? (
+                    <span className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-xs leading-5 text-[var(--ink-soft)]">
+                      <span className="mr-1 font-semibold text-[var(--ink-strong)]">Evidence:</span>
+                      {artifactSummary.evidence}
+                    </span>
+                  ) : null}
                 </span>
                 {/* Status chips and action buttons */}
                 {isCompleted ? (
@@ -161,6 +193,17 @@ export function AcceptedBreakdownPlanCard({
                         Task created
                       </span>
                     ) : null}
+                    {isLinked && !isCompleted && onCompleteLinkedTask ? (
+                      <button
+                        type="button"
+                        disabled={hasPendingAction}
+                        onClick={() => onCompleteLinkedTask(step.id)}
+                        aria-label={`Complete linked task for step ${index + 1}`}
+                        className="inline-flex items-center justify-center rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20"
+                      >
+                        Complete task
+                      </button>
+                    ) : null}
                     {isNext ? (
                       <span
                         aria-label={`Step ${index + 1} is the next recommended step`}
@@ -169,7 +212,7 @@ export function AcceptedBreakdownPlanCard({
                         Next
                       </span>
                     ) : null}
-                    {onCompleteStep ? (
+                    {onCompleteStep && !isLinked ? (
                       <button
                         type="button"
                         disabled={hasPendingAction}
@@ -288,10 +331,13 @@ export function IdeaThreadHistory({
   onAcceptBreakdown,
   onRejectBreakdown,
   onCreateTaskFromStep,
+  onCompleteLinkedTask,
   onCompleteStep,
   onUncompleteStep,
   stepActionInFlight = null,
   linkedStepIds = [],
+  artifactSummariesByStepId = {},
+  linkedTasksByStepId = {},
   className = '',
   threadRegionId,
   showHeader = true,
@@ -319,6 +365,8 @@ export function IdeaThreadHistory({
   onRejectBreakdown?: (proposalId: string) => void
   /** Called when the user clicks "Create task" for a specific accepted step. */
   onCreateTaskFromStep?: (stepId: string) => void
+  /** Called when the user completes a linked task for an accepted step. */
+  onCompleteLinkedTask?: (stepId: string) => void
   /** Called when the user marks an accepted step as done. */
   onCompleteStep?: (stepId: string) => void
   /** Called when the user reopens a completed accepted step. */
@@ -327,6 +375,10 @@ export function IdeaThreadHistory({
   stepActionInFlight?: StepActionInFlight | null
   /** IDs of accepted breakdown steps that already have a linked task. */
   linkedStepIds?: string[]
+  /** Latest result/evidence summaries for linked tasks by accepted step id. */
+  artifactSummariesByStepId?: Record<string, AcceptedBreakdownStepArtifactSummary>
+  /** Linked task metadata for accepted steps. */
+  linkedTasksByStepId?: Record<string, AcceptedBreakdownLinkedTask>
   className?: string
   /** Optional id wired up to a tab's aria-controls for ARIA tab panel semantics */
   threadRegionId?: string
@@ -497,10 +549,13 @@ export function IdeaThreadHistory({
             <AcceptedBreakdownPlanCard
               steps={acceptedBreakdownSteps}
               onCreateTaskFromStep={onCreateTaskFromStep}
+              onCompleteLinkedTask={onCompleteLinkedTask}
               onCompleteStep={onCompleteStep}
               onUncompleteStep={onUncompleteStep}
               stepActionInFlight={stepActionInFlight}
               linkedStepIds={linkedStepIds}
+              artifactSummariesByStepId={artifactSummariesByStepId}
+              linkedTasksByStepId={linkedTasksByStepId}
             />
           </div>
         ) : null}

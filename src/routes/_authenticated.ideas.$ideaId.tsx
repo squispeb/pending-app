@@ -1,10 +1,11 @@
-import { Lightbulb, Mic, Quote, SendHorizonal, Star } from 'lucide-react'
+import { Lightbulb, Mic, Quote, SendHorizonal, Star, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
 import { IdeaThreadHistory } from '../components/idea-thread-history'
 import { useCaptureContext } from '../contexts/CaptureContext'
 import { formatDisplayDateTime } from '../lib/date-time'
+import { isTaskCompleted } from '../lib/tasks'
 import {
   getIdeaActionLockedReason,
   getIdeaStageActionGuidance,
@@ -26,6 +27,7 @@ import {
   getIdeaThread,
   listAcceptedBreakdownSteps,
   listIdeaExecutionLinks,
+  listLinkedTaskExecutionArtifacts,
   persistIdeaRefinement,
   rejectIdeaStructuredAction,
   requestIdeaConvertToTask,
@@ -36,6 +38,7 @@ import {
   toggleIdeaStar,
   uncompleteAcceptedBreakdownStep,
 } from '../server/ideas'
+import { completeTask } from '../server/tasks'
 
 type IdeaPageTab = 'thread' | 'context' | 'guided' | 'source'
 type SupportSheetTab = Exclude<IdeaPageTab, 'thread'>
@@ -68,6 +71,12 @@ const acceptedBreakdownStepsQueryOptions = (ideaId: string) =>
     queryFn: () => listAcceptedBreakdownSteps({ data: { id: ideaId } }),
   })
 
+const linkedTaskExecutionArtifactsQueryOptions = (ideaId: string) =>
+  queryOptions({
+    queryKey: ['idea-linked-task-execution-artifacts', ideaId],
+    queryFn: () => listLinkedTaskExecutionArtifacts({ data: { id: ideaId } }),
+  })
+
 export const Route = createFileRoute('/_authenticated/ideas/$ideaId')({
   validateSearch: (search: Record<string, unknown>) => ({
     view: search.view === 'default' ? 'default' : 'chat',
@@ -78,6 +87,7 @@ export const Route = createFileRoute('/_authenticated/ideas/$ideaId')({
       context.queryClient.ensureQueryData(ideaThreadQueryOptions(params.ideaId)),
       context.queryClient.ensureQueryData(ideaTaskLinksQueryOptions(params.ideaId)),
       context.queryClient.ensureQueryData(acceptedBreakdownStepsQueryOptions(params.ideaId)),
+      context.queryClient.ensureQueryData(linkedTaskExecutionArtifactsQueryOptions(params.ideaId)),
     ])
   },
   component: IdeaDetailPage,
@@ -91,6 +101,7 @@ function IdeaDetailPage() {
   const { data: thread } = useSuspenseQuery(ideaThreadQueryOptions(ideaId))
   const { data: taskLinks } = useSuspenseQuery(ideaTaskLinksQueryOptions(ideaId))
   const { data: acceptedBreakdownSteps } = useSuspenseQuery(acceptedBreakdownStepsQueryOptions(ideaId))
+  const { data: linkedTaskExecutionArtifacts } = useSuspenseQuery(linkedTaskExecutionArtifactsQueryOptions(ideaId))
   const { openCapture } = useCaptureContext()
   const isChatView = view === 'chat'
   const [discoveryMessage, setDiscoveryMessage] = useState('')
@@ -106,6 +117,11 @@ function IdeaDetailPage() {
   const [activeSupportTab, setActiveSupportTab] = useState<SupportSheetTab>('context')
   const [isSupportSheetOpen, setIsSupportSheetOpen] = useState(false)
   const [isThreadAtBottom, setIsThreadAtBottom] = useState(true)
+  const [showLinkedTaskCompletionReview, setShowLinkedTaskCompletionReview] = useState(false)
+  const [linkedTaskCompletionStepId, setLinkedTaskCompletionStepId] = useState<string | null>(null)
+  const [linkedTaskCompletionResult, setLinkedTaskCompletionResult] = useState('')
+  const [linkedTaskCompletionEvidence, setLinkedTaskCompletionEvidence] = useState('')
+  const [linkedTaskCompletionError, setLinkedTaskCompletionError] = useState<string | null>(null)
   const threadViewportRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLFormElement | null>(null)
   const lastStreamEventIdRef = useRef<string | null>(null)
@@ -117,6 +133,7 @@ function IdeaDetailPage() {
   const visibleEvents = thread.visibleEvents ?? []
   const safeAcceptedBreakdownSteps = acceptedBreakdownSteps ?? []
   const safeTaskLinks = taskLinks ?? []
+  const safeLinkedTaskExecutionArtifacts = linkedTaskExecutionArtifacts ?? []
   const workingIdea = thread.workingIdea ?? {
     provisionalTitle: null,
     currentSummary: null,
@@ -145,6 +162,33 @@ function IdeaDetailPage() {
       ),
     )
     .map((step) => step.id)
+
+  const artifactSummariesByStepId = Object.fromEntries(
+    safeAcceptedBreakdownSteps.map((step) => {
+      const linkedTask = safeTaskLinks.find(
+        (link) => link.linkReason === `Accepted breakdown step #${step.stepOrder} from idea.`,
+      )
+      const linkedArtifacts = linkedTask
+        ? safeLinkedTaskExecutionArtifacts.find((artifactRow) => artifactRow.taskId === linkedTask.targetId)?.artifacts ?? []
+        : []
+      const latestResult = linkedArtifacts.find((artifact) => artifact.artifactType === 'result')?.content ?? null
+      const latestEvidence = linkedArtifacts.find((artifact) => artifact.artifactType === 'evidence')?.content ?? null
+
+      return [step.id, { result: latestResult, evidence: latestEvidence }]
+    }),
+  )
+
+  const linkedTasksByStepId = Object.fromEntries(
+    safeAcceptedBreakdownSteps.flatMap((step) => {
+      const linkedTask = safeTaskLinks.find(
+        (link) => link.linkReason === `Accepted breakdown step #${step.stepOrder} from idea.`,
+      )
+
+      return linkedTask
+        ? [[step.id, { taskId: linkedTask.targetId }]]
+        : []
+    }),
+  )
 
   if (!idea) {
     throw notFound()
@@ -561,6 +605,34 @@ function IdeaDetailPage() {
     },
   })
 
+  const completeLinkedTaskMutation = useMutation({
+    mutationFn: async (input: { stepId: string; taskId: string; result: string; evidence: string }) => completeTask({
+      data: {
+        id: input.taskId,
+        resultArtifactContent: input.result,
+        evidenceArtifactContent: input.evidence || undefined,
+      },
+    }),
+    onSuccess: async () => {
+      setDiscoveryError(null)
+      setDiscoveryNotice('Linked task completed with recorded output.')
+      setShowLinkedTaskCompletionReview(false)
+      setLinkedTaskCompletionStepId(null)
+      setLinkedTaskCompletionResult('')
+      setLinkedTaskCompletionEvidence('')
+      setLinkedTaskCompletionError(null)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] }),
+        queryClient.invalidateQueries({ queryKey: ['idea-accepted-breakdown-steps', ideaId] }),
+        queryClient.invalidateQueries({ queryKey: ['idea-linked-task-execution-artifacts', ideaId] }),
+      ])
+    },
+    onError: (error) => {
+      setDiscoveryNotice(null)
+      setLinkedTaskCompletionError(error instanceof Error ? error.message : 'Failed to complete linked task.')
+    },
+  })
+
   const stepActionInFlight = convertBreakdownStepToTaskMutation.isPending
     ? { stepId: convertBreakdownStepToTaskMutation.variables ?? '', action: 'create-task' as const }
     : completeBreakdownStepMutation.isPending
@@ -568,6 +640,51 @@ function IdeaDetailPage() {
       : uncompleteBreakdownStepMutation.isPending
         ? { stepId: uncompleteBreakdownStepMutation.variables ?? '', action: 'uncomplete' as const }
         : null
+
+  function resetLinkedTaskCompletionReview() {
+    setShowLinkedTaskCompletionReview(false)
+    setLinkedTaskCompletionStepId(null)
+    setLinkedTaskCompletionResult('')
+    setLinkedTaskCompletionEvidence('')
+    setLinkedTaskCompletionError(null)
+  }
+
+  function openLinkedTaskCompletionReview(stepId: string) {
+    setLinkedTaskCompletionStepId(stepId)
+    setLinkedTaskCompletionResult('')
+    setLinkedTaskCompletionEvidence('')
+    setLinkedTaskCompletionError(null)
+    setShowLinkedTaskCompletionReview(true)
+  }
+
+  function submitLinkedTaskCompletionReview(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!linkedTaskCompletionStepId) {
+      return
+    }
+
+    const linkedTask = linkedTasksByStepId[linkedTaskCompletionStepId]
+    const trimmedResult = linkedTaskCompletionResult.trim()
+
+    if (!linkedTask) {
+      setLinkedTaskCompletionError('Linked task not found for this step.')
+      return
+    }
+
+    if (trimmedResult.length === 0) {
+      setLinkedTaskCompletionError('Add a short result before completing this linked task.')
+      return
+    }
+
+    setLinkedTaskCompletionError(null)
+    completeLinkedTaskMutation.mutate({
+      stepId: linkedTaskCompletionStepId,
+      taskId: linkedTask.taskId,
+      result: trimmedResult,
+      evidence: linkedTaskCompletionEvidence.trim(),
+    })
+  }
 
   const refineActionsDisabled = isThreadBusy || requestRefinementMutation.isPending || persistRefinementMutation.isPending
   const structuredActionsDisabled = isThreadBusy || requestRefinementMutation.isPending || requestStructuredActionMutation.isPending || persistRefinementMutation.isPending || requestConvertToTaskMutation.isPending || convertToTaskMutation.isPending
@@ -1099,6 +1216,7 @@ function IdeaDetailPage() {
                   onUncompleteStep={(stepId) => uncompleteBreakdownStepMutation.mutate(stepId)}
                   stepActionInFlight={stepActionInFlight}
                   linkedStepIds={linkedStepIds}
+                  artifactSummariesByStepId={artifactSummariesByStepId}
                   threadRegionId="thread-history-panel"
                   showHeader={false}
                   className="min-h-full"
@@ -1287,10 +1405,13 @@ function IdeaDetailPage() {
             onAcceptBreakdown={(proposalId) => acceptBreakdownMutation.mutate(proposalId)}
             onRejectBreakdown={(proposalId) => rejectStructuredActionMutation.mutate(proposalId)}
             onCreateTaskFromStep={(stepId) => convertBreakdownStepToTaskMutation.mutate(stepId)}
+            onCompleteLinkedTask={(stepId) => openLinkedTaskCompletionReview(stepId)}
             onCompleteStep={(stepId) => completeBreakdownStepMutation.mutate(stepId)}
             onUncompleteStep={(stepId) => uncompleteBreakdownStepMutation.mutate(stepId)}
             stepActionInFlight={stepActionInFlight}
             linkedStepIds={linkedStepIds}
+            artifactSummariesByStepId={artifactSummariesByStepId}
+            linkedTasksByStepId={linkedTasksByStepId}
             threadRegionId="thread-history-panel"
             showHeader={false}
             className="min-h-full rounded-[0] border-x-0 border-t-0 bg-transparent px-0 pb-0 pt-0 shadow-none"
@@ -1455,6 +1576,85 @@ function IdeaDetailPage() {
           {threadSurface}
         </main>
         {supportSheet}
+        <div
+          onClick={resetLinkedTaskCompletionReview}
+          className={`fixed inset-0 z-40 bg-black/40 transition-opacity duration-300 ${
+            showLinkedTaskCompletionReview ? 'opacity-100' : 'pointer-events-none opacity-0'
+          }`}
+        />
+
+        <div
+          className={`fixed inset-x-0 bottom-0 z-50 duration-300 ${
+            showLinkedTaskCompletionReview
+              ? 'translate-y-0 opacity-100 transition-[transform,opacity]'
+              : 'pointer-events-none translate-y-full opacity-0 transition-[transform,opacity]'
+          }`}
+        >
+          <div className="mx-auto w-full max-w-3xl">
+            <div className="panel rounded-t-[2rem] px-4 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-3">
+              <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[var(--line)]" />
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="m-0 text-lg font-semibold text-[var(--ink-strong)]">Complete linked task</h2>
+                  <p className="m-0 mt-1 text-sm text-[var(--ink-strong)]">Record what happened so this step can be marked done from the thread.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={resetLinkedTaskCompletionReview}
+                  className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                  aria-label="Close linked task completion"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <form className="space-y-4" onSubmit={submitLinkedTaskCompletionReview}>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">What happened?</span>
+                  <textarea
+                    value={linkedTaskCompletionResult}
+                    onChange={(event) => setLinkedTaskCompletionResult(event.target.value)}
+                    rows={4}
+                    placeholder="Summarize the result of the work."
+                    className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Evidence / notes</span>
+                  <textarea
+                    value={linkedTaskCompletionEvidence}
+                    onChange={(event) => setLinkedTaskCompletionEvidence(event.target.value)}
+                    rows={3}
+                    placeholder="Optional supporting observations, metrics, or evidence."
+                    className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                  />
+                </label>
+
+                {linkedTaskCompletionError ? (
+                  <p className="m-0 text-sm font-medium text-red-600">{linkedTaskCompletionError}</p>
+                ) : null}
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="submit"
+                    disabled={completeLinkedTaskMutation.isPending}
+                    className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {completeLinkedTaskMutation.isPending ? 'Completing...' : 'Complete task'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetLinkedTaskCompletionReview}
+                    className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
       </>
     )
   }

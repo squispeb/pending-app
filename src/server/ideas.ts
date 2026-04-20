@@ -13,6 +13,10 @@ const ideasService = createIdeasService(db)
 const assistantThreadService = createAssistantThreadService(db)
 const tasksService = createTasksService(db)
 
+async function getExecutionSummaryForIdea(ideaId: string, userId: string) {
+  return ideasService.getExecutionSummary(ideaId, userId)
+}
+
 type CreateIdeaAndThreadDependencies = {
   resolveUser: () => Promise<{
     user: { id: string }
@@ -411,6 +415,14 @@ export async function listAcceptedBreakdownStepsForIdea(
       }
     }
 
+    if (linkedTask) {
+      return {
+        ...step,
+        completedAt: null,
+        completedSource: null,
+      }
+    }
+
     if (step.completedAt) {
       return {
         ...step,
@@ -423,6 +435,47 @@ export async function listAcceptedBreakdownStepsForIdea(
       completedSource: null,
     }
   })
+}
+
+export async function listLinkedTaskExecutionArtifactsForIdea(
+  ideaId: string,
+  dependencies: {
+    resolveUser: () => Promise<{ user: { id: string } }>
+    listIdeaExecutionLinks: (
+      input: {
+        ideaId: string
+        targetType?: 'task' | 'habit'
+      },
+      userId: string,
+    ) => Promise<Array<{
+      targetType: 'task' | 'habit'
+      targetId: string
+      linkReason: string | null
+    }>>
+    listTaskExecutionArtifacts: (taskId: string, userId: string) => Promise<Array<{
+      id: string
+      taskId: string
+      userId: string
+      artifactType: string
+      source: string
+      content: string
+      createdAt: Date
+      updatedAt: Date
+    }>>
+  },
+) {
+  const { user } = await dependencies.resolveUser()
+  const taskLinks = await dependencies.listIdeaExecutionLinks({ ideaId, targetType: 'task' }, user.id)
+
+  const artifactRows = await Promise.all(
+    taskLinks.map(async (link) => ({
+      taskId: link.targetId,
+      linkReason: link.linkReason,
+      artifacts: await dependencies.listTaskExecutionArtifacts(link.targetId, user.id),
+    })),
+  )
+
+  return artifactRows.filter((row) => row.artifacts.length > 0)
 }
 
 export async function completeAcceptedBreakdownStepForIdea(
@@ -761,6 +814,19 @@ export const listAcceptedBreakdownSteps = createServerFn({ method: 'GET' })
     })
   })
 
+export const listLinkedTaskExecutionArtifacts = createServerFn({ method: 'GET' })
+  .inputValidator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    return listLinkedTaskExecutionArtifactsForIdea(data.id, {
+      resolveUser: async () => {
+        const { user } = await resolveAuthenticatedPlannerUser(db)
+        return { user }
+      },
+      listIdeaExecutionLinks: (input, userId) => ideasService.listIdeaExecutionLinks(input, userId),
+      listTaskExecutionArtifacts: (taskId, userId) => tasksService.listTaskExecutionArtifacts(taskId, userId),
+    })
+  })
+
 export const convertAcceptedBreakdownStepToTask = createServerFn({ method: 'POST' })
   .inputValidator((input: { ideaId: string; stepId: string }) => input)
   .handler(async ({ data }) => {
@@ -809,8 +875,12 @@ export const getIdeaThread = createServerFn({ method: 'GET' })
 export const submitIdeaThreadTurn = createServerFn({ method: 'POST' })
   .inputValidator((input: { id: string; message: string }) => input)
   .handler(async ({ data }) => {
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    const executionSummary = await getExecutionSummaryForIdea(data.id, user.id)
+
     return assistantThreadService.submitIdeaDiscoveryTurn(data.id, {
       message: data.message,
+      executionSummary: executionSummary ?? undefined,
     })
   })
 
@@ -839,12 +909,15 @@ export const elaborateIdea = createServerFn({ method: 'POST' })
       throw new Error('Accepted snapshot not found')
     }
 
+    const executionSummary = await getExecutionSummaryForIdea(data.id, user.id)
+
     return assistantThreadService.requestIdeaThreadElaboration(data.id, {
       actionInput: data.actionInput,
       currentSnapshotVersion: latestSnapshot.version,
       currentTitle: latestSnapshot.title,
       currentBody: latestSnapshot.body,
       currentSummary: latestSnapshot.threadSummary,
+      executionSummary: executionSummary ?? undefined,
     })
   })
 
@@ -864,6 +937,8 @@ export const requestIdeaRefinement = createServerFn({ method: 'POST' })
       throw new Error('Accepted snapshot not found')
     }
 
+    const executionSummary = await getExecutionSummaryForIdea(data.id, user.id)
+
     const currentThread = await assistantThreadService.getIdeaThread(data.id)
 
     if (!canUseIdeaRefinementActions(currentThread.stage)) {
@@ -876,6 +951,7 @@ export const requestIdeaRefinement = createServerFn({ method: 'POST' })
         currentTitle: latestSnapshot.title,
         currentBody: latestSnapshot.body,
         currentSummary: latestSnapshot.threadSummary,
+        executionSummary: executionSummary ?? undefined,
       })
     }
 
@@ -884,6 +960,7 @@ export const requestIdeaRefinement = createServerFn({ method: 'POST' })
       currentTitle: latestSnapshot.title,
       currentBody: latestSnapshot.body,
       currentSummary: latestSnapshot.threadSummary,
+      executionSummary: executionSummary ?? undefined,
     })
   })
 
@@ -903,6 +980,8 @@ export const requestIdeaStructuredAction = createServerFn({ method: 'POST' })
       throw new Error('Accepted snapshot not found')
     }
 
+    const executionSummary = await getExecutionSummaryForIdea(data.id, user.id)
+
     const currentThread = await assistantThreadService.getIdeaThread(data.id)
 
     if (data.kind === 'restructure') {
@@ -915,6 +994,7 @@ export const requestIdeaStructuredAction = createServerFn({ method: 'POST' })
         currentTitle: latestSnapshot.title,
         currentBody: latestSnapshot.body,
         currentSummary: latestSnapshot.threadSummary,
+        executionSummary: executionSummary ?? undefined,
       })
     }
 
@@ -927,6 +1007,7 @@ export const requestIdeaStructuredAction = createServerFn({ method: 'POST' })
       currentTitle: latestSnapshot.title,
       currentBody: latestSnapshot.body,
       currentSummary: latestSnapshot.threadSummary,
+      executionSummary: executionSummary ?? undefined,
     })
   })
 
@@ -946,6 +1027,8 @@ export const requestIdeaConvertToTask = createServerFn({ method: 'POST' })
       throw new Error('Accepted snapshot not found')
     }
 
+    const executionSummary = await getExecutionSummaryForIdea(data.id, user.id)
+
     const currentThread = await assistantThreadService.getIdeaThread(data.id)
 
     if (!canUseIdeaRefinementActions(currentThread.stage)) {
@@ -957,6 +1040,7 @@ export const requestIdeaConvertToTask = createServerFn({ method: 'POST' })
       currentTitle: latestSnapshot.title,
       currentBody: latestSnapshot.body,
       currentSummary: latestSnapshot.threadSummary,
+      executionSummary: executionSummary ?? undefined,
     })
   })
 
