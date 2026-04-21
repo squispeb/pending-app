@@ -339,6 +339,8 @@ function IdeaDetailPage() {
           ? 'Needs retry'
           : 'Thread ready'
   const reviewItemCount = Number(Boolean(suggestedTitle)) + Number(Boolean(suggestedSummary)) + Number(Boolean(pendingStructuredAction))
+  const hasAcceptedExecutionPlan = safeAcceptedBreakdownSteps.length > 0
+  const shouldShowPlanningActions = !hasAcceptedExecutionPlan
   const refinementActions = (['title', 'summary'] as const).map((action) => ({
     action,
     label: getIdeaStructuredActionLabel(action),
@@ -360,53 +362,34 @@ function IdeaDetailPage() {
     lockedReason: getIdeaActionLockedReason('convert-to-task', thread.stage),
     hasPendingReview: Boolean(pendingStructuredAction) && pendingStructuredAction?.action === 'convert-to-task',
   }
-  const threadActionRailItems = [
-    ...refinementActions
-      .filter(({ available }) => available)
-      .map((item) => ({ ...item, tone: 'emerald' as const })),
-    ...structuredActions
-      .filter(({ available }) => available)
-      .map((item) => ({ ...item, tone: 'cyan' as const })),
-    ...(convertToTaskAction.available ? [{ ...convertToTaskAction, tone: 'cyan' as const }] : []),
-  ]
-  const threadActionGuide = threadActionRailItems.length > 0 ? (
-    <div className="pointer-events-none sticky top-3 z-20 mb-3 flex justify-end">
-      <div
-        className="pointer-events-auto w-full max-w-[18rem] rounded-[20px] border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_90%,white_10%)] px-2.5 py-2 shadow-[0_14px_34px_rgba(15,23,42,0.16)] backdrop-blur-xl"
-        role="group"
-        aria-label="Suggested next steps"
-      >
-        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">Next steps</div>
-        <div className="scrollbar-none mt-1.5 flex gap-1 overflow-x-auto overflow-y-hidden pb-0.5">
-          {threadActionRailItems.map(({ action, label, tone }) => (
-            <button
-              key={action}
-              type="button"
-              onClick={() => {
-                if (action === 'title' || action === 'summary') {
-                  setOptimisticThreadAction(action)
-                  requestRefinementMutation.mutate(action)
-                  return
-                }
-
-                if (action === 'convert-to-task') {
-                  setOptimisticThreadAction(action)
-                  requestConvertToTaskMutation.mutate()
-                  return
-                }
-
-                setOptimisticThreadAction(action)
-                requestStructuredActionMutation.mutate(action)
-              }}
-              className={`inline-flex h-7 flex-none items-center justify-center rounded-full border px-2.5 text-[10px] font-semibold leading-none transition ${tone === 'emerald' ? 'border-emerald-600/60 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20' : 'border-cyan-600/60 bg-cyan-50 text-cyan-800 hover:bg-cyan-100 dark:border-cyan-500/40 dark:bg-cyan-500/10 dark:text-cyan-300 dark:hover:bg-cyan-500/20'}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  ) : null
+  const threadActionRailItems = shouldShowPlanningActions
+    ? [
+        ...refinementActions
+          .filter(({ available }) => available)
+          .map((item) => ({
+            ...item,
+            tone: 'emerald' as const,
+            isPending: Boolean(optimisticThreadAction) || activeStructuredAction !== null,
+            isActiveAction: optimisticThreadAction === item.action,
+          })),
+        ...structuredActions
+          .filter(({ available }) => available)
+          .map((item) => ({
+            ...item,
+            tone: 'cyan' as const,
+            isPending: Boolean(optimisticThreadAction) || activeStructuredAction !== null,
+            isActiveAction: optimisticThreadAction === item.action || activeStructuredAction === item.action,
+          })),
+        ...(convertToTaskAction.available
+          ? [{
+              ...convertToTaskAction,
+              tone: 'cyan' as const,
+              isPending: Boolean(optimisticThreadAction) || activeStructuredAction !== null,
+              isActiveAction: optimisticThreadAction === 'convert-to-task' || activeStructuredAction === 'convert-to-task',
+            }]
+          : []),
+      ]
+    : []
   const shouldShowComposerMeta = Boolean(discoveryError || discoveryNotice || isThreadBusy)
   const pageTabs = [
     { id: 'thread', label: 'Thread' },
@@ -706,6 +689,8 @@ function IdeaDetailPage() {
     ? { stepId: convertBreakdownStepToTaskMutation.variables ?? '', action: 'create-task' as const }
     : completeBreakdownStepMutation.isPending
       ? { stepId: completeBreakdownStepMutation.variables ?? '', action: 'complete' as const }
+      : completeLinkedTaskMutation.isPending
+        ? { stepId: completeLinkedTaskMutation.variables?.stepId ?? '', action: 'complete-linked-task' as const }
       : uncompleteBreakdownStepMutation.isPending
         ? { stepId: uncompleteBreakdownStepMutation.variables ?? '', action: 'uncomplete' as const }
         : null
@@ -1081,6 +1066,9 @@ function IdeaDetailPage() {
               <p className="m-0 mt-0.5 text-sm leading-6 text-[var(--ink-strong)]">
                 {safeAcceptedBreakdownSteps.length} step{safeAcceptedBreakdownSteps.length === 1 ? '' : 's'} locked in from the last accepted proposal.
               </p>
+              <p className="m-0 mt-2 text-xs leading-5 text-[var(--ink-soft)]">
+                This thread is now in execution mode. Work through the accepted plan in the thread instead of requesting new planning actions.
+              </p>
             </div>
             <ol className="m-0 space-y-2 pl-0 list-none">
               {safeAcceptedBreakdownSteps.map((step, index) => (
@@ -1154,9 +1142,14 @@ function IdeaDetailPage() {
             <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${stageBadgeClassName}`}>{stageLabel}</div>
           </div>
           <div className="mt-2 font-medium text-[var(--ink-strong)]">{stageActionGuidance.title}</div>
-          <p className="m-0 mt-2 leading-6 text-[var(--ink-strong)]">{stageActionGuidance.description}</p>
+          <p className="m-0 mt-2 leading-6 text-[var(--ink-strong)]">
+            {hasAcceptedExecutionPlan
+              ? 'The planning pass is complete. Use the accepted breakdown in the thread to create tasks, mark progress, and work through execution.'
+              : stageActionGuidance.description}
+          </p>
           {missingDiscoveryAreas.length > 0 ? <p className="m-0 mt-2 text-xs leading-5 text-[var(--ink-soft)]">Missing context right now: {missingDiscoveryAreas.join(', ')}.</p> : null}
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {!hasAcceptedExecutionPlan ? (
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {refinementActions.map(({ action, label, available, lockedReason, hasPendingReview }) => (
               <div key={action} className={`rounded-2xl border p-3 shadow-sm ${hasPendingReview ? 'border-amber-300 bg-amber-50/80 dark:border-amber-500/30 dark:bg-amber-500/10' : available ? 'border-emerald-300 bg-emerald-50/80 dark:border-emerald-500/30 dark:bg-emerald-500/10' : 'border-slate-200 bg-white dark:border-slate-500/30 dark:bg-slate-950/30'}`}>
                 <button type="button" disabled={!available || refineActionsDisabled || hasPendingReview} onClick={() => {
@@ -1187,7 +1180,8 @@ function IdeaDetailPage() {
                 </div>
               )
             })()}
-          </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </section>
@@ -1231,7 +1225,6 @@ function IdeaDetailPage() {
                 aria-label="Thread messages"
                 className="flex-1 min-h-0 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]"
               >
-                {threadActionGuide}
                 <IdeaThreadHistory
                   visibleEvents={visibleEvents}
                   threadStatus={thread.status}
@@ -1283,6 +1276,22 @@ function IdeaDetailPage() {
                   onCreateTaskFromStep={(stepId) => convertBreakdownStepToTaskMutation.mutate(stepId)}
                   onCompleteStep={(stepId) => completeBreakdownStepMutation.mutate(stepId)}
                   onUncompleteStep={(stepId) => uncompleteBreakdownStepMutation.mutate(stepId)}
+                  suggestedActions={threadActionRailItems}
+                  onSuggestedAction={(action) => {
+                    setOptimisticThreadAction(action)
+
+                    if (action === 'title' || action === 'summary') {
+                      requestRefinementMutation.mutate(action)
+                      return
+                    }
+
+                    if (action === 'convert-to-task') {
+                      requestConvertToTaskMutation.mutate()
+                      return
+                    }
+
+                    requestStructuredActionMutation.mutate(action)
+                  }}
                   stepActionInFlight={stepActionInFlight}
                   linkedStepIds={linkedStepIds}
                   artifactSummariesByStepId={artifactSummariesByStepId}
@@ -1450,7 +1459,6 @@ function IdeaDetailPage() {
           aria-label="Thread messages"
           className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 [scrollbar-gutter:stable]"
         >
-          {threadActionGuide}
           <IdeaThreadHistory
             visibleEvents={visibleEvents}
             threadStatus={thread.status}

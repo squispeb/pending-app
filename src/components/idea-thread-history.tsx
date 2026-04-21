@@ -41,6 +41,14 @@ export type PendingStructuredProposal = {
   explanation: string
 }
 
+export type SuggestedThreadActionItem = {
+  action: 'title' | 'summary' | 'restructure' | 'breakdown' | 'convert-to-task'
+  label: string
+  tone: 'emerald' | 'cyan'
+  isPending: boolean
+  isActiveAction: boolean
+}
+
 function getStructuredActionCardTitle(action: ThreadStructuredAction) {
   switch (action) {
     case 'restructure':
@@ -111,6 +119,10 @@ function getStructuredActionPendingMessage(action: ThreadStructuredAction) {
   return getThreadStructuredActionActivity(action, 'working').helperText
 }
 
+function getStructuredActionFailedMessage() {
+  return 'Review the error below and try the action again when ready.'
+}
+
 export type AcceptedBreakdownStep = {
   id: string
   stepText: string
@@ -131,7 +143,7 @@ export type AcceptedBreakdownLinkedTask = {
 
 type StepActionInFlight = {
   stepId: string
-  action: 'create-task' | 'complete' | 'uncomplete'
+  action: 'create-task' | 'complete' | 'complete-linked-task' | 'uncomplete'
 }
 
 /**
@@ -192,6 +204,7 @@ export function AcceptedBreakdownPlanCard({
         {steps.map((step, index) => {
           const isCreating = stepActionInFlight?.stepId === step.id && stepActionInFlight.action === 'create-task'
           const isCompleting = stepActionInFlight?.stepId === step.id && stepActionInFlight.action === 'complete'
+          const isCompletingLinkedTask = stepActionInFlight?.stepId === step.id && stepActionInFlight.action === 'complete-linked-task'
           const isUncompleting = stepActionInFlight?.stepId === step.id && stepActionInFlight.action === 'uncomplete'
           const isLinked = linkedSet.has(step.id)
           const isCompleted = Boolean(step.completedAt)
@@ -284,7 +297,7 @@ export function AcceptedBreakdownPlanCard({
                         aria-label={`Complete linked task for step ${index + 1}`}
                         className="inline-flex items-center justify-center rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20"
                       >
-                        Complete task
+                        {isCompletingLinkedTask ? 'Completing…' : 'Complete task'}
                       </button>
                     ) : null}
                     {isNext ? (
@@ -481,6 +494,50 @@ export function StructuredActionProposalCard({
   )
 }
 
+export function SuggestedActionsCard({
+  items,
+  onAction,
+}: {
+  items: SuggestedThreadActionItem[]
+  onAction: (action: SuggestedThreadActionItem['action']) => void
+}) {
+  if (items.length === 0) {
+    return null
+  }
+
+  return (
+    <div
+      role="region"
+      aria-label="Suggested actions for this thread"
+      className="mx-auto w-full max-w-[92%] rounded-[22px] border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_92%,white_8%)] px-3.5 py-3 shadow-sm sm:max-w-[85%]"
+    >
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-faint)]">
+          Suggested actions for this thread
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {items.map(({ action, label, tone, isPending, isActiveAction }) => {
+          const buttonLabel = isActiveAction ? `${label}…` : label
+
+          return (
+            <button
+              key={action}
+              type="button"
+              disabled={isPending}
+              onClick={() => onAction(action)}
+              aria-busy={isActiveAction}
+              className={`inline-flex min-h-7 items-center justify-center rounded-full border px-2.5 text-[10px] font-semibold leading-none transition disabled:cursor-not-allowed disabled:opacity-60 ${tone === 'emerald' ? 'border-emerald-600/60 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20' : 'border-cyan-600/60 bg-cyan-50 text-cyan-800 hover:bg-cyan-100 dark:border-cyan-500/40 dark:bg-cyan-500/10 dark:text-cyan-300 dark:hover:bg-cyan-500/20'}`}
+            >
+              {buttonLabel}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function IdeaThreadHistory({
   visibleEvents,
   threadStatus = 'idle',
@@ -506,6 +563,8 @@ export function IdeaThreadHistory({
   onCompleteLinkedTask,
   onCompleteStep,
   onUncompleteStep,
+  suggestedActions = [],
+  onSuggestedAction,
   stepActionInFlight = null,
   linkedStepIds = [],
   artifactSummariesByStepId = {},
@@ -551,6 +610,9 @@ export function IdeaThreadHistory({
   onCompleteStep?: (stepId: string) => void
   /** Called when the user reopens a completed accepted step. */
   onUncompleteStep?: (stepId: string) => void
+  /** Suggested actions rendered inline near the bottom of the thread history. */
+  suggestedActions?: SuggestedThreadActionItem[]
+  onSuggestedAction?: (action: SuggestedThreadActionItem['action']) => void
   /** Current in-flight step action, if any. */
   stepActionInFlight?: StepActionInFlight | null
   /** IDs of accepted breakdown steps that already have a linked task. */
@@ -606,18 +668,23 @@ export function IdeaThreadHistory({
           className="mb-2.5 rounded-[20px] border border-[var(--line)] bg-[var(--surface)] px-3 py-2"
         >
           <p className="m-0 text-xs font-medium text-[var(--ink-strong)]">{threadState.helperText}</p>
+          {threadStatus === 'failed' ? (
+            <p className="m-0 mt-1 text-xs leading-5 text-red-700 dark:text-red-300">
+              The latest assistant turn failed. Review the details below and try again when ready.
+            </p>
+          ) : null}
           {activeTurn ? (
-            <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
+            <p className="m-0 mt-1 line-clamp-2 text-xs leading-5 text-[var(--ink-soft)]" title={activeTurn.userMessage}>
               Active turn: {activeTurn.userMessage}
             </p>
           ) : null}
           {queuedTurns.length > 0 ? (
-            <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
+            <p className="m-0 mt-1 line-clamp-2 text-xs leading-5 text-[var(--ink-soft)]" title={queuedTurns[0]?.userMessage}>
               {queuedTurns.length === 1 ? '1 later reply is queued.' : `${queuedTurns.length} later replies are queued.`}
             </p>
           ) : null}
           {threadStatus === 'failed' && lastTurn ? (
-            <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
+            <p className="m-0 mt-1 line-clamp-2 text-xs leading-5 text-[var(--ink-soft)]" title={lastTurn.userMessage}>
               Last failed turn: {lastTurn.userMessage}
             </p>
           ) : null}
@@ -630,7 +697,7 @@ export function IdeaThreadHistory({
           <article aria-label="Assistant is replying" className="flex justify-start">
             <div className="max-w-[92%] rounded-[22px] border border-violet-200 bg-violet-50/70 px-3.5 py-3 shadow-sm dark:border-violet-500/30 dark:bg-violet-500/10 sm:max-w-[85%]">
               <div className="flex items-center gap-2 text-xs font-semibold text-[var(--ink-soft)]" aria-hidden="true">
-                <span className="text-violet-500">●</span>
+                <span className="inline-flex h-2 w-2 rounded-full bg-violet-500 animate-pulse" />
                 <span>Assistant replying</span>
               </div>
               <p className="m-0 mt-1.5 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">
@@ -644,7 +711,7 @@ export function IdeaThreadHistory({
           <article aria-label={getStructuredActionPendingLabel(activeStructuredAction)} className="flex justify-start">
             <div className="max-w-[92%] rounded-[22px] border border-cyan-200 bg-cyan-50/80 px-3.5 py-3 shadow-sm dark:border-cyan-500/30 dark:bg-cyan-500/10 sm:max-w-[85%]">
               <div className="flex items-center gap-2 text-xs font-semibold text-cyan-700 dark:text-cyan-300" aria-hidden="true">
-                <span className="text-cyan-500">●</span>
+                <span className="inline-flex h-2 w-2 rounded-full bg-cyan-500 animate-pulse" />
                 <span>{getStructuredActionPendingLabel(activeStructuredAction)}</span>
               </div>
               <p className="m-0 mt-1.5 text-sm leading-6 text-[var(--ink-strong)]">
@@ -658,9 +725,13 @@ export function IdeaThreadHistory({
           <article aria-label="Structured action failed" className="flex justify-start">
             <div className="max-w-[92%] rounded-[22px] border border-red-200 bg-red-50/80 px-3.5 py-3 shadow-sm dark:border-red-500/30 dark:bg-red-500/10 sm:max-w-[85%]">
               <div className="flex items-center gap-2 text-xs font-semibold text-red-700 dark:text-red-300" aria-hidden="true">
+                <span className="inline-flex h-2 w-2 rounded-full bg-red-500" />
                 <span>Structured action failed</span>
               </div>
-              <p className="m-0 mt-1.5 text-sm leading-6 text-[var(--ink-strong)]">
+              <p className="m-0 mt-1 text-xs leading-5 text-red-700 dark:text-red-300">
+                {getStructuredActionFailedMessage()}
+              </p>
+              <p className="m-0 mt-1.5 line-clamp-2 break-words text-sm leading-6 text-[var(--ink-strong)]" title={lastStructuredActionError.message}>
                 {lastStructuredActionError.message}
               </p>
             </div>
@@ -750,6 +821,15 @@ export function IdeaThreadHistory({
             <p className="m-0 mt-2 text-sm text-[var(--ink-soft)]">Reply to this idea and the assistant will start building context with you here.</p>
           </div>
         )}
+
+        {suggestedActions.length > 0 && onSuggestedAction ? (
+          <div className="flex justify-start">
+            <SuggestedActionsCard
+              items={suggestedActions}
+              onAction={onSuggestedAction}
+            />
+          </div>
+        ) : null}
 
         {pendingBreakdownProposal && onAcceptBreakdown && onRejectBreakdown ? (
           <div className="flex justify-start">

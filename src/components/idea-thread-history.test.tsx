@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { AcceptedBreakdownPlanCard, BreakdownProposalCard, IdeaThreadHistory, StructuredActionProposalCard, type AcceptedBreakdownStep, type PendingBreakdownProposal, type PendingStructuredProposal } from './idea-thread-history'
+import { AcceptedBreakdownPlanCard, BreakdownProposalCard, IdeaThreadHistory, SuggestedActionsCard, StructuredActionProposalCard, type AcceptedBreakdownStep, type PendingBreakdownProposal, type PendingStructuredProposal, type SuggestedThreadActionItem } from './idea-thread-history'
 vi.mock('@tanstack/react-router', async () => {
   const actual = await vi.importActual<typeof import('@tanstack/react-router')>('@tanstack/react-router')
 
@@ -170,6 +170,7 @@ describe('IdeaThreadHistory', () => {
 
     expect(markup).toContain('Thread')
     expect(markup).toContain('Assistant replying')
+    expect(markup).toContain('animate-pulse')
     expect(markup).toContain('I am outlining the fastest thread-first layout now.')
     expect(markup).toContain('min-h-full')
   })
@@ -246,6 +247,7 @@ describe('IdeaThreadHistory', () => {
     expect(markup).toContain('Preparing restructure')
     expect(markup).toContain('The assistant is reframing this idea into a clearer structure in the thread now.')
     expect(markup).toContain('Structured action failed')
+    expect(markup).toContain('Review the error below and try the action again when ready.')
     expect(markup).toContain('Provider timeout')
   })
 
@@ -270,6 +272,56 @@ describe('IdeaThreadHistory', () => {
     expect(markup).toContain('Suggested framing')
     expect(markup).toContain('Accept restructure')
     expect(markup).toContain('Reject restructure')
+  })
+
+  it('renders suggested actions inline near the bottom of the thread', () => {
+    const suggestedActions: SuggestedThreadActionItem[] = [
+      { action: 'title', label: 'Refine title', tone: 'emerald', isPending: false, isActiveAction: false },
+      { action: 'breakdown', label: 'Break it down', tone: 'cyan', isPending: false, isActiveAction: true },
+    ]
+
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[
+          {
+            eventId: 'event-1',
+            type: 'thread_created',
+            createdAt: '2026-04-12T00:00:00.000Z',
+            summary: 'Thread bootstrapped.',
+          },
+        ]}
+        acceptedBreakdownSteps={[
+          {
+            id: 'step-1',
+            stepText: 'Validate the problem.',
+          },
+        ]}
+        suggestedActions={suggestedActions}
+        onSuggestedAction={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Suggested actions for this thread')
+    expect(markup).toContain('Refine title')
+    expect(markup).toContain('Break it down…')
+    expect(markup.indexOf('Suggested actions for this thread')).toBeLessThan(markup.indexOf('Accepted plan'))
+  })
+
+  it('renders the suggested actions card with pending and busy states', () => {
+    const suggestedActions: SuggestedThreadActionItem[] = [
+      { action: 'summary', label: 'Refine summary', tone: 'emerald', isPending: true, isActiveAction: false },
+    ]
+
+    const markup = renderToStaticMarkup(
+      <SuggestedActionsCard
+        items={suggestedActions}
+        onAction={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Suggested actions for this thread')
+    expect(markup).toContain('disabled')
+    expect(markup).toContain('Refine summary')
   })
 
   it('can hide the internal thread header when the parent view already provides it', () => {
@@ -738,6 +790,20 @@ describe('IdeaThreadHistory — Create task from accepted breakdown step', () =>
     )
 
     expect(markup).toContain('Creating…')
+  })
+
+  it('shows in-flight "Completing…" label for linked tasks being completed', () => {
+    const markup = renderToStaticMarkup(
+      <AcceptedBreakdownPlanCard
+        steps={sampleAcceptedSteps}
+        onCompleteLinkedTask={() => {}}
+        stepActionInFlight={{ stepId: 'step-2', action: 'complete-linked-task' }}
+        linkedStepIds={['step-2']}
+      />,
+    )
+
+    expect(markup).toContain('Completing…')
+    expect(markup).toContain('disabled=""')
   })
 })
 
@@ -1220,5 +1286,20 @@ describe('IdeaThreadHistory — completion action forwarding', () => {
     )
 
     expect(markup).toContain('Marking…')
+  })
+
+  it('forwards linked-task completion pending state to the accepted plan card', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        acceptedBreakdownSteps={sampleAcceptedSteps}
+        onCompleteLinkedTask={() => {}}
+        stepActionInFlight={{ stepId: 'step-2', action: 'complete-linked-task' }}
+        linkedStepIds={['step-2']}
+      />,
+    )
+
+    expect(markup).toContain('Completing…')
+    expect(markup).toContain('disabled=""')
   })
 })
