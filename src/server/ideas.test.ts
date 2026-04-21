@@ -363,7 +363,12 @@ describe('ideas server flow', () => {
     const getIdeaThread = vi.fn().mockResolvedValue({
       pendingStructuredAction: {
         action: 'breakdown',
-        proposedSummary: '1. Validate the riskiest assumption\n- Draft the first experiment\n* Review the results',
+        proposedSummary: 'Text-first clipboard sync over Tailscale with secure device authorization and a CLI proof of concept.',
+        proposedSteps: [
+          'Validate Tailscale-based peer discovery with a Go CLI proof of concept',
+          'Define secure device authorization and per-device signing',
+          'Implement basic clipboard sync with simple conflict resolution',
+        ],
       },
     })
     const acceptIdeaThreadStructuredAction = vi.fn().mockResolvedValue({
@@ -399,9 +404,9 @@ describe('ideas server flow', () => {
       {
         ideaId: 'idea-123',
         steps: [
-          { stepOrder: 1, stepText: 'Validate the riskiest assumption' },
-          { stepOrder: 2, stepText: 'Draft the first experiment' },
-          { stepOrder: 3, stepText: 'Review the results' },
+          { stepOrder: 1, stepText: 'Validate Tailscale-based peer discovery with a Go CLI proof of concept' },
+          { stepOrder: 2, stepText: 'Define secure device authorization and per-device signing' },
+          { stepOrder: 3, stepText: 'Implement basic clipboard sync with simple conflict resolution' },
         ],
       },
       'user-1',
@@ -409,13 +414,18 @@ describe('ideas server flow', () => {
     expect(recordBreakdownPlanForIdeaThread).toHaveBeenCalledWith('idea-123', {
       summary: 'Stored accepted breakdown plan with 3 steps.',
       stepCount: 3,
+      steps: [
+        'Validate Tailscale-based peer discovery with a Go CLI proof of concept',
+        'Define secure device authorization and per-device signing',
+        'Implement basic clipboard sync with simple conflict resolution',
+      ],
     })
     expect(result).toEqual({
       ok: true,
       steps: [
-        { stepOrder: 1, stepText: 'Validate the riskiest assumption' },
-        { stepOrder: 2, stepText: 'Draft the first experiment' },
-        { stepOrder: 3, stepText: 'Review the results' },
+        { stepOrder: 1, stepText: 'Validate Tailscale-based peer discovery with a Go CLI proof of concept' },
+        { stepOrder: 2, stepText: 'Define secure device authorization and per-device signing' },
+        { stepOrder: 3, stepText: 'Implement basic clipboard sync with simple conflict resolution' },
       ],
       thread: {
         threadId: 'thread-user-1:idea-123',
@@ -505,6 +515,14 @@ describe('ideas server flow', () => {
       { stepOrder: 1, stepText: 'Validate the riskiest assumption' },
       { stepOrder: 2, stepText: 'Draft the first experiment' },
       { stepOrder: 3, stepText: 'Review the results' },
+    ])
+  })
+
+  it('parses inline numbered breakdown summaries into ordered steps', () => {
+    expect(parseBreakdownSummaryToSteps('1. Validate the riskiest assumption. 2. Draft the first experiment. 3. Review the results.')).toEqual([
+      { stepOrder: 1, stepText: 'Validate the riskiest assumption.' },
+      { stepOrder: 2, stepText: 'Draft the first experiment.' },
+      { stepOrder: 3, stepText: 'Review the results.' },
     ])
   })
 

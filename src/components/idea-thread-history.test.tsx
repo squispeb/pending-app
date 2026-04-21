@@ -110,6 +110,7 @@ describe('IdeaThreadHistory', () => {
             createdAt: '2026-04-12T00:04:30.000Z',
             summary: 'Stored accepted breakdown plan with 4 steps.',
             stepCount: 4,
+            steps: ['Validate discovery', 'Draft the prototype', 'Test the workflow', 'Review results'],
           },
           {
             eventId: 'event-8',
@@ -142,6 +143,8 @@ describe('IdeaThreadHistory', () => {
     expect(markup).toContain('Plan recorded')
     expect(markup).toContain('Stored accepted breakdown plan with 4 steps.')
     expect(markup).toContain('4 steps')
+    expect(markup).toContain('Validate discovery')
+    expect(markup).toContain('Draft the prototype')
     expect(markup).toContain('Step updated')
     expect(markup).toContain('Step 2 completed')
     expect(markup).toContain('Task created')
@@ -267,11 +270,12 @@ const sampleBreakdownProposal: PendingBreakdownProposal = {
   proposalId: 'prop-abc',
   action: 'breakdown',
   proposedSummary: 'Step 1: Research. Step 2: Prototype. Step 3: Ship.',
+  proposedSteps: ['Research', 'Prototype', 'Ship'],
   explanation: 'The idea is mature enough to break down into concrete steps.',
 }
 
 describe('BreakdownProposalCard', () => {
-  it('renders the proposal heading, summary, and explanation', () => {
+  it('renders the proposal heading, structured steps, and explanation', () => {
     const markup = renderToStaticMarkup(
       <BreakdownProposalCard
         proposal={sampleBreakdownProposal}
@@ -283,8 +287,29 @@ describe('BreakdownProposalCard', () => {
     )
 
     expect(markup).toContain('Breakdown proposal')
-    expect(markup).toContain('Step 1: Research. Step 2: Prototype. Step 3: Ship.')
+    expect(markup).toContain('Research')
+    expect(markup).toContain('Prototype')
+    expect(markup).toContain('Ship')
     expect(markup).toContain('The idea is mature enough to break down into concrete steps.')
+  })
+
+  it('falls back to the proposed summary when structured steps are missing', () => {
+    const markup = renderToStaticMarkup(
+      <BreakdownProposalCard
+        proposal={{
+          proposalId: 'prop-fallback',
+          action: 'breakdown',
+          proposedSummary: 'Step 1: Research. Step 2: Prototype. Step 3: Ship.',
+          explanation: 'Fallback rendering still shows the raw summary.',
+        }}
+        isAccepting={false}
+        isRejecting={false}
+        onAccept={() => {}}
+        onReject={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Step 1: Research. Step 2: Prototype. Step 3: Ship.')
   })
 
   it('renders Accept and Reject buttons', () => {
@@ -370,7 +395,9 @@ describe('IdeaThreadHistory — inline breakdown proposal', () => {
     )
 
     expect(markup).toContain('Breakdown proposal')
-    expect(markup).toContain('Step 1: Research. Step 2: Prototype. Step 3: Ship.')
+    expect(markup).toContain('Research')
+    expect(markup).toContain('Prototype')
+    expect(markup).toContain('Ship')
     expect(markup).toContain('Accept breakdown')
     expect(markup).toContain('Reject breakdown')
   })

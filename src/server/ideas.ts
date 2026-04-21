@@ -176,6 +176,7 @@ type AcceptIdeaBreakdownDependencies = {
     pendingStructuredAction?: {
       action: 'breakdown'
       proposedSummary: string
+      proposedSteps?: string[]
     } | null
   }>
   acceptIdeaThreadStructuredAction: (
@@ -198,6 +199,7 @@ type AcceptIdeaBreakdownDependencies = {
     input: {
       summary: string
       stepCount: number
+      steps?: string[]
     },
   ) => Promise<unknown>
 }
@@ -733,15 +735,29 @@ export async function convertAcceptedBreakdownStepToTaskAndLink(
 }
 
 export function parseBreakdownSummaryToSteps(summary: string) {
-  return summary
+  const normalized = summary.trim()
+
+  if (normalized.length === 0) {
+    return []
+  }
+
+  const lines = normalized
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .map((line) => line.replace(/^(?:[-*•]|\d+[.)-])\s+/, '').trim())
     .filter((line) => line.length > 0)
-    .map((stepText, index) => ({
-      stepOrder: index + 1,
-      stepText,
-    }))
+
+  const stepTexts = lines.length > 1
+    ? lines.map((line) => line.replace(/^(?:[-*•]|\d+[.)-])\s+/, '').trim()).filter((line) => line.length > 0)
+    : Array.from(normalized.matchAll(/(?:^|\s)\d+[.)-]\s+([\s\S]*?)(?=(?:\s+\d+[.)-]\s+)|$)/g))
+        .map((match) => match[1]?.trim() ?? '')
+        .filter((line) => line.length > 0)
+
+  const orderedStepTexts = stepTexts.length > 1 ? stepTexts : [normalized]
+
+  return orderedStepTexts.map((stepText, index) => ({
+    stepOrder: index + 1,
+    stepText,
+  }))
 }
 
 export async function acceptIdeaBreakdownAndPersistSteps(
@@ -753,9 +769,10 @@ export async function acceptIdeaBreakdownAndPersistSteps(
 ) {
   const { user } = await dependencies.resolveUser()
   const currentThread = await dependencies.getIdeaThread(input.ideaId)
-  const proposedSummary = currentThread.pendingStructuredAction?.action === 'breakdown'
-    ? currentThread.pendingStructuredAction.proposedSummary
+  const pendingBreakdownProposal = currentThread.pendingStructuredAction?.action === 'breakdown'
+    ? currentThread.pendingStructuredAction
     : null
+  const proposedSummary = pendingBreakdownProposal?.proposedSummary ?? null
 
   if (!proposedSummary) {
     throw new Error('No breakdown proposal summary available')
@@ -765,7 +782,15 @@ export async function acceptIdeaBreakdownAndPersistSteps(
     proposalId: input.proposalId,
   })
 
-  const steps = parseBreakdownSummaryToSteps(proposedSummary)
+  const steps = pendingBreakdownProposal?.proposedSteps && pendingBreakdownProposal.proposedSteps.length > 0
+    ? pendingBreakdownProposal.proposedSteps
+        .map((stepText) => stepText.trim())
+        .filter((stepText) => stepText.length > 0)
+        .map((stepText, index) => ({
+          stepOrder: index + 1,
+          stepText,
+        }))
+    : parseBreakdownSummaryToSteps(proposedSummary)
 
   if (steps.length === 0) {
     throw new Error('Accepted breakdown summary did not contain any steps')
@@ -782,6 +807,7 @@ export async function acceptIdeaBreakdownAndPersistSteps(
   await dependencies.recordBreakdownPlanForIdeaThread?.(input.ideaId, {
     summary: `Stored accepted breakdown plan with ${steps.length} ${steps.length === 1 ? 'step' : 'steps'}.`,
     stepCount: steps.length,
+    steps: steps.map((step) => step.stepText),
   })
 
   return {

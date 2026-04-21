@@ -538,7 +538,10 @@ function IdeaDetailPage() {
       setDiscoveryError(null)
       setDiscoveryNotice('Accepted — breakdown steps persisted to the thread.')
       queryClient.setQueryData(['idea-thread', ideaId], thread)
-      await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] }),
+        queryClient.invalidateQueries({ queryKey: ['idea-accepted-breakdown-steps', ideaId] }),
+      ])
     },
     onError: (error) => {
       setDiscoveryNotice(null)
@@ -1075,7 +1078,15 @@ function IdeaDetailPage() {
                   <div className="font-medium text-[var(--ink-strong)]">Restructured framing</div>
                   <div className="rounded-2xl border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/30 dark:bg-violet-500/10">
                     <div className="text-xs uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">Suggested</div>
-                    <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{pendingStructuredAction.proposedSummary}</div>
+                    {pendingStructuredAction.proposedSteps && pendingStructuredAction.proposedSteps.length > 0 ? (
+                      <ol className="m-0 mt-2 space-y-1.5 pl-5 text-sm leading-6 text-[var(--ink-strong)]">
+                        {pendingStructuredAction.proposedSteps.map((step, index) => (
+                          <li key={`${pendingStructuredAction.proposalId}-${index}`}>{step}</li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{pendingStructuredAction.proposedSummary}</div>
+                    )}
                   </div>
                   <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
                     <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Why</div>
@@ -1270,6 +1281,7 @@ function IdeaDetailPage() {
                           proposalId: pendingStructuredAction.proposalId,
                           action: 'breakdown',
                           proposedSummary: pendingStructuredAction.proposedSummary,
+                          proposedSteps: pendingStructuredAction.proposedSteps,
                           explanation: pendingStructuredAction.explanation,
                         }
                       : null
@@ -1464,6 +1476,7 @@ function IdeaDetailPage() {
                     proposalId: pendingStructuredAction.proposalId,
                     action: 'breakdown',
                     proposedSummary: pendingStructuredAction.proposedSummary,
+                    proposedSteps: pendingStructuredAction.proposedSteps,
                     explanation: pendingStructuredAction.explanation,
                   }
                 : null

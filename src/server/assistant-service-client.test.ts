@@ -410,9 +410,28 @@ describe('assistant service client', () => {
         ok: true,
         outcome: 'proposal_created',
         action: 'breakdown',
-        thread: makeThread({ stage: 'developed' }),
+        thread: makeThread({
+          stage: 'developed',
+          pendingStructuredAction: {
+            proposalId: 'proposal-1',
+            action: 'breakdown',
+            basedOnSnapshotVersion: 2,
+            proposedSummary: '1. Validate the riskiest assumption. 2. Draft the first experiment. 3. Define success metrics.',
+            proposedSteps: [
+              'Validate the riskiest assumption.',
+              'Draft the first experiment.',
+              'Define success metrics.',
+            ],
+            explanation: 'Broke the idea into concrete next steps without converting it yet.',
+          },
+        }),
         proposal: {
           explanation: 'Broke the idea into concrete next steps without converting it yet.',
+          proposedSteps: [
+            'Validate the riskiest assumption.',
+            'Draft the first experiment.',
+            'Define success metrics.',
+          ],
         },
       }), { status: 200, headers: { 'content-type': 'application/json' } }),
     )
@@ -435,6 +454,16 @@ describe('assistant service client', () => {
     }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
 
     expect(result.action).toBe('breakdown')
+    expect(result.thread.pendingStructuredAction?.proposedSteps).toEqual([
+      'Validate the riskiest assumption.',
+      'Draft the first experiment.',
+      'Define success metrics.',
+    ])
+    expect(result.proposal.proposedSteps).toEqual([
+      'Validate the riskiest assumption.',
+      'Draft the first experiment.',
+      'Define success metrics.',
+    ])
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123/actions/breakdown')
     expect(init?.method).toBe('POST')
@@ -578,6 +607,7 @@ describe('assistant service client', () => {
               summary: 'Stored accepted breakdown plan with 4 steps.',
               visibleToUser: true,
               stepCount: 4,
+              steps: ['Validate discovery', 'Draft the prototype', 'Test the workflow', 'Review results'],
             },
           ],
         }),
@@ -591,12 +621,18 @@ describe('assistant service client', () => {
       authHeaders: { cookie: 'better-auth.session_token=test-session' },
       summary: 'Stored accepted breakdown plan with 4 steps.',
       stepCount: 4,
+      steps: ['Validate discovery', 'Draft the prototype', 'Test the workflow', 'Review results'],
     }, { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' })
 
     expect(result.outcome).toBe('recorded')
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123/actions/record-breakdown-plan')
     expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toEqual({
+      summary: 'Stored accepted breakdown plan with 4 steps.',
+      stepCount: 4,
+      steps: ['Validate discovery', 'Draft the prototype', 'Test the workflow', 'Review results'],
+    })
   })
 
   it('submits a discovery turn through the thread contract', async () => {

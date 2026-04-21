@@ -589,6 +589,7 @@ export function createAssistantThreadService(database: Database) {
       input: {
         summary: string
         stepCount: number
+        steps?: string[]
       },
       options?: ResolveIdeaThreadOptions,
     ) {

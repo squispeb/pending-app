@@ -19,6 +19,7 @@ type IdeaThreadVisibleEvent = {
   taskId: string
   stepOrder: number
   stepCount: number
+  steps: string[]
   status: 'completed' | 'reopened'
 }>
 
@@ -26,6 +27,7 @@ export type PendingBreakdownProposal = {
   proposalId: string
   action: 'breakdown'
   proposedSummary: string
+  proposedSteps?: string[]
   explanation: string
 }
 
@@ -282,9 +284,17 @@ export function BreakdownProposalCard({
       {/* proposed summary */}
       <div className="rounded-2xl border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/30 dark:bg-violet-500/10">
         <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">Suggested</div>
-        <p className="m-0 mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">
-          {proposal.proposedSummary}
-        </p>
+        {proposal.proposedSteps && proposal.proposedSteps.length > 0 ? (
+          <ol className="m-0 mt-2 space-y-1.5 pl-5 text-sm leading-6 text-[var(--ink-strong)]">
+            {proposal.proposedSteps.map((step, index) => (
+              <li key={`${proposal.proposalId}-${index}`}>{step}</li>
+            ))}
+          </ol>
+        ) : (
+          <p className="m-0 mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">
+            {proposal.proposedSummary}
+          </p>
+        )}
       </div>
 
       {/* explanation */}
@@ -499,6 +509,13 @@ export function IdeaThreadHistory({
                     <p className="m-0 mt-1.5 text-sm leading-6 text-[var(--ink-strong)]">
                       {event.summary}
                     </p>
+                    {event.type === 'breakdown_plan_recorded' && event.steps && event.steps.length > 0 ? (
+                      <ol className="m-0 mt-2 space-y-1.5 pl-5 text-sm leading-6 text-[var(--ink-strong)]">
+                        {event.steps.map((step, index) => (
+                          <li key={`${event.eventId}-${index}`}>{step}</li>
+                        ))}
+                      </ol>
+                    ) : null}
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--ink-faint)]">
                       {event.type === 'breakdown_plan_recorded' && event.stepCount ? (
                         <span>{event.stepCount} {event.stepCount === 1 ? 'step' : 'steps'}</span>

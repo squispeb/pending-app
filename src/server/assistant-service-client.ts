@@ -18,6 +18,7 @@ const threadEventSchema = z.discriminatedUnion('type', [
   visibleThreadEventBaseSchema.extend({
     type: z.literal('breakdown_plan_recorded'),
     stepCount: z.number().int().positive(),
+    steps: z.array(z.string().min(1)).optional(),
   }),
   visibleThreadEventBaseSchema.extend({
     type: z.literal('step_status_changed'),
@@ -48,6 +49,7 @@ const pendingStructuredActionSchema = z.object({
   action: z.enum(['restructure', 'breakdown', 'convert-to-task']),
   basedOnSnapshotVersion: z.number().int().positive(),
   proposedSummary: z.string().min(1),
+  proposedSteps: z.array(z.string().min(1)).max(5).optional(),
   explanation: z.string().min(1),
   taskCreationPayload: z
     .object({
@@ -192,6 +194,7 @@ const transformIdeaResponseSchema = z.object({
   thread: ideaThreadViewSchema,
   proposal: z.object({
     explanation: z.string().min(1),
+    proposedSteps: z.array(z.string().min(1)).max(5).optional(),
     taskProposal: taskCreationPayloadSchema.optional(),
   }),
 })
@@ -730,6 +733,7 @@ export async function recordBreakdownPlanForIdeaThread(
     authHeaders: HeadersInit
     summary: string
     stepCount: number
+    steps?: string[]
   },
   options?: { fetchImpl?: typeof fetch; baseUrl?: string },
 ) {
@@ -745,7 +749,11 @@ export async function recordBreakdownPlanForIdeaThread(
   const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/actions/record-breakdown-plan`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ summary: input.summary, stepCount: input.stepCount }),
+    body: JSON.stringify({
+      summary: input.summary,
+      stepCount: input.stepCount,
+      ...(input.steps && input.steps.length > 0 ? { steps: input.steps } : {}),
+    }),
   })
   const payload = await parseAssistantResponse(response)
 
