@@ -809,6 +809,10 @@ function IdeaDetailPage() {
   }, [activePageTab, visibleEvents.length, streamingAssistantText])
 
   useEffect(() => {
+    streamSessionRef.current = createIdeaThreadStreamSessionState()
+  }, [ideaId])
+
+  useEffect(() => {
     if (!shouldSubscribeToThreadStream) {
       setStreamingAssistantText('')
       setStreamFallbackPollEnabled(false)
