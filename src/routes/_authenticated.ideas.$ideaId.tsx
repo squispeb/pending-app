@@ -18,7 +18,11 @@ import {
 } from '../lib/idea-structured-actions'
 import { getIdeaStageBadgeClassName, getIdeaStageLabel, isIdeaStarred } from '../lib/ideas'
 import type { ThreadLiveActivityPresentation } from '../lib/idea-thread-presentation'
-import { applyIdeaThreadStreamEvent, parseIdeaThreadStreamFrames } from '../lib/idea-thread-stream'
+import {
+  applyIdeaThreadStreamSessionEvent,
+  createIdeaThreadStreamSessionState,
+  parseIdeaThreadStreamFrames,
+} from '../lib/idea-thread-stream'
 import {
   acceptIdeaBreakdown,
   acceptIdeaStructuredAction,
@@ -166,12 +170,7 @@ function IdeaDetailPage() {
   } | null>(null)
   const threadViewportRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLFormElement | null>(null)
-  const lastStreamEventIdRef = useRef<string | null>(null)
-  const streamedEventIdsRef = useRef(new Set<string>())
-  const streamingAssistantTextRef = useRef('')
-  const activeStreamingTurnIdRef = useRef<string | null>(null)
-  /** Track turn IDs that have already completed so replayed chunks on reconnect are skipped */
-  const completedTurnIdsRef = useRef(new Set<string>())
+  const streamSessionRef = useRef(createIdeaThreadStreamSessionState())
   const queuedTurns = thread.queuedTurns ?? []
   const visibleEvents = thread.visibleEvents ?? []
   const safeAcceptedBreakdownSteps = acceptedBreakdownSteps ?? []
@@ -411,14 +410,12 @@ function IdeaDetailPage() {
 
   const submitTurnMutation = useMutation({
     mutationFn: async (message: string) => submitIdeaThreadTurn({ data: { id: ideaId, message } }),
-    onSuccess: async (result) => {
+    onSuccess: (result) => {
       setDiscoveryMessage('')
       setIsComposerExpanded(false)
       setDiscoveryError(null)
       setDiscoveryNotice(result.state === 'queued' ? `Reply queued behind ${result.queueDepth} ${result.queueDepth === 1 ? 'active turn' : 'active turns'}.` : null)
       queryClient.setQueryData(['idea-thread', ideaId], result.thread)
-
-      await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
     },
     onError: (error) => {
       setDiscoveryNotice(null)
@@ -434,7 +431,7 @@ function IdeaDetailPage() {
         kind: action,
       },
     }),
-    onSuccess: async (result, action) => {
+    onSuccess: (result, action) => {
       setOptimisticThreadAction(null)
       setDiscoveryError(null)
       setDiscoveryNotice(action === 'title' ? 'Title suggestion added to the thread context.' : 'Summary suggestion added to the thread context.')
@@ -443,7 +440,6 @@ function IdeaDetailPage() {
         [action]: null,
       }))
       queryClient.setQueryData(['idea-thread', ideaId], result.thread)
-      await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
     },
     onError: (error) => {
       setOptimisticThreadAction(null)
@@ -459,12 +455,11 @@ function IdeaDetailPage() {
         kind: action,
       },
     }),
-    onSuccess: async (result, action) => {
+    onSuccess: (result, action) => {
       setOptimisticThreadAction(null)
       setDiscoveryError(null)
       setDiscoveryNotice(action === 'restructure' ? 'Framing request sent.' : 'Breakdown request sent.')
       queryClient.setQueryData(['idea-thread', ideaId], result.thread)
-      await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
     },
     onError: (error) => {
       setOptimisticThreadAction(null)
@@ -565,14 +560,13 @@ function IdeaDetailPage() {
         id: ideaId,
       },
     }),
-    onSuccess: async (result) => {
+    onSuccess: (result) => {
       setOptimisticThreadAction(null)
       setDiscoveryError(null)
       setDiscoveryNotice('Convert to task request sent — a proposal will appear above.')
       setActiveSupportTab('guided')
       setIsSupportSheetOpen(true)
       queryClient.setQueryData(['idea-thread', ideaId], result.thread)
-      await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
     },
     onError: (error) => {
       setOptimisticThreadAction(null)
@@ -819,11 +813,8 @@ function IdeaDetailPage() {
       setStreamingAssistantText('')
       setStreamFallbackPollEnabled(false)
       setActiveStructuredAction(null)
-      streamingAssistantTextRef.current = ''
-      lastStreamEventIdRef.current = null
-      activeStreamingTurnIdRef.current = null
-      streamedEventIdsRef.current.clear()
-      completedTurnIdsRef.current.clear()
+      setLastStructuredActionError(null)
+      streamSessionRef.current = createIdeaThreadStreamSessionState()
       return
     }
 
@@ -835,7 +826,7 @@ function IdeaDetailPage() {
         try {
           setStreamFallbackPollEnabled(false)
           const response = await streamIdeaThread({
-            data: { id: ideaId, lastEventId: lastStreamEventIdRef.current },
+            data: { id: ideaId, lastEventId: streamSessionRef.current.lastStreamEventId },
             signal: abortController.signal as never,
           })
 
@@ -860,46 +851,21 @@ function IdeaDetailPage() {
             buffer = parsed.remainder
 
             for (const payload of parsed.events) {
-              if (payload.streamEventId) {
-                if (streamedEventIdsRef.current.has(payload.streamEventId)) {
-                  continue
-                }
+              const applied = applyIdeaThreadStreamSessionEvent(streamSessionRef.current, payload)
 
-                streamedEventIdsRef.current.add(payload.streamEventId)
-                lastStreamEventIdRef.current = payload.streamEventId
-              }
-
-              const applied = applyIdeaThreadStreamEvent(
-                {
-                  streamingAssistantText: streamingAssistantTextRef.current,
-                  activeStreamingTurnId: activeStreamingTurnIdRef.current,
-                  completedTurnIds: completedTurnIdsRef.current,
-                },
-                payload,
-              )
-
-              if (applied.nextThreadSnapshot) {
-                queryClient.setQueryData(['idea-thread', ideaId], applied.nextThreadSnapshot)
-              }
-
-              setActiveStructuredAction(applied.activeStructuredAction)
-              setLastStructuredActionError(applied.lastFailedStructuredAction)
-              completedTurnIdsRef.current = applied.completedTurnIds
-              activeStreamingTurnIdRef.current = applied.activeStreamingTurnId
-              streamingAssistantTextRef.current = applied.streamingAssistantText
-              setStreamingAssistantText(applied.streamingAssistantText)
-
-              if (payload.type === 'turn_started') {
+              if (!applied.didApply) {
                 continue
               }
 
-              if (payload.type === 'assistant_chunk') {
-                continue
+              streamSessionRef.current = applied.nextSessionState
+
+              if (applied.appliedState.nextThreadSnapshot) {
+                queryClient.setQueryData(['idea-thread', ideaId], applied.appliedState.nextThreadSnapshot)
               }
 
-              if (payload.type === 'turn_completed' || payload.type === 'turn_failed') {
-                continue
-              }
+              setActiveStructuredAction(applied.appliedState.activeStructuredAction)
+              setLastStructuredActionError(applied.appliedState.lastFailedStructuredAction)
+              setStreamingAssistantText(applied.appliedState.streamingAssistantText)
             }
           }
         } catch (error) {

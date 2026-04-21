@@ -32,6 +32,24 @@ export type IdeaThreadStreamApplicationState = {
   nextThreadSnapshot?: unknown
 }
 
+export type IdeaThreadStreamSessionState = Omit<IdeaThreadStreamApplicationState, 'nextThreadSnapshot'> & {
+  lastStreamEventId: string | null
+  streamedEventIds: Set<string>
+}
+
+export function createIdeaThreadStreamSessionState(): IdeaThreadStreamSessionState {
+  return {
+    streamingAssistantText: '',
+    activeStreamingTurnId: null,
+    completedTurnIds: new Set<string>(),
+    activeStructuredAction: null,
+    lastCompletedStructuredAction: null,
+    lastFailedStructuredAction: null,
+    lastStreamEventId: null,
+    streamedEventIds: new Set<string>(),
+  }
+}
+
 export function applyIdeaThreadStreamEvent(
   state: IdeaThreadStreamApplicationState,
   event: IdeaThreadStreamEvent,
@@ -110,6 +128,54 @@ export function applyIdeaThreadStreamEvent(
   }
 
   return nextState
+}
+
+export function applyIdeaThreadStreamSessionEvent(
+  state: IdeaThreadStreamSessionState,
+  event: IdeaThreadStreamEvent,
+) {
+  if (event.streamEventId && state.streamedEventIds.has(event.streamEventId)) {
+    return {
+      didApply: false,
+      nextSessionState: state,
+      appliedState: null,
+    }
+  }
+
+  const appliedState = applyIdeaThreadStreamEvent(
+    {
+      streamingAssistantText: state.streamingAssistantText,
+      activeStreamingTurnId: state.activeStreamingTurnId,
+      completedTurnIds: state.completedTurnIds,
+      activeStructuredAction: state.activeStructuredAction,
+      lastCompletedStructuredAction: state.lastCompletedStructuredAction,
+      lastFailedStructuredAction: state.lastFailedStructuredAction,
+      nextThreadSnapshot: undefined,
+    },
+    event,
+  )
+
+  const nextSessionState: IdeaThreadStreamSessionState = {
+    streamingAssistantText: appliedState.streamingAssistantText,
+    activeStreamingTurnId: appliedState.activeStreamingTurnId,
+    completedTurnIds: appliedState.completedTurnIds,
+    activeStructuredAction: appliedState.activeStructuredAction,
+    lastCompletedStructuredAction: appliedState.lastCompletedStructuredAction,
+    lastFailedStructuredAction: appliedState.lastFailedStructuredAction,
+    lastStreamEventId: state.lastStreamEventId,
+    streamedEventIds: new Set(state.streamedEventIds),
+  }
+
+  if (event.streamEventId) {
+    nextSessionState.streamedEventIds.add(event.streamEventId)
+    nextSessionState.lastStreamEventId = event.streamEventId
+  }
+
+  return {
+    didApply: true,
+    nextSessionState,
+    appliedState,
+  }
 }
 
 export function parseIdeaThreadStreamFrames(buffer: string) {

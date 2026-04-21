@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { applyIdeaThreadStreamEvent, parseIdeaThreadStreamFrames } from './idea-thread-stream'
+import {
+  applyIdeaThreadStreamEvent,
+  applyIdeaThreadStreamSessionEvent,
+  createIdeaThreadStreamSessionState,
+  parseIdeaThreadStreamFrames,
+} from './idea-thread-stream'
 
 describe('idea thread stream parser', () => {
   it('parses assistant chunk and completion events from SSE frames', () => {
@@ -180,6 +185,56 @@ describe('idea thread stream application', () => {
     expect(completed.completedTurnIds.has('turn-1')).toBe(true)
   })
 
+  it('preserves in-flight assistant text across working idea updates', () => {
+    const state = {
+      streamingAssistantText: 'partial reply',
+      activeStreamingTurnId: 'turn-1',
+      completedTurnIds: new Set<string>(),
+      activeStructuredAction: null,
+      lastCompletedStructuredAction: null,
+      lastFailedStructuredAction: null,
+    }
+
+    const updated = applyIdeaThreadStreamEvent(state, {
+      type: 'working_idea_updated',
+      thread: { status: 'streaming', workingIdea: { provisionalTitle: 'Fresh title' } },
+    })
+
+    expect(updated.streamingAssistantText).toBe('partial reply')
+    expect(updated.activeStreamingTurnId).toBe('turn-1')
+    expect(updated.nextThreadSnapshot).toEqual({
+      status: 'streaming',
+      workingIdea: { provisionalTitle: 'Fresh title' },
+    })
+  })
+
+  it('treats the latest terminal thread snapshot as authoritative after working idea updates', () => {
+    const state = {
+      streamingAssistantText: 'partial',
+      activeStreamingTurnId: 'turn-1',
+      completedTurnIds: new Set<string>(),
+      activeStructuredAction: null,
+      lastCompletedStructuredAction: null,
+      lastFailedStructuredAction: null,
+    }
+
+    const updated = applyIdeaThreadStreamEvent(state, {
+      type: 'working_idea_updated',
+      thread: { status: 'streaming', workingIdea: { currentSummary: 'Interim' } },
+    })
+    const completed = applyIdeaThreadStreamEvent(updated, {
+      type: 'turn_completed',
+      turnId: 'turn-1',
+      thread: { status: 'idle', workingIdea: { currentSummary: 'Final' } },
+    })
+
+    expect(completed.nextThreadSnapshot).toEqual({
+      status: 'idle',
+      workingIdea: { currentSummary: 'Final' },
+    })
+    expect(completed.completedTurnIds.has('turn-1')).toBe(true)
+  })
+
   it('tracks structured action lifecycle state from stream events', () => {
     const state = {
       streamingAssistantText: '',
@@ -231,5 +286,52 @@ describe('idea thread stream application', () => {
       message: 'Provider timeout',
     })
     expect(failed.nextThreadSnapshot).toEqual({ status: 'failed' })
+  })
+})
+
+describe('idea thread stream session application', () => {
+  it('ignores replayed events that reuse the same stream event id', () => {
+    const initial = createIdeaThreadStreamSessionState()
+    const first = applyIdeaThreadStreamSessionEvent(initial, {
+      streamEventId: 'event-1',
+      type: 'assistant_chunk',
+      turnId: 'turn-1',
+      textDelta: 'Hello',
+    })
+
+    expect(first.didApply).toBe(true)
+    expect(first.appliedState?.streamingAssistantText).toBe('Hello')
+
+    const replayed = applyIdeaThreadStreamSessionEvent(first.nextSessionState, {
+      streamEventId: 'event-1',
+      type: 'assistant_chunk',
+      turnId: 'turn-1',
+      textDelta: ' again',
+    })
+
+    expect(replayed.didApply).toBe(false)
+    expect(replayed.nextSessionState.streamingAssistantText).toBe('Hello')
+  })
+
+  it('tracks the latest stream event id and preserves reducer state across events', () => {
+    const initial = createIdeaThreadStreamSessionState()
+    const started = applyIdeaThreadStreamSessionEvent(initial, {
+      streamEventId: 'event-1',
+      type: 'structured_action_started',
+      action: 'breakdown',
+    })
+    const updated = applyIdeaThreadStreamSessionEvent(started.nextSessionState, {
+      streamEventId: 'event-2',
+      type: 'working_idea_updated',
+      thread: { status: 'streaming', workingIdea: { currentSummary: 'Updated live' } },
+    })
+
+    expect(updated.didApply).toBe(true)
+    expect(updated.nextSessionState.lastStreamEventId).toBe('event-2')
+    expect(updated.nextSessionState.activeStructuredAction).toBe('breakdown')
+    expect(updated.appliedState?.nextThreadSnapshot).toEqual({
+      status: 'streaming',
+      workingIdea: { currentSummary: 'Updated live' },
+    })
   })
 })
