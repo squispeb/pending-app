@@ -1,6 +1,20 @@
 export type IdeaThreadStreamEvent =
   | { streamEventId?: string; type: 'turn_started'; turnId: string }
+  | { streamEventId?: string; type: 'structured_action_started'; action: 'restructure' | 'breakdown' | 'convert-to-task' }
   | { streamEventId?: string; type: 'assistant_chunk'; turnId: string; textDelta: string }
+  | {
+      streamEventId?: string
+      type: 'structured_action_completed'
+      action: 'restructure' | 'breakdown' | 'convert-to-task'
+      thread: unknown
+    }
+  | {
+      streamEventId?: string
+      type: 'structured_action_failed'
+      action: 'restructure' | 'breakdown' | 'convert-to-task'
+      message: string
+      thread: unknown
+    }
   | { streamEventId?: string; type: 'working_idea_updated'; thread: unknown }
   | { streamEventId?: string; type: 'turn_completed'; turnId: string; thread: unknown }
   | { streamEventId?: string; type: 'turn_failed'; turnId: string; message: string; thread: unknown }
@@ -24,6 +38,11 @@ export function applyIdeaThreadStreamEvent(
   }
 
   if (event.type === 'working_idea_updated') {
+    nextState.nextThreadSnapshot = event.thread
+    return nextState
+  }
+
+  if (event.type === 'structured_action_completed' || event.type === 'structured_action_failed') {
     nextState.nextThreadSnapshot = event.thread
     return nextState
   }

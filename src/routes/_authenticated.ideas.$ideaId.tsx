@@ -6,6 +6,7 @@ import { IdeaThreadHistory } from '../components/idea-thread-history'
 import { useCaptureContext } from '../contexts/CaptureContext'
 import { formatDisplayDateTime } from '../lib/date-time'
 import { isTaskCompleted } from '../lib/tasks'
+import { shouldEnableIdeaThreadFallbackPolling } from '../lib/idea-thread-streaming'
 import {
   getIdeaActionLockedReason,
   getIdeaStageActionGuidance,
@@ -91,10 +92,6 @@ const ideaThreadQueryOptions = (ideaId: string) =>
   queryOptions({
     queryKey: ['idea-thread', ideaId],
     queryFn: () => getIdeaThread({ data: { id: ideaId } }),
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      return status && status !== 'idle' ? 1500 : false
-    },
   })
 
 const ideaTaskLinksQueryOptions = (ideaId: string) =>
@@ -161,6 +158,7 @@ function IdeaDetailPage() {
   const [linkedTaskCompletionResult, setLinkedTaskCompletionResult] = useState('')
   const [linkedTaskCompletionEvidence, setLinkedTaskCompletionEvidence] = useState('')
   const [linkedTaskCompletionError, setLinkedTaskCompletionError] = useState<string | null>(null)
+  const [streamFallbackPollEnabled, setStreamFallbackPollEnabled] = useState(false)
   const threadViewportRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLFormElement | null>(null)
   const lastStreamEventIdRef = useRef<string | null>(null)
@@ -824,6 +822,7 @@ function IdeaDetailPage() {
   useEffect(() => {
     if (!isThreadBusy) {
       setStreamingAssistantText('')
+      setStreamFallbackPollEnabled(false)
       streamingAssistantTextRef.current = ''
       lastStreamEventIdRef.current = null
       activeStreamingTurnIdRef.current = null
@@ -838,6 +837,7 @@ function IdeaDetailPage() {
     void (async () => {
       while (!abortController.signal.aborted) {
         try {
+          setStreamFallbackPollEnabled(false)
           const response = await streamIdeaThread({
             data: { id: ideaId, lastEventId: lastStreamEventIdRef.current },
             signal: abortController.signal as never,
@@ -909,6 +909,7 @@ function IdeaDetailPage() {
             return
           }
 
+          setStreamFallbackPollEnabled(true)
           setDiscoveryError((current) => current ?? (error instanceof Error ? error.message : 'Failed to subscribe to assistant stream.'))
         }
 
@@ -938,6 +939,18 @@ function IdeaDetailPage() {
       }
     }
   }, [ideaId, isThreadBusy])
+
+  useEffect(() => {
+    if (!shouldEnableIdeaThreadFallbackPolling({ isThreadBusy, streamFallbackPollEnabled })) {
+      return
+    }
+
+    const interval = setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
+    }, 1500)
+
+    return () => clearInterval(interval)
+  }, [ideaId, isThreadBusy, queryClient, streamFallbackPollEnabled])
 
   const contextSurface = (
     <section className="panel rounded-[28px] p-4 sm:p-5">
