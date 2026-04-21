@@ -38,6 +38,11 @@ describe('idea structured actions', () => {
     expect(getIdeaStageActionGuidance('developed').title).toBe('Developed ideas can use later actions')
   })
 
+  it('falls back when the stage is missing or unexpected', () => {
+    expect(getIdeaStageActionGuidance(null).title).toBe('Thread guidance unavailable')
+    expect(getIdeaStageActionGuidance(undefined).description).toContain('Refresh the page')
+  })
+
   it('explains why locked actions are unavailable', () => {
     expect(getIdeaActionLockedReason('restructure', 'discovery')).toBe('Restructure unlocks once the idea reaches framing.')
     expect(getIdeaActionLockedReason('breakdown', 'framing')).toBe('Next-step breakdown unlocks once the idea reaches developed.')

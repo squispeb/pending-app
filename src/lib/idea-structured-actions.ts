@@ -31,7 +31,7 @@ export function getIdeaStructuredActionAvailability(action: IdeaStructuredAction
   return stage === 'developed' ? 'available' : 'locked'
 }
 
-export function getIdeaStageActionGuidance(stage: IdeaStage) {
+export function getIdeaStageActionGuidance(stage: IdeaStage | null | undefined) {
   switch (stage) {
     case 'discovery':
       return {
@@ -47,6 +47,11 @@ export function getIdeaStageActionGuidance(stage: IdeaStage) {
       return {
         title: 'Developed ideas can use later actions',
         description: 'Use these guided actions when you want the assistant to tighten the framing, sharpen the wording, turn the current idea into concrete next steps, or convert it into a task without leaving the thread.',
+      }
+    default:
+      return {
+        title: 'Thread guidance unavailable',
+        description: 'Refresh the page to load the latest thread stage before trying guided actions again.',
       }
   }
 }
