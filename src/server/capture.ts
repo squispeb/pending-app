@@ -11,10 +11,12 @@ import { resolveAuthenticatedPlannerUser } from './authenticated-user'
 import { createCaptureService } from './capture-service'
 import { createAssistantThreadService } from './assistant-thread-service'
 import { createIdeaAndBootstrapThread } from './ideas'
+import { createIdeasService } from './ideas-service'
 import { createTranscriptionBroker } from './transcription'
 
 const captureService = createCaptureService(db)
 const assistantThreadService = createAssistantThreadService(db)
+const ideasService = createIdeasService(db)
 const transcriptionBroker = createTranscriptionBroker()
 
 export const interpretCaptureInput = createServerFn({ method: 'POST' })
@@ -64,5 +66,18 @@ export const confirmCapturedIdea = createServerFn({ method: 'POST' })
         assistantThreadService.bootstrapIdeaThread(ideaId, {
           requestHeaders: options.requestHeaders,
         }),
+      seedInitialElaboration: async (ideaId, options) => {
+        const { user } = await resolveAuthenticatedPlannerUser(db, {
+          requestHeaders: options.requestHeaders,
+        })
+        const executionSummary = await ideasService.getExecutionSummary(ideaId, user.id)
+
+        await assistantThreadService.requestIdeaThreadElaboration(ideaId, {
+          ...options.input,
+          executionSummary: executionSummary ?? undefined,
+        }, {
+          requestHeaders: options.requestHeaders,
+        })
+      },
     })
   })

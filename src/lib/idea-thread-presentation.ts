@@ -25,6 +25,12 @@ export type ThreadTurnPresentation = {
   completedAt: string | null
 }
 
+export type ThreadLiveActivityPresentation = {
+  label: string
+  badgeClassName: string
+  helperText: string
+}
+
 export function formatThreadEventLabel(type: ThreadEventType) {
   switch (type) {
     case 'thread_created':
@@ -124,12 +130,18 @@ export function deriveThreadState(
         visibleEvents: Array<{ type: ThreadEventType }>
         activeTurn?: ThreadTurnPresentation | null
         queuedTurns?: Array<ThreadTurnPresentation>
+        optimisticActivity?: ThreadLiveActivityPresentation | null
       },
 ) {
   const status = Array.isArray(input) ? 'idle' : input.status
   const visibleEvents = Array.isArray(input) ? input : input.visibleEvents
   const activeTurn = Array.isArray(input) ? null : input.activeTurn ?? null
   const queuedTurns = Array.isArray(input) ? [] : input.queuedTurns ?? []
+  const optimisticActivity = Array.isArray(input) ? null : input.optimisticActivity ?? null
+
+  if (optimisticActivity) {
+    return optimisticActivity
+  }
 
   if (status === 'queued') {
     return {

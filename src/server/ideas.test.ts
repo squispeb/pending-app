@@ -15,6 +15,7 @@ describe('ideas server flow', () => {
       threadId: 'thread-user-1:idea-123',
       initialSnapshotId: 'snapshot-1',
     })
+    const seedInitialElaboration = vi.fn().mockResolvedValue({ ok: true })
 
     const result = await createIdeaAndBootstrapThread(
       {
@@ -27,6 +28,7 @@ describe('ideas server flow', () => {
         resolveUser,
         createIdea,
         bootstrapIdeaThread,
+        seedInitialElaboration,
       },
     )
 
@@ -39,6 +41,16 @@ describe('ideas server flow', () => {
     })
     expect(bootstrapIdeaThread).toHaveBeenCalledWith('idea-123', {
       requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+    })
+    expect(seedInitialElaboration).toHaveBeenCalledWith('idea-123', {
+      requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+      input: {
+        actionInput: 'Turn this into a tracked idea.',
+        currentSnapshotVersion: 1,
+        currentTitle: 'Bootstrap flow',
+        currentBody: 'This should save the idea and create the assistant thread.',
+        currentSummary: null,
+      },
     })
     expect(result).toEqual({
       ok: true,
@@ -61,6 +73,7 @@ describe('ideas server flow', () => {
       threadId: 'thread-user-1:idea-voice-1',
       initialSnapshotId: 'snapshot-voice-1',
     })
+    const seedInitialElaboration = vi.fn().mockResolvedValue({ ok: true })
 
     const result = await createIdeaAndBootstrapThread(
       {
@@ -73,6 +86,7 @@ describe('ideas server flow', () => {
         resolveUser,
         createIdea,
         bootstrapIdeaThread,
+        seedInitialElaboration,
       },
     )
 
@@ -81,6 +95,16 @@ describe('ideas server flow', () => {
       body: 'Preserve the transcript and continue refining in the thread.',
       sourceType: 'voice_capture',
       sourceInput: 'I have an idea for a better capture flow.',
+    })
+    expect(seedInitialElaboration).toHaveBeenCalledWith('idea-voice-1', {
+      requestHeaders: { cookie: 'better-auth.session_token=session-1' },
+      input: {
+        actionInput: 'I have an idea for a better capture flow.',
+        currentSnapshotVersion: 1,
+        currentTitle: 'Voice idea',
+        currentBody: 'Preserve the transcript and continue refining in the thread.',
+        currentSummary: null,
+      },
     })
     expect(result).toEqual({
       ok: true,

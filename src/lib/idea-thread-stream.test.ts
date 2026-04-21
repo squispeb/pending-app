@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseIdeaThreadStreamFrames } from './idea-thread-stream'
+import { applyIdeaThreadStreamEvent, parseIdeaThreadStreamFrames } from './idea-thread-stream'
 
 describe('idea thread stream parser', () => {
   it('parses assistant chunk and completion events from SSE frames', () => {
@@ -104,6 +104,76 @@ describe('idea thread stream parser', () => {
     expect(flushed.events[0]).toMatchObject({
       streamEventId: 'replay-event-5',
       type: 'working_idea_updated',
+      thread: { status: 'streaming' },
     })
+  })
+})
+
+describe('idea thread stream application', () => {
+  it('appends assistant chunks for the active turn', () => {
+    const initialState = {
+      streamingAssistantText: '',
+      activeStreamingTurnId: null,
+      completedTurnIds: new Set<string>(),
+    }
+
+    const started = applyIdeaThreadStreamEvent(initialState, {
+      type: 'turn_started',
+      turnId: 'turn-1',
+    })
+    const appended = applyIdeaThreadStreamEvent(started, {
+      type: 'assistant_chunk',
+      turnId: 'turn-1',
+      textDelta: 'Hello',
+    })
+    const appendedAgain = applyIdeaThreadStreamEvent(appended, {
+      type: 'assistant_chunk',
+      turnId: 'turn-1',
+      textDelta: ' world',
+    })
+
+    expect(appendedAgain.streamingAssistantText).toBe('Hello world')
+    expect(appendedAgain.activeStreamingTurnId).toBe('turn-1')
+  })
+
+  it('skips replayed chunks for completed turns', () => {
+    const state = {
+      streamingAssistantText: '',
+      activeStreamingTurnId: null,
+      completedTurnIds: new Set(['turn-1']),
+    }
+
+    const result = applyIdeaThreadStreamEvent(state, {
+      type: 'assistant_chunk',
+      turnId: 'turn-1',
+      textDelta: 'ignored',
+    })
+
+    expect(result.streamingAssistantText).toBe('')
+    expect(result.activeStreamingTurnId).toBeNull()
+  })
+
+  it('captures thread snapshots for working idea and terminal events', () => {
+    const state = {
+      streamingAssistantText: 'partial',
+      activeStreamingTurnId: 'turn-1',
+      completedTurnIds: new Set<string>(),
+    }
+
+    const updated = applyIdeaThreadStreamEvent(state, {
+      type: 'working_idea_updated',
+      thread: { status: 'streaming', workingIdea: { currentSummary: 'Updated' } },
+    })
+    const completed = applyIdeaThreadStreamEvent(updated, {
+      type: 'turn_completed',
+      turnId: 'turn-1',
+      thread: { status: 'idle', workingIdea: { currentSummary: 'Done' } },
+    })
+
+    expect(updated.nextThreadSnapshot).toEqual({ status: 'streaming', workingIdea: { currentSummary: 'Updated' } })
+    expect(completed.nextThreadSnapshot).toEqual({ status: 'idle', workingIdea: { currentSummary: 'Done' } })
+    expect(completed.streamingAssistantText).toBe('')
+    expect(completed.activeStreamingTurnId).toBeNull()
+    expect(completed.completedTurnIds.has('turn-1')).toBe(true)
   })
 })

@@ -225,10 +225,7 @@ describe('assistant service client', () => {
     expect(url).toBe('https://assistant.example/threads/idea-123/actions/elaborate')
     expect(init?.method).toBe('POST')
     expect(JSON.parse(String(init?.body))).toMatchObject({
-      executionSummary: {
-        ideaId: 'idea-123',
-        stage: 'discovery',
-      },
+      executionSummary: expect.stringContaining('Idea idea-123 is currently in discovery.'),
     })
   })
 
@@ -277,7 +274,9 @@ describe('assistant service client', () => {
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123/actions/improve-title')
     expect(init?.method).toBe('POST')
-    expect(JSON.parse(String(init?.body))).toMatchObject({ executionSummary: { ideaId: 'idea-123' } })
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      executionSummary: expect.stringContaining('Idea idea-123 is currently in developed.'),
+    })
   })
 
   it('parses task creation payloads when accepting a convert-to-task proposal', async () => {
@@ -360,7 +359,9 @@ describe('assistant service client', () => {
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('https://assistant.example/threads/idea-123/actions/improve-summary')
     expect(init?.method).toBe('POST')
-    expect(JSON.parse(String(init?.body))).toMatchObject({ executionSummary: { ideaId: 'idea-123' } })
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      executionSummary: expect.stringContaining('Idea idea-123 is currently in developed.'),
+    })
   })
 
   it('requests a restructure action through the dedicated action contract', async () => {
@@ -399,7 +400,7 @@ describe('assistant service client', () => {
     expect(init?.method).toBe('POST')
     expect(JSON.parse(String(init?.body))).toMatchObject({
       currentSnapshotVersion: 2,
-      executionSummary: { ideaId: 'idea-123' },
+      executionSummary: expect.stringContaining('Idea idea-123 is currently in developed.'),
     })
   })
 
@@ -439,7 +440,7 @@ describe('assistant service client', () => {
     expect(init?.method).toBe('POST')
     expect(JSON.parse(String(init?.body))).toMatchObject({
       currentSnapshotVersion: 2,
-      executionSummary: { ideaId: 'idea-123' },
+      executionSummary: expect.stringContaining('Idea idea-123 is currently in developed.'),
     })
   })
 
@@ -694,10 +695,7 @@ describe('assistant service client', () => {
     expect(init?.method).toBe('POST')
     expect(JSON.parse(String(init?.body))).toMatchObject({
       message: 'Reduce onboarding drop-off for first-time users.',
-      executionSummary: {
-        ideaId: 'idea-123',
-        stage: 'discovery',
-      },
+      executionSummary: expect.stringContaining('Idea idea-123 is currently in discovery.'),
     })
   })
 

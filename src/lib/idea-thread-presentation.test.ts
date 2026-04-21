@@ -69,6 +69,22 @@ describe('idea thread presentation', () => {
     expect(state.helperText).toContain('Reduce onboarding drop-off')
   })
 
+  it('prefers optimistic activity before thread status changes arrive', () => {
+    const state = deriveThreadState({
+      status: 'idle',
+      visibleEvents: [{ type: 'thread_created' }],
+      optimisticActivity: {
+        label: 'Preparing breakdown',
+        badgeClassName: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+        helperText: 'The assistant is turning this idea into concrete next steps.',
+      },
+    })
+
+    expect(state.label).toBe('Preparing breakdown')
+    expect(state.helperText).toContain('concrete next steps')
+    expect(state.badgeClassName).toContain('cyan')
+  })
+
   it('falls back to a ready state when only thread creation is visible', () => {
     const state = deriveThreadState([{ type: 'thread_created' }])
 

@@ -5,6 +5,64 @@ export type IdeaThreadStreamEvent =
   | { streamEventId?: string; type: 'turn_completed'; turnId: string; thread: unknown }
   | { streamEventId?: string; type: 'turn_failed'; turnId: string; message: string; thread: unknown }
 
+export type IdeaThreadStreamApplicationState = {
+  streamingAssistantText: string
+  activeStreamingTurnId: string | null
+  completedTurnIds: Set<string>
+  nextThreadSnapshot?: unknown
+}
+
+export function applyIdeaThreadStreamEvent(
+  state: IdeaThreadStreamApplicationState,
+  event: IdeaThreadStreamEvent,
+) {
+  const nextState: IdeaThreadStreamApplicationState = {
+    streamingAssistantText: state.streamingAssistantText,
+    activeStreamingTurnId: state.activeStreamingTurnId,
+    completedTurnIds: new Set(state.completedTurnIds),
+    nextThreadSnapshot: undefined,
+  }
+
+  if (event.type === 'working_idea_updated') {
+    nextState.nextThreadSnapshot = event.thread
+    return nextState
+  }
+
+  if (event.type === 'turn_started') {
+    if (!nextState.completedTurnIds.has(event.turnId)) {
+      nextState.activeStreamingTurnId = event.turnId
+      nextState.streamingAssistantText = ''
+    }
+
+    return nextState
+  }
+
+  if (event.type === 'assistant_chunk') {
+    if (nextState.completedTurnIds.has(event.turnId)) {
+      return nextState
+    }
+
+    if (nextState.activeStreamingTurnId !== event.turnId) {
+      nextState.activeStreamingTurnId = event.turnId
+      nextState.streamingAssistantText = event.textDelta
+      return nextState
+    }
+
+    nextState.streamingAssistantText = `${nextState.streamingAssistantText}${event.textDelta}`
+    return nextState
+  }
+
+  if (event.type === 'turn_completed' || event.type === 'turn_failed') {
+    nextState.completedTurnIds.add(event.turnId)
+    nextState.streamingAssistantText = ''
+    nextState.activeStreamingTurnId = null
+    nextState.nextThreadSnapshot = event.thread
+    return nextState
+  }
+
+  return nextState
+}
+
 export function parseIdeaThreadStreamFrames(buffer: string) {
   const normalizedBuffer = buffer.replace(/\r\n?/g, '\n')
   const frames = normalizedBuffer.split('\n\n')

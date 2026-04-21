@@ -4,6 +4,7 @@ import {
   deriveThreadState,
   getThreadEventPresentation,
   type ThreadEventType,
+  type ThreadLiveActivityPresentation,
   type ThreadStatus,
   type ThreadTurnPresentation,
 } from '../lib/idea-thread-presentation'
@@ -324,6 +325,7 @@ export function IdeaThreadHistory({
   queuedTurns = [],
   lastTurn = null,
   streamingAssistantText = '',
+  optimisticActivity = null,
   acceptedBreakdownSteps = [],
   pendingBreakdownProposal = null,
   isAcceptingBreakdown = false,
@@ -348,8 +350,9 @@ export function IdeaThreadHistory({
   queuedTurns?: Array<ThreadTurnPresentation>
   lastTurn?: ThreadTurnPresentation | null
   streamingAssistantText?: string
+  optimisticActivity?: ThreadLiveActivityPresentation | null
   /**
- * When accepted breakdown steps exist they are rendered as a plan card at
+  * When accepted breakdown steps exist they are rendered as a plan card at
  * the bottom of the event list. When callbacks are provided, each step can
  * gain completion toggles and/or a per-step "Create task" button.
    */
@@ -390,8 +393,13 @@ export function IdeaThreadHistory({
     visibleEvents,
     activeTurn,
     queuedTurns,
+    optimisticActivity,
   })
-  const showQueuePanel = threadStatus === 'queued' || threadStatus === 'processing' || threadStatus === 'streaming' || threadStatus === 'failed'
+  const showQueuePanel = Boolean(optimisticActivity)
+    || threadStatus === 'queued'
+    || threadStatus === 'processing'
+    || threadStatus === 'streaming'
+    || threadStatus === 'failed'
 
   return (
     <section

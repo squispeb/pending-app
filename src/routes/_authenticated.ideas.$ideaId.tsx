@@ -16,7 +16,8 @@ import {
   type IdeaRestructureAction,
 } from '../lib/idea-structured-actions'
 import { getIdeaStageBadgeClassName, getIdeaStageLabel, isIdeaStarred } from '../lib/ideas'
-import { parseIdeaThreadStreamFrames } from '../lib/idea-thread-stream'
+import type { ThreadLiveActivityPresentation } from '../lib/idea-thread-presentation'
+import { applyIdeaThreadStreamEvent, parseIdeaThreadStreamFrames } from '../lib/idea-thread-stream'
 import {
   acceptIdeaBreakdown,
   acceptIdeaStructuredAction,
@@ -42,6 +43,43 @@ import { completeTask } from '../server/tasks'
 
 type IdeaPageTab = 'thread' | 'context' | 'guided' | 'source'
 type SupportSheetTab = Exclude<IdeaPageTab, 'thread'>
+
+type OptimisticThreadAction = 'title' | 'summary' | 'restructure' | 'breakdown' | 'convert-to-task'
+
+function getOptimisticThreadActivity(action: OptimisticThreadAction): ThreadLiveActivityPresentation {
+  switch (action) {
+    case 'title':
+      return {
+        label: 'Preparing title suggestion',
+        badgeClassName: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300',
+        helperText: 'The assistant is preparing a better title for this idea.',
+      }
+    case 'summary':
+      return {
+        label: 'Preparing summary suggestion',
+        badgeClassName: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300',
+        helperText: 'The assistant is preparing a sharper summary for this idea.',
+      }
+    case 'restructure':
+      return {
+        label: 'Preparing restructure',
+        badgeClassName: 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-300',
+        helperText: 'The assistant is reframing the idea into a clearer structure.',
+      }
+    case 'breakdown':
+      return {
+        label: 'Preparing breakdown',
+        badgeClassName: 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-300',
+        helperText: 'The assistant is turning this idea into concrete next steps.',
+      }
+    case 'convert-to-task':
+      return {
+        label: 'Preparing task proposal',
+        badgeClassName: 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-300',
+        helperText: 'The assistant is preparing a task conversion proposal for review.',
+      }
+  }
+}
 
 const ideaDetailQueryOptions = (ideaId: string) =>
   queryOptions({
@@ -108,6 +146,7 @@ function IdeaDetailPage() {
   const [discoveryError, setDiscoveryError] = useState<string | null>(null)
   const [discoveryNotice, setDiscoveryNotice] = useState<string | null>(null)
   const [streamingAssistantText, setStreamingAssistantText] = useState('')
+  const [optimisticThreadAction, setOptimisticThreadAction] = useState<OptimisticThreadAction | null>(null)
   const [isComposerExpanded, setIsComposerExpanded] = useState(false)
   const [dismissedRefinements, setDismissedRefinements] = useState<{ title: string | null; summary: string | null }>({
     title: null,
@@ -126,6 +165,7 @@ function IdeaDetailPage() {
   const composerRef = useRef<HTMLFormElement | null>(null)
   const lastStreamEventIdRef = useRef<string | null>(null)
   const streamedEventIdsRef = useRef(new Set<string>())
+  const streamingAssistantTextRef = useRef('')
   const activeStreamingTurnIdRef = useRef<string | null>(null)
   /** Track turn IDs that have already completed so replayed chunks on reconnect are skipped */
   const completedTurnIdsRef = useRef(new Set<string>())
@@ -217,18 +257,23 @@ function IdeaDetailPage() {
     .reverse()
     .find((event) => event.type === 'assistant_question' || event.type === 'assistant_synthesis') ?? null
   const latestAssistantQuestion = latestAssistantEvent?.type === 'assistant_question' ? latestAssistantEvent.summary : null
+  const optimisticThreadActivity = !isThreadBusy && optimisticThreadAction
+    ? getOptimisticThreadActivity(optimisticThreadAction)
+    : null
   const currentThreadTitle = workingIdea.provisionalTitle ?? ideaTitle
   const composerStatusText = thread.status === 'queued'
     ? latestQueuedTurn
       ? `Queued after the current turn: ${latestQueuedTurn.userMessage}`
       : 'Your next reply will queue after the current turn.'
-    : thread.status === 'processing'
-      ? thread.activeTurn
-        ? `Assistant is working on: ${thread.activeTurn.userMessage}`
-        : 'Assistant is processing the latest reply.'
-      : thread.status === 'streaming'
-        ? 'Assistant is replying now. You can queue another follow-up if needed.'
-        : 'Add the next piece of context and the assistant will continue the conversation.'
+      : thread.status === 'processing'
+        ? thread.activeTurn
+          ? `Assistant is working on: ${thread.activeTurn.userMessage}`
+          : 'Assistant is processing the latest reply.'
+        : thread.status === 'streaming'
+          ? 'Assistant is replying now. You can queue another follow-up if needed.'
+          : optimisticThreadActivity
+            ? optimisticThreadActivity.helperText
+          : 'Add the next piece of context and the assistant will continue the conversation.'
 
   const missingDiscoveryAreas = [
     !workingIdea.purpose ? 'purpose' : null,
@@ -267,6 +312,8 @@ function IdeaDetailPage() {
   const currentThreadSubtitle = latestAssistantQuestion
     ?? (streamingAssistantText
       ? 'Assistant is replying in the thread now.'
+      : optimisticThreadActivity
+        ? optimisticThreadActivity.helperText
       : thread.status === 'failed'
         ? 'The last reply failed. Retry with another prompt or capture more context.'
         : threadRailMessage)
@@ -278,6 +325,8 @@ function IdeaDetailPage() {
       ? 'Assistant thinking'
       : thread.status === 'streaming'
         ? 'Assistant replying'
+        : optimisticThreadActivity
+          ? optimisticThreadActivity.label
         : thread.status === 'failed'
           ? 'Needs retry'
           : 'Thread ready'
@@ -327,15 +376,18 @@ function IdeaDetailPage() {
               type="button"
               onClick={() => {
                 if (action === 'title' || action === 'summary') {
+                  setOptimisticThreadAction(action)
                   requestRefinementMutation.mutate(action)
                   return
                 }
 
                 if (action === 'convert-to-task') {
+                  setOptimisticThreadAction(action)
                   requestConvertToTaskMutation.mutate()
                   return
                 }
 
+                setOptimisticThreadAction(action)
                 requestStructuredActionMutation.mutate(action)
               }}
               className={`inline-flex h-7 flex-none items-center justify-center rounded-full border px-2.5 text-[10px] font-semibold leading-none transition ${tone === 'emerald' ? 'border-emerald-600/60 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20' : 'border-cyan-600/60 bg-cyan-50 text-cyan-800 hover:bg-cyan-100 dark:border-cyan-500/40 dark:bg-cyan-500/10 dark:text-cyan-300 dark:hover:bg-cyan-500/20'}`}
@@ -392,6 +444,7 @@ function IdeaDetailPage() {
       },
     }),
     onSuccess: async (result, action) => {
+      setOptimisticThreadAction(null)
       setDiscoveryError(null)
       setDiscoveryNotice(action === 'title' ? 'Title suggestion added to the thread context.' : 'Summary suggestion added to the thread context.')
       setDismissedRefinements((current) => ({
@@ -402,6 +455,7 @@ function IdeaDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
     },
     onError: (error) => {
+      setOptimisticThreadAction(null)
       setDiscoveryNotice(null)
       setDiscoveryError(error instanceof Error ? error.message : 'Failed to request a refinement action.')
     },
@@ -415,12 +469,14 @@ function IdeaDetailPage() {
       },
     }),
     onSuccess: async (result, action) => {
+      setOptimisticThreadAction(null)
       setDiscoveryError(null)
       setDiscoveryNotice(action === 'restructure' ? 'Framing request sent.' : 'Breakdown request sent.')
       queryClient.setQueryData(['idea-thread', ideaId], result.thread)
       await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
     },
     onError: (error) => {
+      setOptimisticThreadAction(null)
       setDiscoveryNotice(null)
       setDiscoveryError(error instanceof Error ? error.message : 'Failed to request a structured action.')
     },
@@ -516,6 +572,7 @@ function IdeaDetailPage() {
       },
     }),
     onSuccess: async (result) => {
+      setOptimisticThreadAction(null)
       setDiscoveryError(null)
       setDiscoveryNotice('Convert to task request sent — a proposal will appear above.')
       setActiveSupportTab('guided')
@@ -524,6 +581,7 @@ function IdeaDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ['idea-thread', ideaId] })
     },
     onError: (error) => {
+      setOptimisticThreadAction(null)
       setDiscoveryNotice(null)
       setDiscoveryError(error instanceof Error ? error.message : 'Failed to request task conversion.')
     },
@@ -763,6 +821,7 @@ function IdeaDetailPage() {
   useEffect(() => {
     if (!isThreadBusy) {
       setStreamingAssistantText('')
+      streamingAssistantTextRef.current = ''
       lastStreamEventIdRef.current = null
       activeStreamingTurnIdRef.current = null
       streamedEventIdsRef.current.clear()
@@ -811,36 +870,34 @@ function IdeaDetailPage() {
                 lastStreamEventIdRef.current = payload.streamEventId
               }
 
+              const applied = applyIdeaThreadStreamEvent(
+                {
+                  streamingAssistantText: streamingAssistantTextRef.current,
+                  activeStreamingTurnId: activeStreamingTurnIdRef.current,
+                  completedTurnIds: completedTurnIdsRef.current,
+                },
+                payload,
+              )
+
+              if (applied.nextThreadSnapshot) {
+                queryClient.setQueryData(['idea-thread', ideaId], applied.nextThreadSnapshot)
+              }
+
+              completedTurnIdsRef.current = applied.completedTurnIds
+              activeStreamingTurnIdRef.current = applied.activeStreamingTurnId
+              streamingAssistantTextRef.current = applied.streamingAssistantText
+              setStreamingAssistantText(applied.streamingAssistantText)
+
               if (payload.type === 'turn_started') {
-                // Don't reset streaming text for a turn that already completed
-                // (can be replayed when lastEventId is sent on reconnect)
-                if (!completedTurnIdsRef.current.has(payload.turnId)) {
-                  activeStreamingTurnIdRef.current = payload.turnId
-                  setStreamingAssistantText('')
-                }
                 continue
               }
 
               if (payload.type === 'assistant_chunk') {
-                // Skip chunks for turns that have already completed to prevent duplicates
-                if (completedTurnIdsRef.current.has(payload.turnId)) {
-                  continue
-                }
-
-                if (activeStreamingTurnIdRef.current !== payload.turnId) {
-                  activeStreamingTurnIdRef.current = payload.turnId
-                  setStreamingAssistantText(payload.textDelta)
-                  continue
-                }
-
-                setStreamingAssistantText((current) => `${current}${payload.textDelta}`)
                 continue
               }
 
               if (payload.type === 'turn_completed' || payload.type === 'turn_failed') {
-                completedTurnIdsRef.current.add(payload.turnId)
-                setStreamingAssistantText('')
-                activeStreamingTurnIdRef.current = null
+                continue
               }
             }
           }
@@ -1125,13 +1182,19 @@ function IdeaDetailPage() {
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {refinementActions.map(({ action, label, available, lockedReason, hasPendingReview }) => (
               <div key={action} className={`rounded-2xl border p-3 shadow-sm ${hasPendingReview ? 'border-amber-300 bg-amber-50/80 dark:border-amber-500/30 dark:bg-amber-500/10' : available ? 'border-emerald-300 bg-emerald-50/80 dark:border-emerald-500/30 dark:bg-emerald-500/10' : 'border-slate-200 bg-white dark:border-slate-500/30 dark:bg-slate-950/30'}`}>
-                <button type="button" disabled={!available || refineActionsDisabled || hasPendingReview} onClick={() => requestRefinementMutation.mutate(action)} className={`inline-flex min-h-11 w-full items-center justify-center rounded-2xl border px-4 py-2 text-sm font-semibold leading-none transition disabled:cursor-not-allowed disabled:opacity-60 ${hasPendingReview ? 'border-amber-700 bg-amber-700 text-white hover:border-amber-800 hover:bg-amber-800 dark:border-amber-300 dark:bg-amber-300 dark:text-slate-950 dark:hover:bg-amber-200' : available ? 'border-emerald-700 bg-emerald-700 text-white hover:border-emerald-800 hover:bg-emerald-800 dark:border-emerald-300 dark:bg-emerald-300 dark:text-slate-950 dark:hover:bg-emerald-200' : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-500/30 dark:bg-slate-950/30 dark:text-slate-100 dark:hover:border-slate-400/60 dark:hover:bg-slate-900/50'}`}>{label}</button>
+                <button type="button" disabled={!available || refineActionsDisabled || hasPendingReview} onClick={() => {
+                  setOptimisticThreadAction(action)
+                  requestRefinementMutation.mutate(action)
+                }} className={`inline-flex min-h-11 w-full items-center justify-center rounded-2xl border px-4 py-2 text-sm font-semibold leading-none transition disabled:cursor-not-allowed disabled:opacity-60 ${hasPendingReview ? 'border-amber-700 bg-amber-700 text-white hover:border-amber-800 hover:bg-amber-800 dark:border-amber-300 dark:bg-amber-300 dark:text-slate-950 dark:hover:bg-amber-200' : available ? 'border-emerald-700 bg-emerald-700 text-white hover:border-emerald-800 hover:bg-emerald-800 dark:border-emerald-300 dark:bg-emerald-300 dark:text-slate-950 dark:hover:bg-emerald-200' : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-500/30 dark:bg-slate-950/30 dark:text-slate-100 dark:hover:border-slate-400/60 dark:hover:bg-slate-900/50'}`}>{label}</button>
                 <p className="m-0 mt-2 text-xs leading-5 text-[var(--ink-soft)]">{hasPendingReview ? 'A suggestion is already waiting above. Review it before requesting another.' : available ? 'Uses the current thread context to tighten the wording without leaving the conversation.' : lockedReason}</p>
               </div>
             ))}
             {structuredActions.map(({ action, label, available, lockedReason, hasPendingReview }) => (
               <div key={action} className={`rounded-2xl border p-3 shadow-sm ${hasPendingReview ? 'border-violet-300 bg-violet-50/80 dark:border-violet-500/30 dark:bg-violet-500/10' : available ? 'border-cyan-300 bg-cyan-50/80 dark:border-cyan-500/30 dark:bg-cyan-500/10' : 'border-slate-200 bg-white dark:border-slate-500/30 dark:bg-slate-950/30'}`}>
-                <button type="button" disabled={!available || structuredActionsDisabled || hasPendingReview} onClick={() => requestStructuredActionMutation.mutate(action)} className={`inline-flex min-h-11 w-full items-center justify-center rounded-2xl border px-4 py-2 text-sm font-semibold leading-none transition disabled:cursor-not-allowed disabled:opacity-60 ${hasPendingReview ? 'border-violet-700 bg-violet-700 text-white hover:border-violet-800 hover:bg-violet-800 dark:border-violet-300 dark:bg-violet-300 dark:text-slate-950 dark:hover:bg-violet-200' : available ? 'border-cyan-700 bg-cyan-700 text-white hover:border-cyan-800 hover:bg-cyan-800 dark:border-cyan-300 dark:bg-cyan-300 dark:text-slate-950 dark:hover:bg-cyan-200' : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-500/30 dark:bg-slate-950/30 dark:text-slate-100 dark:hover:border-slate-400/60 dark:hover:bg-slate-900/50'}`}>{label}</button>
+                <button type="button" disabled={!available || structuredActionsDisabled || hasPendingReview} onClick={() => {
+                  setOptimisticThreadAction(action)
+                  requestStructuredActionMutation.mutate(action)
+                }} className={`inline-flex min-h-11 w-full items-center justify-center rounded-2xl border px-4 py-2 text-sm font-semibold leading-none transition disabled:cursor-not-allowed disabled:opacity-60 ${hasPendingReview ? 'border-violet-700 bg-violet-700 text-white hover:border-violet-800 hover:bg-violet-800 dark:border-violet-300 dark:bg-violet-300 dark:text-slate-950 dark:hover:bg-violet-200' : available ? 'border-cyan-700 bg-cyan-700 text-white hover:border-cyan-800 hover:bg-cyan-800 dark:border-cyan-300 dark:bg-cyan-300 dark:text-slate-950 dark:hover:bg-cyan-200' : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-500/30 dark:bg-slate-950/30 dark:text-slate-100 dark:hover:border-slate-400/60 dark:hover:bg-slate-900/50'}`}>{label}</button>
                 <p className="m-0 mt-2 text-xs leading-5 text-[var(--ink-soft)]">{hasPendingReview ? 'A proposal is already waiting above. Review it before requesting another.' : available ? action === 'restructure' ? 'Sends a guided prompt into the thread to clarify the framing while keeping the same idea direction.' : 'Sends a guided prompt into the thread to turn the developed idea into concrete next steps.' : lockedReason}</p>
               </div>
             ))}
@@ -1139,7 +1202,10 @@ function IdeaDetailPage() {
               const { label, available, lockedReason, hasPendingReview } = convertToTaskAction
               return (
                 <div className={`rounded-2xl border p-3 shadow-sm ${hasPendingReview ? 'border-violet-300 bg-violet-50/80 dark:border-violet-500/30 dark:bg-violet-500/10' : available ? 'border-cyan-300 bg-cyan-50/80 dark:border-cyan-500/30 dark:bg-cyan-500/10' : 'border-slate-200 bg-white dark:border-slate-500/30 dark:bg-slate-950/30'}`}>
-                  <button type="button" disabled={!available || structuredActionsDisabled || hasPendingReview} onClick={() => requestConvertToTaskMutation.mutate()} className={`inline-flex min-h-11 w-full items-center justify-center rounded-2xl border px-4 py-2 text-sm font-semibold leading-none transition disabled:cursor-not-allowed disabled:opacity-60 ${hasPendingReview ? 'border-violet-700 bg-violet-700 text-white hover:border-violet-800 hover:bg-violet-800 dark:border-violet-300 dark:bg-violet-300 dark:text-slate-950 dark:hover:bg-violet-200' : available ? 'border-cyan-700 bg-cyan-700 text-white hover:border-cyan-800 hover:bg-cyan-800 dark:border-cyan-300 dark:bg-cyan-300 dark:text-slate-950 dark:hover:bg-cyan-200' : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-500/30 dark:bg-slate-950/30 dark:text-slate-100 dark:hover:border-slate-400/60 dark:hover:bg-slate-900/50'}`}>{label}</button>
+                  <button type="button" disabled={!available || structuredActionsDisabled || hasPendingReview} onClick={() => {
+                    setOptimisticThreadAction('convert-to-task')
+                    requestConvertToTaskMutation.mutate()
+                  }} className={`inline-flex min-h-11 w-full items-center justify-center rounded-2xl border px-4 py-2 text-sm font-semibold leading-none transition disabled:cursor-not-allowed disabled:opacity-60 ${hasPendingReview ? 'border-violet-700 bg-violet-700 text-white hover:border-violet-800 hover:bg-violet-800 dark:border-violet-300 dark:bg-violet-300 dark:text-slate-950 dark:hover:bg-violet-200' : available ? 'border-cyan-700 bg-cyan-700 text-white hover:border-cyan-800 hover:bg-cyan-800 dark:border-cyan-300 dark:bg-cyan-300 dark:text-slate-950 dark:hover:bg-cyan-200' : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-500/30 dark:bg-slate-950/30 dark:text-slate-100 dark:hover:border-slate-400/60 dark:hover:bg-slate-900/50'}`}>{label}</button>
                   <p className="m-0 mt-2 text-xs leading-5 text-[var(--ink-soft)]">{hasPendingReview ? 'A proposal is already waiting above. Review it before requesting another.' : available ? 'Asks the assistant to propose a task based on this idea. A proposal will appear above for you to review before any task is created.' : lockedReason}</p>
                 </div>
               )
@@ -1192,6 +1258,7 @@ function IdeaDetailPage() {
                 <IdeaThreadHistory
                   visibleEvents={visibleEvents}
                   threadStatus={thread.status}
+                  optimisticActivity={optimisticThreadActivity}
                   activeTurn={thread.activeTurn}
                   queuedTurns={queuedTurns}
                   lastTurn={thread.lastTurn}
@@ -1385,6 +1452,7 @@ function IdeaDetailPage() {
           <IdeaThreadHistory
             visibleEvents={visibleEvents}
             threadStatus={thread.status}
+            optimisticActivity={optimisticThreadActivity}
             activeTurn={thread.activeTurn}
             queuedTurns={queuedTurns}
             lastTurn={thread.lastTurn}

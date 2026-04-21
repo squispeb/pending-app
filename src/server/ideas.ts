@@ -35,6 +35,19 @@ type CreateIdeaAndThreadDependencies = {
     threadId: string
     initialSnapshotId: string
   }>
+  seedInitialElaboration?: (
+    ideaId: string,
+    options: {
+      requestHeaders: HeadersInit
+      input: {
+        actionInput: string | null
+        currentSnapshotVersion: number
+        currentTitle: string
+        currentBody: string
+        currentSummary: string | null
+      }
+    },
+  ) => Promise<unknown>
 }
 
 type ApproveIdeaProposalDependencies = {
@@ -198,6 +211,19 @@ export async function createIdeaAndBootstrapThread(
   const thread = await dependencies.bootstrapIdeaThread(createdIdea.id, {
     requestHeaders: authHeaders,
   })
+
+  if (dependencies.seedInitialElaboration) {
+    await dependencies.seedInitialElaboration(createdIdea.id, {
+      requestHeaders: authHeaders,
+      input: {
+        actionInput: data.sourceInput ?? null,
+        currentSnapshotVersion: 1,
+        currentTitle: data.title,
+        currentBody: data.body,
+        currentSummary: null,
+      },
+    })
+  }
 
   return {
     ...createdIdea,

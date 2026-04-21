@@ -103,6 +103,41 @@ const executionSummarySchema = z.object({
 
 export type ExecutionSummary = z.infer<typeof executionSummarySchema>
 
+function formatExecutionSummary(input: ExecutionSummary) {
+  const lines: string[] = [
+    `Idea ${input.ideaId} is currently in ${input.stage}.`,
+  ]
+
+  if (input.latestSnapshot) {
+    lines.push(`Latest snapshot v${input.latestSnapshot.version}: ${input.latestSnapshot.title}.`)
+
+    if (input.latestSnapshot.threadSummary) {
+      lines.push(`Thread summary: ${input.latestSnapshot.threadSummary}`)
+    }
+  }
+
+  if (input.acceptedBreakdownSteps.length > 0) {
+    lines.push(
+      `Accepted breakdown steps: ${input.acceptedBreakdownSteps
+        .map((step) => `#${step.stepOrder} ${step.stepText}${step.completedAt ? ' (completed)' : ''}${step.linkedTaskId ? ` [task ${step.linkedTaskId}]` : ''}`)
+        .join('; ')}.`,
+    )
+  }
+
+  if (input.linkedTasks.length > 0) {
+    lines.push(
+      `Linked tasks: ${input.linkedTasks
+        .map((task) => {
+          const artifactSummary = task.artifactSummaries[0]?.summary
+          return `${task.title} (${task.status}${task.completedAt ? ', completed' : ''}${artifactSummary ? `, latest artifact: ${artifactSummary}` : ''})`
+        })
+        .join('; ')}.`,
+    )
+  }
+
+  return lines.join(' ')
+}
+
 const threadTurnSchema = z.object({
   turnId: z.string().min(1),
   source: z.literal('text'),
@@ -312,15 +347,15 @@ export async function requestIdeaThreadElaboration(
   const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/actions/elaborate`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      actionInput: input.actionInput,
-      currentSnapshotVersion: input.currentSnapshotVersion,
-      currentTitle: input.currentTitle,
-      currentBody: input.currentBody,
-      currentSummary: input.currentSummary,
-      ...(input.executionSummary ? { executionSummary: input.executionSummary } : {}),
-    }),
-  })
+      body: JSON.stringify({
+        actionInput: input.actionInput,
+        currentSnapshotVersion: input.currentSnapshotVersion,
+        currentTitle: input.currentTitle,
+        currentBody: input.currentBody,
+        currentSummary: input.currentSummary,
+        ...(input.executionSummary ? { executionSummary: formatExecutionSummary(input.executionSummary) } : {}),
+      }),
+    })
   const payload = await parseAssistantResponse(response)
 
   return elaborateIdeaResponseSchema.parse(payload)
@@ -351,14 +386,14 @@ async function requestIdeaImprovement(
   const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/actions/${path}`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      currentSnapshotVersion: input.currentSnapshotVersion,
-      currentTitle: input.currentTitle,
-      currentBody: input.currentBody,
-      currentSummary: input.currentSummary,
-      ...(input.executionSummary ? { executionSummary: input.executionSummary } : {}),
-    }),
-  })
+      body: JSON.stringify({
+        currentSnapshotVersion: input.currentSnapshotVersion,
+        currentTitle: input.currentTitle,
+        currentBody: input.currentBody,
+        currentSummary: input.currentSummary,
+        ...(input.executionSummary ? { executionSummary: formatExecutionSummary(input.executionSummary) } : {}),
+      }),
+    })
   const payload = await parseAssistantResponse(response)
 
   return improveIdeaResponseSchema.parse(payload)
@@ -419,14 +454,14 @@ async function requestIdeaTransform(
   const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/actions/${path}`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      currentSnapshotVersion: input.currentSnapshotVersion,
-      currentTitle: input.currentTitle,
-      currentBody: input.currentBody,
-      currentSummary: input.currentSummary,
-      ...(input.executionSummary ? { executionSummary: input.executionSummary } : {}),
-    }),
-  })
+      body: JSON.stringify({
+        currentSnapshotVersion: input.currentSnapshotVersion,
+        currentTitle: input.currentTitle,
+        currentBody: input.currentBody,
+        currentSummary: input.currentSummary,
+        ...(input.executionSummary ? { executionSummary: formatExecutionSummary(input.executionSummary) } : {}),
+      }),
+    })
   const payload = await parseAssistantResponse(response)
 
   return transformIdeaResponseSchema.parse(payload)
@@ -496,11 +531,11 @@ export async function submitIdeaDiscoveryTurn(
   const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/threads/${input.ideaId}/turns`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      message: input.message,
-      ...(input.executionSummary ? { executionSummary: input.executionSummary } : {}),
-    }),
-  })
+      body: JSON.stringify({
+        message: input.message,
+        ...(input.executionSummary ? { executionSummary: formatExecutionSummary(input.executionSummary) } : {}),
+      }),
+    })
   const payload = await parseAssistantResponse(response)
 
   return submitDiscoveryTurnResponseSchema.parse(payload)

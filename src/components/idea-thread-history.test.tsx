@@ -191,6 +191,23 @@ describe('IdeaThreadHistory', () => {
     expect(markup).toContain('The assistant is currently writing back in this thread.')
   })
 
+  it('renders optimistic live activity before canonical thread status updates', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        optimisticActivity={{
+          label: 'Preparing task proposal',
+          badgeClassName: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+          helperText: 'The assistant is preparing a task conversion proposal for review.',
+        }}
+      />,
+    )
+
+    expect(markup).toContain('Preparing task proposal')
+    expect(markup).toContain('The assistant is preparing a task conversion proposal for review.')
+    expect(markup).toContain('role="status"')
+  })
+
   it('exposes threadRegionId as the section id for tab panel wiring', () => {
     const markup = renderToStaticMarkup(
       <IdeaThreadHistory
