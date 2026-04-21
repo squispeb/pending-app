@@ -23,6 +23,12 @@ export type IdeaThreadStreamApplicationState = {
   streamingAssistantText: string
   activeStreamingTurnId: string | null
   completedTurnIds: Set<string>
+  activeStructuredAction: 'restructure' | 'breakdown' | 'convert-to-task' | null
+  lastCompletedStructuredAction: 'restructure' | 'breakdown' | 'convert-to-task' | null
+  lastFailedStructuredAction: {
+    action: 'restructure' | 'breakdown' | 'convert-to-task'
+    message: string
+  } | null
   nextThreadSnapshot?: unknown
 }
 
@@ -34,6 +40,9 @@ export function applyIdeaThreadStreamEvent(
     streamingAssistantText: state.streamingAssistantText,
     activeStreamingTurnId: state.activeStreamingTurnId,
     completedTurnIds: new Set(state.completedTurnIds),
+    activeStructuredAction: state.activeStructuredAction,
+    lastCompletedStructuredAction: state.lastCompletedStructuredAction,
+    lastFailedStructuredAction: state.lastFailedStructuredAction,
     nextThreadSnapshot: undefined,
   }
 
@@ -42,7 +51,28 @@ export function applyIdeaThreadStreamEvent(
     return nextState
   }
 
-  if (event.type === 'structured_action_completed' || event.type === 'structured_action_failed') {
+  if (event.type === 'structured_action_started') {
+    nextState.activeStructuredAction = event.action
+    nextState.lastCompletedStructuredAction = null
+    nextState.lastFailedStructuredAction = null
+    return nextState
+  }
+
+  if (event.type === 'structured_action_completed') {
+    nextState.activeStructuredAction = null
+    nextState.lastCompletedStructuredAction = event.action
+    nextState.lastFailedStructuredAction = null
+    nextState.nextThreadSnapshot = event.thread
+    return nextState
+  }
+
+  if (event.type === 'structured_action_failed') {
+    nextState.activeStructuredAction = null
+    nextState.lastCompletedStructuredAction = null
+    nextState.lastFailedStructuredAction = {
+      action: event.action,
+      message: event.message,
+    }
     nextState.nextThreadSnapshot = event.thread
     return nextState
   }

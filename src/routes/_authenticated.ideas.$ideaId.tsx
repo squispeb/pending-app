@@ -159,6 +159,11 @@ function IdeaDetailPage() {
   const [linkedTaskCompletionEvidence, setLinkedTaskCompletionEvidence] = useState('')
   const [linkedTaskCompletionError, setLinkedTaskCompletionError] = useState<string | null>(null)
   const [streamFallbackPollEnabled, setStreamFallbackPollEnabled] = useState(false)
+  const [activeStructuredAction, setActiveStructuredAction] = useState<'restructure' | 'breakdown' | 'convert-to-task' | null>(null)
+  const [lastStructuredActionError, setLastStructuredActionError] = useState<{
+    action: 'restructure' | 'breakdown' | 'convert-to-task'
+    message: string
+  } | null>(null)
   const threadViewportRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLFormElement | null>(null)
   const lastStreamEventIdRef = useRef<string | null>(null)
@@ -184,6 +189,11 @@ function IdeaDetailPage() {
     openQuestions: [],
   }
   const isThreadBusy = thread.status === 'queued' || thread.status === 'processing' || thread.status === 'streaming'
+  const isStructuredActionStreaming = optimisticThreadAction === 'restructure'
+    || optimisticThreadAction === 'breakdown'
+    || optimisticThreadAction === 'convert-to-task'
+    || activeStructuredAction !== null
+  const shouldSubscribeToThreadStream = isThreadBusy || isStructuredActionStreaming
   const queuedTurnCount = queuedTurns.length
   const latestQueuedTurn = queuedTurns.at(-1) ?? null
 
@@ -820,9 +830,10 @@ function IdeaDetailPage() {
   }, [activePageTab, visibleEvents.length, streamingAssistantText])
 
   useEffect(() => {
-    if (!isThreadBusy) {
+    if (!shouldSubscribeToThreadStream) {
       setStreamingAssistantText('')
       setStreamFallbackPollEnabled(false)
+      setActiveStructuredAction(null)
       streamingAssistantTextRef.current = ''
       lastStreamEventIdRef.current = null
       activeStreamingTurnIdRef.current = null
@@ -886,6 +897,8 @@ function IdeaDetailPage() {
                 queryClient.setQueryData(['idea-thread', ideaId], applied.nextThreadSnapshot)
               }
 
+              setActiveStructuredAction(applied.activeStructuredAction)
+              setLastStructuredActionError(applied.lastFailedStructuredAction)
               completedTurnIdsRef.current = applied.completedTurnIds
               activeStreamingTurnIdRef.current = applied.activeStreamingTurnId
               streamingAssistantTextRef.current = applied.streamingAssistantText
@@ -938,7 +951,7 @@ function IdeaDetailPage() {
         clearTimeout(reconnectTimeout)
       }
     }
-  }, [ideaId, isThreadBusy])
+  }, [ideaId, shouldSubscribeToThreadStream])
 
   useEffect(() => {
     if (!shouldEnableIdeaThreadFallbackPolling({ isThreadBusy, streamFallbackPollEnabled })) {
@@ -1085,69 +1098,9 @@ function IdeaDetailPage() {
         {canUseRefinementActions && pendingStructuredAction ? (
           <div className="rounded-2xl border border-violet-200 bg-violet-50/70 p-4 dark:border-violet-500/30 dark:bg-violet-500/10">
             <div className="mb-2 text-sm font-semibold text-[var(--ink-strong)]">Assistant proposal</div>
-            <div className="space-y-4">
-              {pendingStructuredAction.action === 'restructure' ? (
-                <div className="space-y-2">
-                  <div className="font-medium text-[var(--ink-strong)]">Restructured framing</div>
-                  <div className="rounded-2xl border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/30 dark:bg-violet-500/10">
-                    <div className="text-xs uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">Suggested</div>
-                    {pendingStructuredAction.proposedSteps && pendingStructuredAction.proposedSteps.length > 0 ? (
-                      <ol className="m-0 mt-2 space-y-1.5 pl-5 text-sm leading-6 text-[var(--ink-strong)]">
-                        {pendingStructuredAction.proposedSteps.map((step, index) => (
-                          <li key={`${pendingStructuredAction.proposalId}-${index}`}>{step}</li>
-                        ))}
-                      </ol>
-                    ) : (
-                      <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{pendingStructuredAction.proposedSummary}</div>
-                    )}
-                  </div>
-                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
-                    <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Why</div>
-                    <div className="mt-1 whitespace-pre-wrap">{pendingStructuredAction.explanation}</div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending} onClick={() => acceptStructuredActionMutation.mutate(pendingStructuredAction.proposalId)} className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60">Accept restructure</button>
-                    <button type="button" disabled={acceptStructuredActionMutation.isPending || rejectStructuredActionMutation.isPending} onClick={() => rejectStructuredActionMutation.mutate(pendingStructuredAction.proposalId)} className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60">Reject restructure</button>
-                  </div>
-                </div>
-              ) : null}
-
-              {pendingStructuredAction.action === 'breakdown' ? (
-                <div className="space-y-2">
-                  <div className="font-medium text-[var(--ink-strong)]">Next-step breakdown</div>
-                  <div className="rounded-2xl border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/30 dark:bg-violet-500/10">
-                    <div className="text-xs uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">Suggested</div>
-                    <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{pendingStructuredAction.proposedSummary}</div>
-                  </div>
-                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
-                    <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Why</div>
-                    <div className="mt-1 whitespace-pre-wrap">{pendingStructuredAction.explanation}</div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" disabled={acceptBreakdownMutation.isPending || rejectStructuredActionMutation.isPending} onClick={() => acceptBreakdownMutation.mutate(pendingStructuredAction.proposalId)} className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60">Accept breakdown</button>
-                    <button type="button" disabled={acceptBreakdownMutation.isPending || rejectStructuredActionMutation.isPending} onClick={() => rejectStructuredActionMutation.mutate(pendingStructuredAction.proposalId)} className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60">Reject breakdown</button>
-                  </div>
-                </div>
-              ) : null}
-
-              {pendingStructuredAction.action === 'convert-to-task' ? (
-                <div className="space-y-2">
-                  <div className="font-medium text-[var(--ink-strong)]">Task conversion proposal</div>
-                  <div className="rounded-2xl border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/30 dark:bg-violet-500/10">
-                    <div className="text-xs uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">Proposed task</div>
-                    <div className="mt-1 whitespace-pre-wrap text-[var(--ink-strong)]">{pendingStructuredAction.proposedSummary}</div>
-                  </div>
-                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
-                    <div className="text-xs uppercase tracking-[0.12em] text-[var(--ink-faint)]">Why</div>
-                    <div className="mt-1 whitespace-pre-wrap">{pendingStructuredAction.explanation}</div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" disabled={convertToTaskMutation.isPending || rejectStructuredActionMutation.isPending} onClick={() => convertToTaskMutation.mutate(pendingStructuredAction.proposalId)} className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60">{convertToTaskMutation.isPending ? 'Creating task…' : 'Accept — create task'}</button>
-                    <button type="button" disabled={convertToTaskMutation.isPending || rejectStructuredActionMutation.isPending} onClick={() => rejectStructuredActionMutation.mutate(pendingStructuredAction.proposalId)} className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60">Reject proposal</button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
+            <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">
+              Review this proposal directly in the thread. The guided panel stays available as a secondary surface.
+            </p>
           </div>
         ) : null}
 
@@ -1299,10 +1252,34 @@ function IdeaDetailPage() {
                         }
                       : null
                   }
+                  pendingStructuredProposal={
+                    pendingStructuredAction && pendingStructuredAction.action !== 'breakdown' && canUseRefinementActions
+                      ? {
+                          proposalId: pendingStructuredAction.proposalId,
+                          action: pendingStructuredAction.action,
+                          proposedSummary: pendingStructuredAction.proposedSummary,
+                          proposedSteps: pendingStructuredAction.proposedSteps,
+                          explanation: pendingStructuredAction.explanation,
+                        }
+                      : null
+                  }
+                  activeStructuredAction={activeStructuredAction}
+                  lastStructuredActionError={lastStructuredActionError}
                   isAcceptingBreakdown={acceptBreakdownMutation.isPending}
                   isRejectingBreakdown={rejectStructuredActionMutation.isPending}
+                  isAcceptingStructuredProposal={acceptStructuredActionMutation.isPending || convertToTaskMutation.isPending}
+                  isRejectingStructuredProposal={rejectStructuredActionMutation.isPending}
                   onAcceptBreakdown={(proposalId) => acceptBreakdownMutation.mutate(proposalId)}
                   onRejectBreakdown={(proposalId) => rejectStructuredActionMutation.mutate(proposalId)}
+                  onAcceptStructuredProposal={(proposalId) => {
+                    if (pendingStructuredAction?.action === 'convert-to-task') {
+                      convertToTaskMutation.mutate(proposalId)
+                      return
+                    }
+
+                    acceptStructuredActionMutation.mutate(proposalId)
+                  }}
+                  onRejectStructuredProposal={(proposalId) => rejectStructuredActionMutation.mutate(proposalId)}
                   onCreateTaskFromStep={(stepId) => convertBreakdownStepToTaskMutation.mutate(stepId)}
                   onCompleteStep={(stepId) => completeBreakdownStepMutation.mutate(stepId)}
                   onUncompleteStep={(stepId) => uncompleteBreakdownStepMutation.mutate(stepId)}
@@ -1494,10 +1471,34 @@ function IdeaDetailPage() {
                   }
                 : null
             }
+            pendingStructuredProposal={
+              pendingStructuredAction && pendingStructuredAction.action !== 'breakdown' && canUseRefinementActions
+                ? {
+                    proposalId: pendingStructuredAction.proposalId,
+                    action: pendingStructuredAction.action,
+                    proposedSummary: pendingStructuredAction.proposedSummary,
+                    proposedSteps: pendingStructuredAction.proposedSteps,
+                    explanation: pendingStructuredAction.explanation,
+                  }
+                : null
+            }
+            activeStructuredAction={activeStructuredAction}
+            lastStructuredActionError={lastStructuredActionError}
             isAcceptingBreakdown={acceptBreakdownMutation.isPending}
             isRejectingBreakdown={rejectStructuredActionMutation.isPending}
+            isAcceptingStructuredProposal={acceptStructuredActionMutation.isPending || convertToTaskMutation.isPending}
+            isRejectingStructuredProposal={rejectStructuredActionMutation.isPending}
             onAcceptBreakdown={(proposalId) => acceptBreakdownMutation.mutate(proposalId)}
             onRejectBreakdown={(proposalId) => rejectStructuredActionMutation.mutate(proposalId)}
+            onAcceptStructuredProposal={(proposalId) => {
+              if (pendingStructuredAction?.action === 'convert-to-task') {
+                convertToTaskMutation.mutate(proposalId)
+                return
+              }
+
+              acceptStructuredActionMutation.mutate(proposalId)
+            }}
+            onRejectStructuredProposal={(proposalId) => rejectStructuredActionMutation.mutate(proposalId)}
             onCreateTaskFromStep={(stepId) => convertBreakdownStepToTaskMutation.mutate(stepId)}
             onCompleteLinkedTask={(stepId) => openLinkedTaskCompletionReview(stepId)}
             onCompleteStep={(stepId) => completeBreakdownStepMutation.mutate(stepId)}

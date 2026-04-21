@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { AcceptedBreakdownPlanCard, BreakdownProposalCard, IdeaThreadHistory, type AcceptedBreakdownStep, type PendingBreakdownProposal } from './idea-thread-history'
+import { AcceptedBreakdownPlanCard, BreakdownProposalCard, IdeaThreadHistory, StructuredActionProposalCard, type AcceptedBreakdownStep, type PendingBreakdownProposal, type PendingStructuredProposal } from './idea-thread-history'
 vi.mock('@tanstack/react-router', async () => {
   const actual = await vi.importActual<typeof import('@tanstack/react-router')>('@tanstack/react-router')
 
@@ -234,6 +234,44 @@ describe('IdeaThreadHistory', () => {
     expect(markup).toContain('Thinking about your question now.')
   })
 
+  it('renders inline structured action progress and failure states inside the thread', () => {
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        activeStructuredAction="restructure"
+        lastStructuredActionError={{ action: 'convert-to-task', message: 'Provider timeout' }}
+      />,
+    )
+
+    expect(markup).toContain('Preparing restructure')
+    expect(markup).toContain('The assistant is reframing this idea into a clearer structure in the thread now.')
+    expect(markup).toContain('Structured action failed')
+    expect(markup).toContain('Provider timeout')
+  })
+
+  it('renders non-breakdown structured proposals inline in the thread', () => {
+    const proposal: PendingStructuredProposal = {
+      proposalId: 'proposal-1',
+      action: 'restructure',
+      proposedSummary: 'Refocus the idea around a lighter-weight onboarding checkpoint.',
+      explanation: 'This framing makes the first milestone easier to scan and act on.',
+    }
+
+    const markup = renderToStaticMarkup(
+      <IdeaThreadHistory
+        visibleEvents={[]}
+        pendingStructuredProposal={proposal}
+        onAcceptStructuredProposal={() => {}}
+        onRejectStructuredProposal={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Restructure proposal')
+    expect(markup).toContain('Suggested framing')
+    expect(markup).toContain('Accept restructure')
+    expect(markup).toContain('Reject restructure')
+  })
+
   it('can hide the internal thread header when the parent view already provides it', () => {
     const markup = renderToStaticMarkup(
       <IdeaThreadHistory
@@ -378,6 +416,32 @@ describe('BreakdownProposalCard', () => {
     )
 
     expect(markup).toContain('aria-label="Pending breakdown proposal"')
+  })
+})
+
+describe('StructuredActionProposalCard', () => {
+  it('renders convert-to-task proposal labels and actions', () => {
+    const proposal: PendingStructuredProposal = {
+      proposalId: 'proposal-task',
+      action: 'convert-to-task',
+      proposedSummary: 'Create a task to validate the onboarding bottleneck and prototype the fix.',
+      explanation: 'This idea is developed enough to turn into a task-ready next step.',
+    }
+
+    const markup = renderToStaticMarkup(
+      <StructuredActionProposalCard
+        proposal={proposal}
+        isAccepting={false}
+        isRejecting={false}
+        onAccept={() => {}}
+        onReject={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Task conversion proposal')
+    expect(markup).toContain('Proposed task')
+    expect(markup).toContain('Accept - create task')
+    expect(markup).toContain('Reject proposal')
   })
 })
 

@@ -158,6 +158,9 @@ describe('idea thread stream application', () => {
       streamingAssistantText: 'partial',
       activeStreamingTurnId: 'turn-1',
       completedTurnIds: new Set<string>(),
+      activeStructuredAction: null,
+      lastCompletedStructuredAction: null,
+      lastFailedStructuredAction: null,
     }
 
     const updated = applyIdeaThreadStreamEvent(state, {
@@ -175,5 +178,58 @@ describe('idea thread stream application', () => {
     expect(completed.streamingAssistantText).toBe('')
     expect(completed.activeStreamingTurnId).toBeNull()
     expect(completed.completedTurnIds.has('turn-1')).toBe(true)
+  })
+
+  it('tracks structured action lifecycle state from stream events', () => {
+    const state = {
+      streamingAssistantText: '',
+      activeStreamingTurnId: null,
+      completedTurnIds: new Set<string>(),
+      activeStructuredAction: null,
+      lastCompletedStructuredAction: null,
+      lastFailedStructuredAction: null,
+    }
+
+    const started = applyIdeaThreadStreamEvent(state, {
+      type: 'structured_action_started',
+      action: 'breakdown',
+    })
+    const completed = applyIdeaThreadStreamEvent(started, {
+      type: 'structured_action_completed',
+      action: 'breakdown',
+      thread: { status: 'idle', pendingStructuredAction: { action: 'breakdown' } },
+    })
+
+    expect(started.activeStructuredAction).toBe('breakdown')
+    expect(completed.activeStructuredAction).toBeNull()
+    expect(completed.lastCompletedStructuredAction).toBe('breakdown')
+    expect(completed.lastFailedStructuredAction).toBeNull()
+    expect(completed.nextThreadSnapshot).toEqual({ status: 'idle', pendingStructuredAction: { action: 'breakdown' } })
+  })
+
+  it('captures structured action failures for thread rendering', () => {
+    const state = {
+      streamingAssistantText: '',
+      activeStreamingTurnId: null,
+      completedTurnIds: new Set<string>(),
+      activeStructuredAction: 'convert-to-task' as const,
+      lastCompletedStructuredAction: null,
+      lastFailedStructuredAction: null,
+    }
+
+    const failed = applyIdeaThreadStreamEvent(state, {
+      type: 'structured_action_failed',
+      action: 'convert-to-task',
+      message: 'Provider timeout',
+      thread: { status: 'failed' },
+    })
+
+    expect(failed.activeStructuredAction).toBeNull()
+    expect(failed.lastCompletedStructuredAction).toBeNull()
+    expect(failed.lastFailedStructuredAction).toEqual({
+      action: 'convert-to-task',
+      message: 'Provider timeout',
+    })
+    expect(failed.nextThreadSnapshot).toEqual({ status: 'failed' })
   })
 })

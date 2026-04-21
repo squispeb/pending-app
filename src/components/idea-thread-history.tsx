@@ -2,10 +2,12 @@ import { CheckCircle2, ClipboardList, CheckCheck } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import {
   deriveThreadState,
+  getThreadStructuredActionActivity,
   getThreadEventPresentation,
   type ThreadEventType,
   type ThreadLiveActivityPresentation,
   type ThreadStatus,
+  type ThreadStructuredAction,
   type ThreadTurnPresentation,
 } from '../lib/idea-thread-presentation'
 import { formatDisplayDateTime } from '../lib/date-time'
@@ -29,6 +31,84 @@ export type PendingBreakdownProposal = {
   proposedSummary: string
   proposedSteps?: string[]
   explanation: string
+}
+
+export type PendingStructuredProposal = {
+  proposalId: string
+  action: ThreadStructuredAction
+  proposedSummary: string
+  proposedSteps?: string[]
+  explanation: string
+}
+
+function getStructuredActionCardTitle(action: ThreadStructuredAction) {
+  switch (action) {
+    case 'restructure':
+      return 'Restructure proposal'
+    case 'breakdown':
+      return 'Breakdown proposal'
+    case 'convert-to-task':
+      return 'Task conversion proposal'
+  }
+}
+
+function getStructuredActionSuggestedLabel(action: ThreadStructuredAction) {
+  switch (action) {
+    case 'restructure':
+      return 'Suggested framing'
+    case 'breakdown':
+      return 'Suggested steps'
+    case 'convert-to-task':
+      return 'Proposed task'
+  }
+}
+
+function getStructuredActionAcceptLabel(action: ThreadStructuredAction, isAccepting: boolean) {
+  if (isAccepting) {
+    switch (action) {
+      case 'restructure':
+        return 'Applying…'
+      case 'breakdown':
+        return 'Accepting…'
+      case 'convert-to-task':
+        return 'Creating task…'
+    }
+  }
+
+  switch (action) {
+    case 'restructure':
+      return 'Accept restructure'
+    case 'breakdown':
+      return 'Accept breakdown'
+    case 'convert-to-task':
+      return 'Accept - create task'
+  }
+}
+
+function getStructuredActionRejectLabel(action: ThreadStructuredAction) {
+  switch (action) {
+    case 'restructure':
+      return 'Reject restructure'
+    case 'breakdown':
+      return 'Reject breakdown'
+    case 'convert-to-task':
+      return 'Reject proposal'
+  }
+}
+
+function getStructuredActionPendingLabel(action: ThreadStructuredAction) {
+  switch (action) {
+    case 'restructure':
+      return 'Preparing restructure'
+    case 'breakdown':
+      return 'Preparing breakdown'
+    case 'convert-to-task':
+      return 'Preparing task proposal'
+  }
+}
+
+function getStructuredActionPendingMessage(action: ThreadStructuredAction) {
+  return getThreadStructuredActionActivity(action, 'working').helperText
 }
 
 export type AcceptedBreakdownStep = {
@@ -328,6 +408,79 @@ export function BreakdownProposalCard({
   )
 }
 
+export function StructuredActionProposalCard({
+  proposal,
+  isAccepting,
+  isRejecting,
+  onAccept,
+  onReject,
+}: {
+  proposal: PendingStructuredProposal
+  isAccepting: boolean
+  isRejecting: boolean
+  onAccept: (proposalId: string) => void
+  onReject: (proposalId: string) => void
+}) {
+  const disabled = isAccepting || isRejecting
+
+  return (
+    <div
+      role="region"
+      aria-label={getStructuredActionCardTitle(proposal.action)}
+      className="mx-auto w-full max-w-[92%] rounded-[22px] border border-violet-200 bg-violet-50/70 px-3.5 py-3 shadow-sm dark:border-violet-500/30 dark:bg-violet-500/10 sm:max-w-[85%]"
+    >
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-violet-700 dark:text-violet-300">
+          {getStructuredActionCardTitle(proposal.action)}
+        </span>
+      </div>
+
+      <div className="rounded-2xl border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/30 dark:bg-violet-500/10">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">
+          {getStructuredActionSuggestedLabel(proposal.action)}
+        </div>
+        {proposal.proposedSteps && proposal.proposedSteps.length > 0 ? (
+          <ol className="m-0 mt-2 space-y-1.5 pl-5 text-sm leading-6 text-[var(--ink-strong)]">
+            {proposal.proposedSteps.map((step, index) => (
+              <li key={`${proposal.proposalId}-${index}`}>{step}</li>
+            ))}
+          </ol>
+        ) : (
+          <p className="m-0 mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">
+            {proposal.proposedSummary}
+          </p>
+        )}
+      </div>
+
+      <div className="mt-2 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-faint)]">Why</div>
+        <p className="m-0 mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">
+          {proposal.explanation}
+        </p>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onAccept(proposal.proposalId)}
+          className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {getStructuredActionAcceptLabel(proposal.action, isAccepting)}
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onReject(proposal.proposalId)}
+          className="inline-flex items-center justify-center rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isRejecting ? 'Rejecting…' : getStructuredActionRejectLabel(proposal.action)}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function IdeaThreadHistory({
   visibleEvents,
   threadStatus = 'idle',
@@ -338,10 +491,17 @@ export function IdeaThreadHistory({
   optimisticActivity = null,
   acceptedBreakdownSteps = [],
   pendingBreakdownProposal = null,
+  pendingStructuredProposal = null,
+  activeStructuredAction = null,
+  lastStructuredActionError = null,
   isAcceptingBreakdown = false,
   isRejectingBreakdown = false,
+  isAcceptingStructuredProposal = false,
+  isRejectingStructuredProposal = false,
   onAcceptBreakdown,
   onRejectBreakdown,
+  onAcceptStructuredProposal,
+  onRejectStructuredProposal,
   onCreateTaskFromStep,
   onCompleteLinkedTask,
   onCompleteStep,
@@ -372,10 +532,17 @@ export function IdeaThreadHistory({
    * bottom of the event list so users can act on it without leaving the thread.
    */
   pendingBreakdownProposal?: PendingBreakdownProposal | null
+  pendingStructuredProposal?: PendingStructuredProposal | null
+  activeStructuredAction?: ThreadStructuredAction | null
+  lastStructuredActionError?: { action: ThreadStructuredAction; message: string } | null
   isAcceptingBreakdown?: boolean
   isRejectingBreakdown?: boolean
+  isAcceptingStructuredProposal?: boolean
+  isRejectingStructuredProposal?: boolean
   onAcceptBreakdown?: (proposalId: string) => void
   onRejectBreakdown?: (proposalId: string) => void
+  onAcceptStructuredProposal?: (proposalId: string) => void
+  onRejectStructuredProposal?: (proposalId: string) => void
   /** Called when the user clicks "Create task" for a specific accepted step. */
   onCreateTaskFromStep?: (stepId: string) => void
   /** Called when the user completes a linked task for an accepted step. */
@@ -468,6 +635,33 @@ export function IdeaThreadHistory({
               </div>
               <p className="m-0 mt-1.5 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-strong)]">
                 {streamingAssistantText}
+              </p>
+            </div>
+          </article>
+        ) : null}
+
+        {activeStructuredAction ? (
+          <article aria-label={getStructuredActionPendingLabel(activeStructuredAction)} className="flex justify-start">
+            <div className="max-w-[92%] rounded-[22px] border border-cyan-200 bg-cyan-50/80 px-3.5 py-3 shadow-sm dark:border-cyan-500/30 dark:bg-cyan-500/10 sm:max-w-[85%]">
+              <div className="flex items-center gap-2 text-xs font-semibold text-cyan-700 dark:text-cyan-300" aria-hidden="true">
+                <span className="text-cyan-500">●</span>
+                <span>{getStructuredActionPendingLabel(activeStructuredAction)}</span>
+              </div>
+              <p className="m-0 mt-1.5 text-sm leading-6 text-[var(--ink-strong)]">
+                {getStructuredActionPendingMessage(activeStructuredAction)}
+              </p>
+            </div>
+          </article>
+        ) : null}
+
+        {lastStructuredActionError ? (
+          <article aria-label="Structured action failed" className="flex justify-start">
+            <div className="max-w-[92%] rounded-[22px] border border-red-200 bg-red-50/80 px-3.5 py-3 shadow-sm dark:border-red-500/30 dark:bg-red-500/10 sm:max-w-[85%]">
+              <div className="flex items-center gap-2 text-xs font-semibold text-red-700 dark:text-red-300" aria-hidden="true">
+                <span>Structured action failed</span>
+              </div>
+              <p className="m-0 mt-1.5 text-sm leading-6 text-[var(--ink-strong)]">
+                {lastStructuredActionError.message}
               </p>
             </div>
           </article>
@@ -569,7 +763,19 @@ export function IdeaThreadHistory({
           </div>
         ) : null}
 
-        {acceptedBreakdownSteps.length > 0 && !pendingBreakdownProposal ? (
+        {pendingStructuredProposal && onAcceptStructuredProposal && onRejectStructuredProposal ? (
+          <div className="flex justify-start">
+            <StructuredActionProposalCard
+              proposal={pendingStructuredProposal}
+              isAccepting={isAcceptingStructuredProposal}
+              isRejecting={isRejectingStructuredProposal}
+              onAccept={onAcceptStructuredProposal}
+              onReject={onRejectStructuredProposal}
+            />
+          </div>
+        ) : null}
+
+        {acceptedBreakdownSteps.length > 0 && !pendingBreakdownProposal && !pendingStructuredProposal ? (
           <div className="flex justify-start">
             <AcceptedBreakdownPlanCard
               steps={acceptedBreakdownSteps}

@@ -31,6 +31,57 @@ export type ThreadLiveActivityPresentation = {
   helperText: string
 }
 
+export type ThreadStructuredAction = 'restructure' | 'breakdown' | 'convert-to-task'
+
+export function getThreadStructuredActionActivity(
+  action: ThreadStructuredAction,
+  status: 'working' | 'ready',
+): ThreadLiveActivityPresentation {
+  if (status === 'working') {
+    switch (action) {
+      case 'restructure':
+        return {
+          label: 'Preparing restructure',
+          badgeClassName: 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-300',
+          helperText: 'The assistant is reframing this idea into a clearer structure in the thread now.',
+        }
+      case 'breakdown':
+        return {
+          label: 'Preparing breakdown',
+          badgeClassName: 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-300',
+          helperText: 'The assistant is turning this idea into concrete next steps in the thread now.',
+        }
+      case 'convert-to-task':
+        return {
+          label: 'Preparing task proposal',
+          badgeClassName: 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-300',
+          helperText: 'The assistant is preparing a task conversion proposal in the thread now.',
+        }
+    }
+  }
+
+  switch (action) {
+    case 'restructure':
+      return {
+        label: 'Restructure ready',
+        badgeClassName: 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300',
+        helperText: 'A restructure proposal is ready for review in this thread.',
+      }
+    case 'breakdown':
+      return {
+        label: 'Breakdown ready',
+        badgeClassName: 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300',
+        helperText: 'A breakdown proposal is ready for review in this thread.',
+      }
+    case 'convert-to-task':
+      return {
+        label: 'Task proposal ready',
+        badgeClassName: 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300',
+        helperText: 'A task conversion proposal is ready for review in this thread.',
+      }
+  }
+}
+
 export function formatThreadEventLabel(type: ThreadEventType) {
   switch (type) {
     case 'thread_created':
