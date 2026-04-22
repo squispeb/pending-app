@@ -9,6 +9,8 @@ import viteReact from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { nitro } from 'nitro/vite'
 
+const pwaOutDir = process.env.VERCEL ? '.vercel/output/static' : '.output/public'
+
 const config = defineConfig({
   optimizeDeps: {
     exclude: ['@tanstack/start-server-core'],
@@ -32,7 +34,7 @@ const config = defineConfig({
     }),
     viteReact(),
     VitePWA({
-      outDir: '.output/public',
+      outDir: pwaOutDir,
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'robots.txt', 'logo192.png', 'logo512.png'],
       workbox: {
