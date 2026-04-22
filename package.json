@@ -2,6 +2,7 @@
   "name": "app",
   "private": true,
   "type": "module",
+  "packageManager": "bun@1.1.43",
   "imports": {
     "#/*": "./src/*"
   },
