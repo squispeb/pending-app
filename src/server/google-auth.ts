@@ -13,7 +13,7 @@ export function getGoogleConfigStatus() {
   const missing = [
     ['GOOGLE_CLIENT_ID', env.GOOGLE_CLIENT_ID],
     ['GOOGLE_CLIENT_SECRET', env.GOOGLE_CLIENT_SECRET],
-    ['GOOGLE_REDIRECT_URI', env.GOOGLE_REDIRECT_URI],
+    ['GOOGLE_CALENDAR_REDIRECT_URI', env.GOOGLE_CALENDAR_REDIRECT_URI],
     ['SESSION_SECRET', env.SESSION_SECRET],
   ]
     .filter(([, value]) => !value)

@@ -75,6 +75,64 @@ function LoginPage() {
     },
   })
 
+  const googleSignInMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch('/api/auth/sign-in/social', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          provider: 'google',
+          callbackURL: redirectTarget,
+          newUserCallbackURL: redirectTarget,
+          errorCallbackURL: `/login?redirect=${encodeURIComponent(redirectTarget)}`,
+          disableRedirect: true,
+        }),
+      })
+
+      const payload = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        const message =
+          payload && typeof payload === 'object' && 'message' in payload && typeof payload.message === 'string'
+            ? payload.message
+            : 'Could not start Google sign-in.'
+        throw new Error(message)
+      }
+
+      const redirectUrl =
+        payload && typeof payload === 'object'
+          ? 'url' in payload && typeof payload.url === 'string'
+            ? payload.url
+            : 'data' in payload &&
+                payload.data &&
+                typeof payload.data === 'object' &&
+                'url' in payload.data &&
+                typeof payload.data.url === 'string'
+              ? payload.data.url
+              : null
+          : null
+
+      if (!redirectUrl) {
+        throw new Error('Google sign-in did not return a redirect URL.')
+      }
+
+      return redirectUrl
+    },
+    onSuccess: (redirectUrl) => {
+      setIsRedirecting(true)
+      setErrorMessage(null)
+      setMessage('Redirecting to Google...')
+      window.location.assign(redirectUrl)
+    },
+    onError: (error) => {
+      setIsRedirecting(false)
+      setErrorMessage(error instanceof Error ? error.message : 'Could not start Google sign-in.')
+    },
+  })
+
   const verifyOtpMutation = useMutation({
     mutationFn: async () => {
       const parsed = verifyOtpSchema.parse({
@@ -124,8 +182,36 @@ function LoginPage() {
           </div>
           <h1 className="display-title m-0 text-3xl font-bold text-[var(--ink-strong)]">Log in to Pending App</h1>
           <p className="m-0 max-w-lg text-sm leading-7 text-[var(--ink-soft)] sm:text-base">
-            Enter your email address and we’ll send you a one-time sign-in code. That session will be shared with the assistant service too.
+            Continue with Google or use a one-time email code. The resulting session is shared with the assistant service too.
           </p>
+        </div>
+
+        <div className="mb-6 space-y-4">
+          <button
+            type="button"
+            disabled={googleSignInMutation.isPending || isRedirecting}
+            onClick={() => {
+              setMessage(null)
+              setErrorMessage(null)
+              googleSignInMutation.mutate()
+            }}
+            className="secondary-pill w-full cursor-pointer border-0 justify-center text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {googleSignInMutation.isPending || isRedirecting ? (
+              <span className="inline-flex items-center gap-2">
+                <LoaderCircle size={16} className="animate-spin" />
+                Redirecting to Google...
+              </span>
+            ) : (
+              'Continue with Google'
+            )}
+          </button>
+
+          <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ink-soft)]">
+            <span className="h-px flex-1 bg-[var(--line)]" />
+            <span>Email code</span>
+            <span className="h-px flex-1 bg-[var(--line)]" />
+          </div>
         </div>
 
         {message ? (

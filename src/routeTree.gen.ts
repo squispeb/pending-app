@@ -18,6 +18,7 @@ import { Route as AuthenticatedIdeasRouteImport } from './routes/_authenticated.
 import { Route as AuthenticatedHabitsRouteImport } from './routes/_authenticated.habits'
 import { Route as AuthenticatedCalendarRouteImport } from './routes/_authenticated.calendar'
 import { Route as AuthenticatedIdeasIndexRouteImport } from './routes/_authenticated.ideas.index'
+import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as AuthenticatedIdeasIdeaIdRouteImport } from './routes/_authenticated.ideas.$ideaId'
 import { Route as AuthenticatedAuthGoogleCallbackRouteImport } from './routes/_authenticated.auth.google.callback'
 
@@ -65,6 +66,11 @@ const AuthenticatedIdeasIndexRoute = AuthenticatedIdeasIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedIdeasRoute,
 } as any)
+const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
+  id: '/api/auth/$',
+  path: '/api/auth/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedIdeasIdeaIdRoute =
   AuthenticatedIdeasIdeaIdRouteImport.update({
     id: '/$ideaId',
@@ -87,6 +93,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AuthenticatedSettingsRoute
   '/tasks': typeof AuthenticatedTasksRoute
   '/ideas/$ideaId': typeof AuthenticatedIdeasIdeaIdRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
   '/ideas/': typeof AuthenticatedIdeasIndexRoute
   '/auth/google/callback': typeof AuthenticatedAuthGoogleCallbackRoute
 }
@@ -98,6 +105,7 @@ export interface FileRoutesByTo {
   '/tasks': typeof AuthenticatedTasksRoute
   '/': typeof AuthenticatedIndexRoute
   '/ideas/$ideaId': typeof AuthenticatedIdeasIdeaIdRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
   '/ideas': typeof AuthenticatedIdeasIndexRoute
   '/auth/google/callback': typeof AuthenticatedAuthGoogleCallbackRoute
 }
@@ -112,6 +120,7 @@ export interface FileRoutesById {
   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/ideas/$ideaId': typeof AuthenticatedIdeasIdeaIdRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
   '/_authenticated/ideas/': typeof AuthenticatedIdeasIndexRoute
   '/_authenticated/auth/google/callback': typeof AuthenticatedAuthGoogleCallbackRoute
 }
@@ -126,6 +135,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/tasks'
     | '/ideas/$ideaId'
+    | '/api/auth/$'
     | '/ideas/'
     | '/auth/google/callback'
   fileRoutesByTo: FileRoutesByTo
@@ -137,6 +147,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/'
     | '/ideas/$ideaId'
+    | '/api/auth/$'
     | '/ideas'
     | '/auth/google/callback'
   id:
@@ -150,6 +161,7 @@ export interface FileRouteTypes {
     | '/_authenticated/tasks'
     | '/_authenticated/'
     | '/_authenticated/ideas/$ideaId'
+    | '/api/auth/$'
     | '/_authenticated/ideas/'
     | '/_authenticated/auth/google/callback'
   fileRoutesById: FileRoutesById
@@ -157,6 +169,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   LoginRoute: typeof LoginRoute
+  ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -224,6 +237,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedIdeasIndexRouteImport
       parentRoute: typeof AuthenticatedIdeasRoute
     }
+    '/api/auth/$': {
+      id: '/api/auth/$'
+      path: '/api/auth/$'
+      fullPath: '/api/auth/$'
+      preLoaderRoute: typeof ApiAuthSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/ideas/$ideaId': {
       id: '/_authenticated/ideas/$ideaId'
       path: '/$ideaId'
@@ -281,6 +301,7 @@ const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   LoginRoute: LoginRoute,
+  ApiAuthSplatRoute: ApiAuthSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

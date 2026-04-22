@@ -175,14 +175,14 @@ async function fetchGoogleJson<T>(input: RequestInfo | URL, init: RequestInit, s
 }
 
 function requireGoogleCredentials() {
-  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.GOOGLE_REDIRECT_URI) {
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.GOOGLE_CALENDAR_REDIRECT_URI) {
     throw new Error('Google Calendar is not configured. Add client ID, client secret, and redirect URI.')
   }
 
   return {
     clientId: env.GOOGLE_CLIENT_ID,
     clientSecret: env.GOOGLE_CLIENT_SECRET,
-    redirectUri: env.GOOGLE_REDIRECT_URI,
+    redirectUri: env.GOOGLE_CALENDAR_REDIRECT_URI,
   }
 }
 
