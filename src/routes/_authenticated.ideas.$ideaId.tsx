@@ -6,7 +6,7 @@ import { IdeaThreadHistory } from '../components/idea-thread-history'
 import { useCaptureContext } from '../contexts/CaptureContext'
 import { formatDisplayDateTime } from '../lib/date-time'
 import { isTaskCompleted } from '../lib/tasks'
-import { shouldEnableIdeaThreadFallbackPolling } from '../lib/idea-thread-streaming'
+import { applyIdeaThreadStreamResponse, shouldEnableIdeaThreadFallbackPolling } from '../lib/idea-thread-streaming'
 import {
   getIdeaActionLockedReason,
   getIdeaStageActionGuidance,
@@ -18,11 +18,7 @@ import {
 } from '../lib/idea-structured-actions'
 import { getIdeaStageBadgeClassName, getIdeaStageLabel, isIdeaStarred } from '../lib/ideas'
 import type { ThreadLiveActivityPresentation } from '../lib/idea-thread-presentation'
-import {
-  applyIdeaThreadStreamSessionEvent,
-  createIdeaThreadStreamSessionState,
-  parseIdeaThreadStreamFrames,
-} from '../lib/idea-thread-stream'
+import { createIdeaThreadStreamSessionState } from '../lib/idea-thread-stream'
 import {
   acceptIdeaBreakdown,
   acceptIdeaStructuredAction,
@@ -132,7 +128,7 @@ export const Route = createFileRoute('/_authenticated/ideas/$ideaId')({
   component: IdeaDetailPage,
 })
 
-function IdeaDetailPage() {
+export function IdeaDetailPage() {
   const { ideaId } = Route.useParams()
   const { view } = Route.useSearch()
   const queryClient = useQueryClient()
@@ -838,40 +834,19 @@ function IdeaDetailPage() {
             return
           }
 
-          const reader = response.body
-            .pipeThrough(new TextDecoderStream())
-            .getReader()
-          let buffer = ''
-
-          while (true) {
-            const { value, done } = await reader.read()
-
-            if (done) {
-              break
-            }
-
-            buffer += value
-            const parsed = parseIdeaThreadStreamFrames(buffer)
-            buffer = parsed.remainder
-
-            for (const payload of parsed.events) {
-              const applied = applyIdeaThreadStreamSessionEvent(streamSessionRef.current, payload)
-
-              if (!applied.didApply) {
-                continue
-              }
-
-              streamSessionRef.current = applied.nextSessionState
-
-              if (applied.appliedState.nextThreadSnapshot) {
-                queryClient.setQueryData(['idea-thread', ideaId], applied.appliedState.nextThreadSnapshot)
-              }
-
-              setActiveStructuredAction(applied.appliedState.activeStructuredAction)
-              setLastStructuredActionError(applied.appliedState.lastFailedStructuredAction)
-              setStreamingAssistantText(applied.appliedState.streamingAssistantText)
-            }
-          }
+          await applyIdeaThreadStreamResponse({
+            response,
+            sessionState: streamSessionRef.current,
+            onSessionState: (nextState) => {
+              streamSessionRef.current = nextState
+            },
+            onThreadSnapshot: (snapshot) => {
+              queryClient.setQueryData(['idea-thread', ideaId], snapshot)
+            },
+            onActiveStructuredAction: setActiveStructuredAction,
+            onLastStructuredActionError: setLastStructuredActionError,
+            onStreamingAssistantText: setStreamingAssistantText,
+          })
         } catch (error) {
           if (abortController.signal.aborted) {
             return
