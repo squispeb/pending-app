@@ -18,11 +18,26 @@ const config = defineConfig({
     tsconfigPaths({ projects: ['./tsconfig.json'] }),
     tailwindcss(),
     tanstackStart(),
-    nitro({ rollupConfig: { external: [/^@sentry\//] } }),
+    nitro({
+      rollupConfig: {
+        external: [/^@sentry\//],
+        onwarn(warning, warn) {
+          if (warning.code === 'MODULE_LEVEL_DIRECTIVE' && warning.id?.includes('/node_modules/')) {
+            return
+          }
+
+          warn(warning)
+        },
+      },
+    }),
     viteReact(),
     VitePWA({
+      outDir: '.output/public',
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'robots.txt', 'logo192.png', 'logo512.png'],
+      workbox: {
+        navigateFallback: null,
+      },
       manifest: {
         name: 'Pending App',
         short_name: 'Pending',
