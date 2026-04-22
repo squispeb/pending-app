@@ -1,8 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const setResponseHeaderMock = vi.fn()
+
+vi.mock('@tanstack/start-server-core', () => ({
+  setResponseHeader: setResponseHeaderMock,
+}))
+
 describe('auth proxy', () => {
   beforeEach(() => {
     process.env.ASSISTANT_SERVICE_URL = 'https://assistant.example'
+    setResponseHeaderMock.mockReset()
   })
 
   it('forwards auth requests with proxy headers and request body', async () => {
@@ -38,6 +45,9 @@ describe('auth proxy', () => {
     const headers = init?.headers as Headers
     expect(headers.get('cookie')).toBe('better-auth.session_token=test-session')
     expect(headers.get('origin')).toBe('http://localhost:3000')
+    expect(headers.get('accept-encoding')).toBe('identity')
+    expect(headers.get('x-pending-auth-host')).toBe('localhost:3000')
+    expect(headers.get('x-pending-auth-proto')).toBe('http')
     expect(headers.get('x-forwarded-host')).toBe('localhost:3000')
     expect(headers.get('x-forwarded-proto')).toBe('http')
     expect(Buffer.from(init?.body as ArrayBuffer).toString('utf8')).toBe(
@@ -45,6 +55,99 @@ describe('auth proxy', () => {
     )
 
     expect(response.headers.get('set-cookie')).toContain('better-auth.pkce_verifier=abc')
+    expect(setResponseHeaderMock).toHaveBeenCalledWith('set-cookie', [
+      'better-auth.pkce_verifier=abc; Path=/; HttpOnly; SameSite=Lax',
+    ])
+  })
+
+  it('prefers the browser origin over request.url when forwarding localhost protocol', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ url: 'https://accounts.google.com/o/oauth2/auth' }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+        },
+      }),
+    )
+
+    const { proxyAssistantAuthRequest } = await import('./auth-proxy')
+    await proxyAssistantAuthRequest(
+      new Request('https://localhost:3000/api/auth/sign-in/social', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: 'http://localhost:3000',
+          referer: 'http://localhost:3000/login',
+        },
+        body: JSON.stringify({ provider: 'google', callbackURL: '/' }),
+      }),
+      'sign-in/social',
+      { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' },
+    )
+
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    const headers = init?.headers as Headers
+    expect(headers.get('x-pending-auth-host')).toBe('localhost:3000')
+    expect(headers.get('x-pending-auth-proto')).toBe('http')
+    expect(headers.get('x-forwarded-host')).toBe('localhost:3000')
+    expect(headers.get('x-forwarded-proto')).toBe('http')
+  })
+
+  it('ignores third-party referers when forwarding callback requests', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+        },
+      }),
+    )
+
+    const { proxyAssistantAuthRequest } = await import('./auth-proxy')
+    await proxyAssistantAuthRequest(
+      new Request('http://localhost:3000/api/auth/callback/google?state=test&code=test', {
+        method: 'GET',
+        headers: {
+          referer: 'https://accounts.google.com/',
+        },
+      }),
+      'callback/google',
+      { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' },
+    )
+
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    const headers = init?.headers as Headers
+    expect(headers.get('x-pending-auth-host')).toBe('localhost:3000')
+    expect(headers.get('x-pending-auth-proto')).toBe('http')
+  })
+
+  it('falls back to raw set-cookie headers when getSetCookie is unavailable', async () => {
+    const response = new Response(JSON.stringify({ ok: true }), {
+      status: 302,
+      headers: {
+        'content-type': 'application/json',
+        'set-cookie': 'better-auth.session_token=abc; Path=/; HttpOnly; SameSite=Lax',
+      },
+    })
+
+    Object.defineProperty(response.headers, 'getSetCookie', {
+      value: () => [],
+    })
+
+    const fetchMock = vi.fn(async () => response)
+    const { proxyAssistantAuthRequest } = await import('./auth-proxy')
+    const proxiedResponse = await proxyAssistantAuthRequest(
+      new Request('http://localhost:3000/api/auth/callback/google?state=test&code=test', {
+        method: 'GET',
+      }),
+      'callback/google',
+      { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' },
+    )
+
+    expect(proxiedResponse.headers.get('set-cookie')).toContain('better-auth.session_token=abc')
+    expect(setResponseHeaderMock).toHaveBeenCalledWith('set-cookie', [
+      'better-auth.session_token=abc; Path=/; HttpOnly; SameSite=Lax',
+    ])
   })
 
   it('rewrites assistant-service redirects back onto the app origin', async () => {

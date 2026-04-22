@@ -92,12 +92,23 @@ function LoginPage() {
         }),
       })
 
-      const payload = await response.json().catch(() => null)
+      const responseText = await response.text()
+      let payload: unknown = null
+
+      if (responseText.length > 0) {
+        try {
+          payload = JSON.parse(responseText) as unknown
+        } catch {
+          payload = null
+        }
+      }
 
       if (!response.ok) {
         const message =
           payload && typeof payload === 'object' && 'message' in payload && typeof payload.message === 'string'
             ? payload.message
+            : responseText.trim().length > 0
+              ? responseText.trim()
             : 'Could not start Google sign-in.'
         throw new Error(message)
       }
@@ -113,10 +124,16 @@ function LoginPage() {
                 typeof payload.data.url === 'string'
               ? payload.data.url
               : null
-          : null
+          : response.redirected && response.url
+            ? response.url
+            : null
 
       if (!redirectUrl) {
-        throw new Error('Google sign-in did not return a redirect URL.')
+        throw new Error(
+          responseText.trim().length > 0
+            ? `Google sign-in did not return a redirect URL. Response: ${responseText.trim().slice(0, 240)}`
+            : 'Google sign-in did not return a redirect URL.',
+        )
       }
 
       return redirectUrl

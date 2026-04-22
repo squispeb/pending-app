@@ -1,3 +1,4 @@
+import { setResponseHeader } from '@tanstack/start-server-core'
 import { env } from '../lib/env'
 
 type ProxyAssistantAuthRequestOptions = {
@@ -15,12 +16,52 @@ function getAssistantServiceUrl(baseUrl?: string) {
   return resolvedBaseUrl.replace(/\/$/, '')
 }
 
-function createProxyHeaders(request: Request) {
-  const headers = new Headers(request.headers)
+function resolveClientOrigin(request: Request) {
   const requestUrl = new URL(request.url)
 
-  headers.set('x-forwarded-host', requestUrl.host)
-  headers.set('x-forwarded-proto', requestUrl.protocol.replace(':', ''))
+  const originHeader = request.headers.get('origin')
+  if (originHeader) {
+    try {
+      const originUrl = new URL(originHeader)
+      if (originUrl.host === requestUrl.host) {
+        return originUrl
+      }
+    } catch {
+      // Fall through to referer/request URL.
+    }
+  }
+
+  const refererHeader = request.headers.get('referer')
+  if (refererHeader) {
+    try {
+      const refererUrl = new URL(refererHeader)
+      if (refererUrl.host === requestUrl.host) {
+        return refererUrl
+      }
+    } catch {
+      // Fall through to request URL.
+    }
+  }
+
+  return requestUrl
+}
+
+function isLocalHost(hostname: string) {
+  return hostname === 'localhost' || hostname === '127.0.0.1'
+}
+
+function createProxyHeaders(request: Request) {
+  const headers = new Headers(request.headers)
+  const clientUrl = resolveClientOrigin(request)
+  const protocol = isLocalHost(clientUrl.hostname) ? 'http' : clientUrl.protocol.replace(':', '')
+
+  // Ask the upstream auth service for an identity response so the app proxy
+  // can relay JSON/redirect payloads without content-encoding ambiguity.
+  headers.set('accept-encoding', 'identity')
+  headers.set('x-pending-auth-host', clientUrl.host)
+  headers.set('x-pending-auth-proto', protocol)
+  headers.set('x-forwarded-host', clientUrl.host)
+  headers.set('x-forwarded-proto', protocol)
 
   return headers
 }
@@ -38,6 +79,24 @@ function stripProxyUnsafeResponseHeaders(headers: Headers) {
   headers.delete('upgrade')
 }
 
+function splitSetCookieHeader(value: string) {
+  return value
+    .split(/,(?=\s*[^;,\s]+=)/)
+    .map((cookie) => cookie.trim())
+    .filter(Boolean)
+}
+
+function getResponseSetCookieHeaders(response: Response) {
+  const values = response.headers.getSetCookie()
+
+  if (values.length > 0) {
+    return values
+  }
+
+  const combined = response.headers.get('set-cookie')
+  return combined ? splitSetCookieHeader(combined) : []
+}
+
 function shouldIncludeRequestBody(method: string) {
   return method !== 'GET' && method !== 'HEAD'
 }
@@ -45,9 +104,15 @@ function shouldIncludeRequestBody(method: string) {
 function copyResponseHeaders(response: Response, requestOrigin: string, assistantServiceOrigin: string) {
   const headers = new Headers(response.headers)
   stripProxyUnsafeResponseHeaders(headers)
-  const setCookieHeaders = response.headers.getSetCookie()
+  const setCookieHeaders = getResponseSetCookieHeaders(response)
 
   if (setCookieHeaders.length > 0) {
+    try {
+      setResponseHeader('set-cookie', setCookieHeaders)
+    } catch {
+      // Tests and non-request contexts may not expose the TanStack response header bridge.
+    }
+
     headers.delete('set-cookie')
     for (const value of setCookieHeaders) {
       headers.append('set-cookie', value)
