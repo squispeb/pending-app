@@ -13,7 +13,10 @@ const authSessionResponseSchema = z.object({
   user: z.object({
     id: z.string().min(1),
     email: z.string().min(1),
-    name: z.string().min(1).nullable().optional(),
+    name: z.preprocess(
+      (value) => (typeof value === 'string' && value.trim().length === 0 ? null : value),
+      z.string().trim().min(1).nullable().optional(),
+    ),
   }),
 })
 
@@ -23,6 +26,22 @@ type ResolvedPlannerAuthUser = {
   id: string
   email: string
   name?: string | null
+}
+
+function normalizeDisplayName(value?: string | null) {
+  const trimmed = value?.trim()
+  return trimmed && trimmed.length > 0 ? trimmed : null
+}
+
+function resolvePlannerDisplayName(authUser: ResolvedPlannerAuthUser, existingDisplayName?: string | null) {
+  const displayName = normalizeDisplayName(authUser.name) ?? normalizeDisplayName(existingDisplayName)
+
+  if (displayName) {
+    return displayName
+  }
+
+  const fallback = authUser.email.split('@', 1)[0]?.trim()
+  return fallback && fallback.length > 0 ? fallback : authUser.email
 }
 
 type ResolveAuthenticatedPlannerUserOptions = {
@@ -158,16 +177,23 @@ export async function resolveAssistantAuthSession(
 
 async function upsertPlannerUser(database: Database, authUser: ResolvedPlannerAuthUser) {
   const now = new Date()
-  const existing = await database.query.users.findFirst({
+  const existingById = await database.query.users.findFirst({
     where: eq(users.id, authUser.id),
   })
-  const displayName = authUser.name ?? existing?.displayName ?? null
+  const existingByEmail = existingById
+    ? null
+    : await database.query.users.findFirst({
+        where: eq(users.email, authUser.email),
+      })
+  const existing = existingById ?? existingByEmail
+  const plannerUserId = existing?.id ?? authUser.id
+  const displayName = resolvePlannerDisplayName(authUser, existing?.displayName)
   const timezone = existing?.timezone ?? 'UTC'
 
   await database
     .insert(users)
     .values({
-      id: authUser.id,
+      id: plannerUserId,
       email: authUser.email,
       displayName,
       timezone,
@@ -183,7 +209,7 @@ async function upsertPlannerUser(database: Database, authUser: ResolvedPlannerAu
     })
 
   const user = await database.query.users.findFirst({
-    where: eq(users.id, authUser.id),
+    where: eq(users.id, plannerUserId),
   })
 
   if (!user) {
