@@ -8,7 +8,7 @@ import {
 } from '@tanstack/react-query'
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { z } from 'zod'
-import { formatDisplayDateTime } from '../lib/date-time'
+import { formatDisplayDateTime, useClientTimeZone } from '../lib/date-time'
 import {
   getIdeaExcerpt,
   getIdeaStageBadgeClassName,
@@ -38,6 +38,7 @@ export const Route = createFileRoute('/_authenticated/ideas/')({
 const EMPTY_FORM = toIdeaFormValues(null)
 
 function IdeasIndexPage() {
+  const timeZone = useClientTimeZone()
   const navigate = useNavigate({ from: '/ideas' })
   const search = Route.useSearch()
   const queryClient = useQueryClient()
@@ -273,7 +274,7 @@ function IdeasIndexPage() {
 
                           <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--ink-faint)]">
                             {idea.threadSummary ? <span className="line-clamp-1">{idea.threadSummary}</span> : null}
-                            <span>Updated {formatDisplayDateTime(idea.updatedAt)}</span>
+                            <span>Updated {formatDisplayDateTime(idea.updatedAt, timeZone)}</span>
                           </div>
                       </div>
                     </div>

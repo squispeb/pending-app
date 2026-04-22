@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { queryOptions, useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { ChevronDown, ChevronUp, RefreshCw, Settings2 } from 'lucide-react'
+import { formatDisplayTime, useClientTimeZone } from '../lib/date-time'
 import { getCalendarView, getCalendarEventsForDay, syncGoogleCalendar } from '../server/calendar'
 import { getTodayDateString } from '../lib/tasks'
 
@@ -31,9 +32,9 @@ export const Route = createFileRoute('/_authenticated/calendar')({
 const DAYS_BACK = 30
 const DAYS_FORWARD = 90
 
-function formatEventTimeRange(start: Date, end: Date, allDay: boolean) {
+function formatEventTimeRange(start: Date, end: Date, allDay: boolean, timeZone: string) {
   if (allDay) return 'All day'
-  return `${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+  return `${formatDisplayTime(start, timeZone)} – ${formatDisplayTime(end, timeZone)}`
 }
 
 function formatRelativeSyncTime(syncedAt: Date, now: Date): string {
@@ -60,10 +61,12 @@ function EventCard({
   event,
   isInProgress,
   isNext,
+  timeZone,
 }: {
   event: DayEvent
   isInProgress: boolean
   isNext: boolean
+  timeZone: string
 }) {
   const start = new Date(event.startsAt)
   const end = new Date(event.endsAt)
@@ -90,7 +93,7 @@ function EventCard({
             {event.summary || '(Untitled event)'}
           </p>
           <p className="m-0 mt-0.5 truncate text-xs leading-5 text-[var(--ink-soft)]">
-            {formatEventTimeRange(start, end, event.allDay)}
+            {formatEventTimeRange(start, end, event.allDay, timeZone)}
             {event.location ? ` · ${event.location}` : ''}
           </p>
         </div>
@@ -115,6 +118,7 @@ function EventCard({
 function CalendarPage() {
   const queryClient = useQueryClient()
   const { data } = useSuspenseQuery(calendarViewQueryOptions())
+  const timeZone = useClientTimeZone()
 
   const [now, setNow] = useState(() => new Date())
   const [showPastToday, setShowPastToday] = useState(false)
@@ -214,7 +218,7 @@ function CalendarPage() {
     return selectedEvents.find((e) => new Date(e.startsAt) > now)?.id ?? null
   }, [selectedEvents, now, isToday])
 
-  const liveTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  const liveTime = formatDisplayTime(now, timeZone)
 
   const syncLabel = !data.account
     ? null
@@ -339,12 +343,13 @@ function CalendarPage() {
             const isNextEvent = event.id === nextEventId
 
             return (
-              <EventCard
-                key={event.id}
-                event={event}
-                isInProgress={isInProgress}
-                isNext={isNextEvent}
-              />
+                <EventCard
+                  key={event.id}
+                  event={event}
+                  isInProgress={isInProgress}
+                  isNext={isNextEvent}
+                  timeZone={timeZone}
+                />
             )
           })
         )}

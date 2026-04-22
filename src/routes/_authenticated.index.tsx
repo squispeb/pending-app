@@ -3,6 +3,7 @@ import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@ta
 import { createFileRoute } from '@tanstack/react-router'
 import { Bell, CalendarDays, CheckSquare, Mic, Repeat, Settings2 } from 'lucide-react'
 import type { Habit, Task } from '../db/schema'
+import { formatDisplayDate, formatDisplayTime, useClientTimeZone } from '../lib/date-time'
 import { getTaskTimingLabel, isTaskCompleted } from '../lib/tasks'
 import { getHabitCadenceLabel } from '../lib/habits'
 import type { ReminderItem } from '../lib/reminders'
@@ -18,16 +19,13 @@ import {
 } from '../server/reminders'
 import { useCaptureContext } from '../contexts/CaptureContext'
 
-const todayHeadingFormatter = new Intl.DateTimeFormat('en-US', {
-  weekday: 'long',
-  month: 'long',
-  day: 'numeric',
-  timeZone: 'UTC',
-})
+function formatTodayHeading(date: Date, timeZone: string) {
+  return formatDisplayDate(date, timeZone)
+}
 
-function formatTodayHeading(dateStr: string) {
+function parseDateOnlyValue(dateStr: string) {
   const [year, month, day] = dateStr.split('-').map(Number)
-  return todayHeadingFormatter.format(new Date(Date.UTC(year, month - 1, day, 12)))
+  return new Date(year, month - 1, day, 12)
 }
 
 function formatMeetingTimeRange(start: Date, end: Date, allDay: boolean, timeZone: string) {
@@ -35,13 +33,7 @@ function formatMeetingTimeRange(start: Date, end: Date, allDay: boolean, timeZon
     return 'All day'
   }
 
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZone,
-  })
-
-  return `${formatter.format(start)} – ${formatter.format(end)}`
+  return `${formatDisplayTime(start, timeZone)} – ${formatDisplayTime(end, timeZone)}`
 }
 
 const dashboardQueryOptions = () =>
@@ -61,6 +53,7 @@ function DashboardPage() {
   const queryClient = useQueryClient()
   const { data } = useSuspenseQuery(dashboardQueryOptions())
   const { openCapture, openCaptureWithText } = useCaptureContext()
+  const timeZone = useClientTimeZone()
 
   const todayStr = data.today
   const calendarViewData = data.calendarView
@@ -294,7 +287,7 @@ function DashboardPage() {
         <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.24),transparent_66%)]" />
         <div className="pointer-events-none absolute -bottom-20 -right-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(16,185,129,0.18),transparent_66%)]" />
         <h1 className="display-title mb-6 text-3xl font-bold tracking-tight text-[var(--ink-strong)] sm:text-4xl">
-          {formatTodayHeading(data.today)}
+          {formatTodayHeading(parseDateOnlyValue(data.today), timeZone)}
         </h1>
         <div className="grid grid-cols-2 gap-y-4 sm:flex sm:flex-wrap sm:items-center">
           {(
@@ -485,7 +478,7 @@ function DashboardPage() {
           </div>
           <div className="space-y-2">
             {todayMeetings.map((event) => (
-              <MeetingRow key={event.id} event={event} now={meetingNow} timeZone={data.timezone} />
+              <MeetingRow key={event.id} event={event} now={meetingNow} timeZone={timeZone} />
             ))}
           </div>
         </section>

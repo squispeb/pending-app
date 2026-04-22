@@ -4,7 +4,7 @@ import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@ta
 import { Link, createFileRoute, notFound } from '@tanstack/react-router'
 import { IdeaThreadHistory } from '../components/idea-thread-history'
 import { useCaptureContext } from '../contexts/CaptureContext'
-import { formatDisplayDateTime } from '../lib/date-time'
+import { formatDisplayDateTime, useClientTimeZone } from '../lib/date-time'
 import { isTaskCompleted } from '../lib/tasks'
 import { applyIdeaThreadStreamResponse, shouldEnableIdeaThreadFallbackPolling } from '../lib/idea-thread-streaming'
 import {
@@ -131,6 +131,7 @@ export const Route = createFileRoute('/_authenticated/ideas/$ideaId')({
 export function IdeaDetailPage() {
   const { ideaId } = Route.useParams()
   const { view } = Route.useSearch()
+  const timeZone = useClientTimeZone()
   const queryClient = useQueryClient()
   const { data: idea } = useSuspenseQuery(ideaDetailQueryOptions(ideaId))
   const { data: thread } = useSuspenseQuery(ideaThreadQueryOptions(ideaId))
@@ -972,11 +973,11 @@ export function IdeaDetailPage() {
           </div>
             <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
               <dt className="font-medium text-[var(--ink-strong)]">Created</dt>
-              <dd className="mt-1">{formatDisplayDateTime(idea.createdAt)}</dd>
+              <dd className="mt-1">{formatDisplayDateTime(idea.createdAt, timeZone)}</dd>
             </div>
             <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
               <dt className="font-medium text-[var(--ink-strong)]">Updated</dt>
-              <dd className="mt-1">{formatDisplayDateTime(idea.updatedAt)}</dd>
+              <dd className="mt-1">{formatDisplayDateTime(idea.updatedAt, timeZone)}</dd>
             </div>
         </dl>
       </div>

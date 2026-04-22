@@ -10,7 +10,7 @@ import {
   type ThreadStructuredAction,
   type ThreadTurnPresentation,
 } from '../lib/idea-thread-presentation'
-import { formatDisplayDateTime } from '../lib/date-time'
+import { formatDisplayDateTime, useClientTimeZone } from '../lib/date-time'
 
 type IdeaThreadVisibleEvent = {
   eventId: string
@@ -627,6 +627,7 @@ export function IdeaThreadHistory({
   /** Hide the internal thread shell header when a parent view already owns that context */
   showHeader?: boolean
 }) {
+  const timeZone = useClientTimeZone()
   const threadState = deriveThreadState({
     status: threadStatus,
     visibleEvents,
@@ -759,7 +760,7 @@ export function IdeaThreadHistory({
                       {event.summary}
                     </p>
                     <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--ink-faint)]">
-                      <time dateTime={event.createdAt}>{formatDisplayDateTime(event.createdAt)}</time>
+                      <time dateTime={event.createdAt}>{formatDisplayDateTime(event.createdAt, timeZone)}</time>
                       <Link to="/tasks" className="font-semibold text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-300">
                         View in Tasks →
                       </Link>
@@ -788,7 +789,7 @@ export function IdeaThreadHistory({
                       {event.type === 'step_status_changed' && event.stepOrder ? (
                         <span>Step {event.stepOrder} {event.status === 'reopened' ? 'reopened' : 'completed'}</span>
                       ) : null}
-                      <time dateTime={event.createdAt}>{formatDisplayDateTime(event.createdAt)}</time>
+                      <time dateTime={event.createdAt}>{formatDisplayDateTime(event.createdAt, timeZone)}</time>
                     </div>
                   </div>
                 ) : isSystemEvent ? (
@@ -808,7 +809,7 @@ export function IdeaThreadHistory({
                       {event.summary}
                     </p>
                     <div className={`mt-1.5 text-[11px] ${isUserTurn ? 'text-white/70' : 'text-[var(--ink-faint)]'}`}>
-                      <time dateTime={event.createdAt}>{formatDisplayDateTime(event.createdAt)}</time>
+                      <time dateTime={event.createdAt}>{formatDisplayDateTime(event.createdAt, timeZone)}</time>
                     </div>
                   </div>
                 )}
