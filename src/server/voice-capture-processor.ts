@@ -1,4 +1,3 @@
-import { db } from '../db/client'
 import {
   buildVoiceClarificationMessage,
   buildVoiceClarificationQuestions,
@@ -10,7 +9,7 @@ import {
 } from '../lib/capture'
 import { createCaptureService } from './capture-service'
 import { createTranscriptionBroker } from './transcription'
-import { buildVoiceActionClarification, classifyVoiceIntent } from './voice-intent-router'
+import { buildVoiceActionClarification, createVoiceIntentRouter, type VoiceIntentClassifier } from './voice-intent-router'
 
 const transcriptionBroker = createTranscriptionBroker()
 
@@ -39,8 +38,13 @@ export function createVoiceCaptureProcessor(
   dependencies: {
     transcriptionBroker: Pick<ReturnType<typeof createTranscriptionBroker>, 'transcribeAudioUpload'>
     captureService: VoiceCaptureService
+    voiceIntentClassifier?: VoiceIntentClassifier | null
   },
 ) {
+  const voiceIntentRouter = createVoiceIntentRouter({
+    classifier: dependencies.voiceIntentClassifier,
+  })
+
   return {
     async processVoiceCapture(data: ProcessVoiceCaptureInput): Promise<ProcessVoiceCaptureResponse> {
       const transcription = await dependencies.transcriptionBroker.transcribeAudioUpload({
@@ -53,7 +57,7 @@ export function createVoiceCaptureProcessor(
         return transcription
       }
 
-      const voiceIntent = classifyVoiceIntent(transcription.transcript)
+      const voiceIntent = await voiceIntentRouter.classifyVoiceIntent(transcription.transcript)
 
       if (voiceIntent.family !== 'creation') {
         const clarification = buildVoiceActionClarification(voiceIntent)

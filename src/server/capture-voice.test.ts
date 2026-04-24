@@ -9,10 +9,19 @@ const sampleUpload = {
   timezone: 'America/Lima',
 }
 
+function createTestVoiceCaptureProcessor(
+  dependencies: Parameters<typeof createVoiceCaptureProcessor>[0],
+) {
+  return createVoiceCaptureProcessor({
+    ...dependencies,
+    voiceIntentClassifier: null,
+  })
+}
+
 describe('voice capture processor', () => {
   it('auto-saves a high-confidence voice task result', async () => {
     const confirmCapturedTask = vi.fn(async () => ({ ok: true as const, id: 'task-1' }))
-    const processor = createVoiceCaptureProcessor({
+     const processor = createTestVoiceCaptureProcessor({
       transcriptionBroker: {
         async transcribeAudioUpload() {
           return {
@@ -73,7 +82,7 @@ describe('voice capture processor', () => {
 
   it('auto-saves a high-confidence voice task with a broader relative due date', async () => {
     const confirmCapturedTask = vi.fn(async () => ({ ok: true as const, id: 'task-2' }))
-    const processor = createVoiceCaptureProcessor({
+     const processor = createTestVoiceCaptureProcessor({
       transcriptionBroker: {
         async transcribeAudioUpload() {
           return {
@@ -132,7 +141,7 @@ describe('voice capture processor', () => {
   })
 
   it('returns a review draft when confidence is not high enough', async () => {
-    const processor = createVoiceCaptureProcessor({
+     const processor = createTestVoiceCaptureProcessor({
       transcriptionBroker: {
         async transcribeAudioUpload() {
           return {
@@ -204,7 +213,7 @@ describe('voice capture processor', () => {
   })
 
   it('returns a clarification outcome for very weak voice captures', async () => {
-    const processor = createVoiceCaptureProcessor({
+     const processor = createTestVoiceCaptureProcessor({
       transcriptionBroker: {
         async transcribeAudioUpload() {
           return {
@@ -279,7 +288,7 @@ describe('voice capture processor', () => {
 
   it('requires clarification instead of auto-save when a new task has no due date', async () => {
     const confirmCapturedTask = vi.fn(async () => ({ ok: true as const, id: 'task-1' }))
-    const processor = createVoiceCaptureProcessor({
+     const processor = createTestVoiceCaptureProcessor({
       transcriptionBroker: {
         async transcribeAudioUpload() {
           return {
@@ -355,7 +364,7 @@ describe('voice capture processor', () => {
     const interpretTypedTaskInput = vi.fn(async () => {
       throw new Error('Should not be called')
     })
-    const processor = createVoiceCaptureProcessor({
+     const processor = createTestVoiceCaptureProcessor({
       transcriptionBroker: {
         async transcribeAudioUpload() {
           return {
@@ -394,7 +403,7 @@ describe('voice capture processor', () => {
     const interpretTypedTaskInput = vi.fn(async () => {
       throw new Error('Should not be called')
     })
-    const processor = createVoiceCaptureProcessor({
+     const processor = createTestVoiceCaptureProcessor({
       transcriptionBroker: {
         async transcribeAudioUpload() {
           return {
@@ -433,7 +442,7 @@ describe('voice capture processor', () => {
     const interpretTypedTaskInput = vi.fn(async () => {
       throw new Error('Should not be called')
     })
-    const processor = createVoiceCaptureProcessor({
+     const processor = createTestVoiceCaptureProcessor({
       transcriptionBroker: {
         async transcribeAudioUpload() {
           return {
@@ -469,7 +478,7 @@ describe('voice capture processor', () => {
   })
 
   it('asks whether the user means a task or a habit when intent is ambiguous', async () => {
-    const processor = createVoiceCaptureProcessor({
+     const processor = createTestVoiceCaptureProcessor({
       transcriptionBroker: {
         async transcribeAudioUpload() {
           return {
@@ -543,7 +552,7 @@ describe('voice capture processor', () => {
   })
 
   it('routes high-confidence idea captures into idea confirmation instead of task auto-save', async () => {
-    const processor = createVoiceCaptureProcessor({
+     const processor = createTestVoiceCaptureProcessor({
       transcriptionBroker: {
         async transcribeAudioUpload() {
           return {
@@ -615,7 +624,7 @@ describe('voice capture processor', () => {
   })
 
   it('returns transcription failures directly', async () => {
-    const processor = createVoiceCaptureProcessor({
+     const processor = createTestVoiceCaptureProcessor({
       transcriptionBroker: {
         async transcribeAudioUpload() {
           return {
@@ -648,7 +657,7 @@ describe('voice capture processor', () => {
   })
 
   it('returns interpretation failures after successful transcription', async () => {
-    const processor = createVoiceCaptureProcessor({
+     const processor = createTestVoiceCaptureProcessor({
       transcriptionBroker: {
         async transcribeAudioUpload() {
           return {
