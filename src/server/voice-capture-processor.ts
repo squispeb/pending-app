@@ -10,6 +10,7 @@ import {
 } from '../lib/capture'
 import { createCaptureService } from './capture-service'
 import { createTranscriptionBroker } from './transcription'
+import { buildVoiceActionClarification, classifyVoiceIntent } from './voice-intent-router'
 
 const transcriptionBroker = createTranscriptionBroker()
 
@@ -50,6 +51,22 @@ export function createVoiceCaptureProcessor(
 
       if (!transcription.ok) {
         return transcription
+      }
+
+      const voiceIntent = classifyVoiceIntent(transcription.transcript)
+
+      if (voiceIntent.family !== 'creation') {
+        const clarification = buildVoiceActionClarification(voiceIntent)
+
+        return {
+          ok: true,
+          outcome: 'clarify',
+          transcript: transcription.transcript,
+          language: transcription.language,
+          message: clarification.message,
+          questions: clarification.questions,
+          draft: null,
+        }
       }
 
       const languageHint = transcription.language === 'unknown' ? undefined : transcription.language

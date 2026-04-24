@@ -12,6 +12,43 @@ const captureTimeSchema = z.string().regex(/^\d{2}:\d{2}$/)
 
 export const captureLanguageHintSchema = z.enum(['es', 'en', 'mixed'])
 export const captureRouteIntentSchema = z.enum(['tasks', 'habits', 'ideas', 'auto'])
+export const voiceIntentFamilySchema = z.enum([
+  'creation',
+  'task_action',
+  'calendar_action',
+  'unsupported_action',
+])
+export const voiceTaskActionKindSchema = z.enum([
+  'task_status',
+  'complete_task',
+  'reopen_task',
+  'edit_task',
+  'unsupported_task_action',
+])
+export const voiceCalendarActionKindSchema = z.enum([
+  'create_calendar_event',
+  'edit_calendar_event',
+  'cancel_calendar_event',
+  'unsupported_calendar_action',
+])
+export const voiceIntentClassificationSchema = z.discriminatedUnion('family', [
+  z.object({
+    family: z.literal('creation'),
+    kind: z.literal('creation'),
+  }),
+  z.object({
+    family: z.literal('task_action'),
+    kind: voiceTaskActionKindSchema,
+  }),
+  z.object({
+    family: z.literal('calendar_action'),
+    kind: voiceCalendarActionKindSchema,
+  }),
+  z.object({
+    family: z.literal('unsupported_action'),
+    kind: z.literal('unsupported_action'),
+  }),
+])
 
 export const interpretCaptureInputSchema = z.object({
   rawInput: z.string().max(4000),
@@ -212,6 +249,10 @@ export const processVoiceCaptureResponseSchema = z.union([
 
 export type CaptureLanguageHint = z.infer<typeof captureLanguageHintSchema>
 export type CaptureRouteIntent = z.infer<typeof captureRouteIntentSchema>
+export type VoiceIntentFamily = z.infer<typeof voiceIntentFamilySchema>
+export type VoiceTaskActionKind = z.infer<typeof voiceTaskActionKindSchema>
+export type VoiceCalendarActionKind = z.infer<typeof voiceCalendarActionKindSchema>
+export type VoiceIntentClassification = z.infer<typeof voiceIntentClassificationSchema>
 export type CandidateType = z.infer<typeof candidateTypeSchema>
 export type InterpretCaptureInput = z.infer<typeof interpretCaptureInputSchema>
 export type TypedTaskDraft = z.infer<typeof typedTaskDraftSchema>

@@ -217,6 +217,123 @@ describe('voice capture processor', () => {
     })
   })
 
+  it('routes recognized task actions into clarification instead of task creation', async () => {
+    const interpretTypedTaskInput = vi.fn(async () => {
+      throw new Error('Should not be called')
+    })
+    const processor = createVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Mark this task as done',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        interpretTypedTaskInput,
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture(sampleUpload)
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Mark this task as done',
+      language: 'en',
+      message: 'I understood that as a task action, but voice task actions are not available yet.',
+      questions: ['Do you want to create a new task instead?'],
+      draft: null,
+    })
+    expect(interpretTypedTaskInput).not.toHaveBeenCalled()
+  })
+
+  it('routes recognized calendar actions into clarification instead of task creation', async () => {
+    const interpretTypedTaskInput = vi.fn(async () => {
+      throw new Error('Should not be called')
+    })
+    const processor = createVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Schedule a meeting on my calendar for tomorrow',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        interpretTypedTaskInput,
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture(sampleUpload)
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Schedule a meeting on my calendar for tomorrow',
+      language: 'en',
+      message: 'I understood that as a calendar action, but voice calendar actions are not available yet.',
+      questions: ['Do you want to capture this as a new task instead?'],
+      draft: null,
+    })
+    expect(interpretTypedTaskInput).not.toHaveBeenCalled()
+  })
+
+  it('routes unsupported planner commands into clarification instead of task creation', async () => {
+    const interpretTypedTaskInput = vi.fn(async () => {
+      throw new Error('Should not be called')
+    })
+    const processor = createVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Edit this habit',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        interpretTypedTaskInput,
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture(sampleUpload)
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Edit this habit',
+      language: 'en',
+      message: 'I understood that as a planner command, but that voice action is not supported yet.',
+      questions: ['Do you want to capture this as a new task instead?'],
+      draft: null,
+    })
+    expect(interpretTypedTaskInput).not.toHaveBeenCalled()
+  })
+
   it('asks whether the user means a task or a habit when intent is ambiguous', async () => {
     const processor = createVoiceCaptureProcessor({
       transcriptionBroker: {
