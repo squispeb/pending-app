@@ -34,11 +34,29 @@ type VoiceCaptureService = {
     : never
 }
 
+type VoiceTaskResolver = {
+  resolveTaskTarget: (input: {
+    contextTaskId?: string | null
+    contextIdeaId?: string | null
+  }) => Promise<
+    | {
+        kind: 'resolved'
+        task: { id: string; title: string; source: 'context_task' | 'context_idea' }
+      }
+    | {
+        kind: 'ambiguous'
+        candidates: Array<{ id: string; title: string; source: 'context_task' | 'context_idea' }>
+      }
+    | { kind: 'unresolved' }
+  >
+}
+
 export function createVoiceCaptureProcessor(
   dependencies: {
     transcriptionBroker: Pick<ReturnType<typeof createTranscriptionBroker>, 'transcribeAudioUpload'>
     captureService: VoiceCaptureService
     voiceIntentClassifier?: VoiceIntentClassifier | null
+    taskResolver?: VoiceTaskResolver
   },
 ) {
   const voiceIntentRouter = createVoiceIntentRouter({
@@ -58,6 +76,37 @@ export function createVoiceCaptureProcessor(
       }
 
       const voiceIntent = await voiceIntentRouter.classifyVoiceIntent(transcription.transcript)
+
+      if (voiceIntent.family === 'task_action' && dependencies.taskResolver) {
+        const resolution = await dependencies.taskResolver.resolveTaskTarget({
+          contextTaskId: data.contextTaskId,
+          contextIdeaId: data.contextIdeaId,
+        })
+
+        if (resolution.kind === 'resolved') {
+          return {
+            ok: true,
+            outcome: 'clarify',
+            transcript: transcription.transcript,
+            language: transcription.language,
+            message: `I understood that as a task action for \"${resolution.task.title}\", but voice task actions are not available yet.`,
+            questions: ['Do you want to use this task as the target once voice task actions are enabled?'],
+            draft: null,
+          }
+        }
+
+        if (resolution.kind === 'ambiguous') {
+          return {
+            ok: true,
+            outcome: 'clarify',
+            transcript: transcription.transcript,
+            language: transcription.language,
+            message: 'I need to confirm which task you mean before I can do that.',
+            questions: resolution.candidates.slice(0, 3).map((candidate) => `Did you mean \"${candidate.title}\"?`),
+            draft: null,
+          }
+        }
+      }
 
       if (voiceIntent.family !== 'creation') {
         const clarification = buildVoiceActionClarification(voiceIntent)

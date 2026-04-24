@@ -194,6 +194,8 @@ export const processVoiceCaptureInputSchema = transcribeAudioUploadInputSchema.e
   currentDate: captureDateSchema,
   timezone: z.string().trim().min(1).max(120),
   routeIntent: captureRouteIntentSchema.optional(),
+  contextTaskId: z.string().trim().min(1).max(120).optional(),
+  contextIdeaId: z.string().trim().min(1).max(120).optional(),
 })
 
 export const processVoiceCaptureAutoSavedSchema = z.object({
@@ -799,6 +801,8 @@ export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCa
   const currentDate = input.get('currentDate')
   const timezone = input.get('timezone')
   const routeIntent = input.get('routeIntent')
+  const contextTaskId = input.get('contextTaskId')
+  const contextIdeaId = input.get('contextIdeaId')
 
   return processVoiceCaptureInputSchema.parse({
     audio,
@@ -807,5 +811,7 @@ export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCa
     currentDate: typeof currentDate === 'string' ? currentDate : undefined,
     timezone: typeof timezone === 'string' ? timezone : undefined,
     routeIntent: typeof routeIntent === 'string' && routeIntent ? routeIntent : undefined,
+    contextTaskId: typeof contextTaskId === 'string' && contextTaskId ? contextTaskId : undefined,
+    contextIdeaId: typeof contextIdeaId === 'string' && contextIdeaId ? contextIdeaId : undefined,
   })
 }

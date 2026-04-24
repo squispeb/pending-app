@@ -6,6 +6,8 @@ import {
 } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { CaptureContext } from '../contexts/CaptureContext'
+import type { CaptureOpenOptions } from '../contexts/CaptureContext'
+import { resolveCaptureOpenTargets } from '../contexts/CaptureContext'
 import {
   habitFormSchema,
   toHabitFormValues,
@@ -117,6 +119,8 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   const [captureClarifyReply, setCaptureClarifyReply] = useState('')
   const [captureShowAdvanced, setCaptureShowAdvanced] = useState(false)
   const [captureThreadIdeaId, setCaptureThreadIdeaId] = useState<string | null>(null)
+  const [captureContextIdeaId, setCaptureContextIdeaId] = useState<string | null>(null)
+  const [captureContextTaskId, setCaptureContextTaskId] = useState<string | null>(null)
   const [isOpeningIdea, setIsOpeningIdea] = useState(false)
   const [threadReplySucceeded, setThreadReplySucceeded] = useState(false)
 
@@ -370,6 +374,12 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
       formData.set('currentDate', getTodayDateString())
       formData.set('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone)
       formData.set('routeIntent', routeIntent)
+      if (captureContextTaskId) {
+        formData.set('contextTaskId', captureContextTaskId)
+      }
+      if (captureContextIdeaId) {
+        formData.set('contextIdeaId', captureContextIdeaId)
+      }
       return processVoiceCapture({ data: formData })
     },
     onSuccess: (result) => {
@@ -500,6 +510,8 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureNotes([])
     setCaptureShowAdvanced(false)
     setCaptureThreadIdeaId(null)
+    setCaptureContextIdeaId(null)
+    setCaptureContextTaskId(null)
     setIsOpeningIdea(false)
     setTranscribeError(null)
     setThreadReplySucceeded(false)
@@ -514,18 +526,24 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     window.addEventListener('keydown', onKeyDown)
   }
 
-  function openCapture() {
-    setCaptureThreadIdeaId(currentIdeaThreadTarget)
+  function openCapture(options?: CaptureOpenOptions) {
+    const { captureThreadIdeaId: nextThreadIdeaId, captureContextIdeaId: nextContextIdeaId } = resolveCaptureOpenTargets(currentIdeaThreadTarget, options)
+    setCaptureThreadIdeaId(nextThreadIdeaId)
+    setCaptureContextIdeaId(nextContextIdeaId)
+    setCaptureContextTaskId(options?.contextTaskId ?? null)
     const resolved: CandidateType = ctx.defaultType === 'auto' ? 'task' : ctx.defaultType
     setCaptureType(resolved)
     setCaptureMode('recording')
     registerEscapeHandler()
     // Auto-start recording when the sheet opens — no extra tap required
-    void startRecording(currentIdeaThreadTarget)
+    void startRecording(nextThreadIdeaId)
   }
 
-  function openCaptureWithText(text: string) {
-    setCaptureThreadIdeaId(currentIdeaThreadTarget)
+  function openCaptureWithText(text: string, options?: CaptureOpenOptions) {
+    const { captureThreadIdeaId: nextThreadIdeaId, captureContextIdeaId: nextContextIdeaId } = resolveCaptureOpenTargets(currentIdeaThreadTarget, options)
+    setCaptureThreadIdeaId(nextThreadIdeaId)
+    setCaptureContextIdeaId(nextContextIdeaId)
+    setCaptureContextTaskId(options?.contextTaskId ?? null)
     const resolved: CandidateType = ctx.defaultType === 'auto' ? 'task' : ctx.defaultType
     setCaptureType(resolved)
     setCaptureRawInput(text)

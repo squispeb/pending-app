@@ -1376,7 +1376,15 @@ export function IdeaDetailPage() {
               <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--brand)] px-1.5 py-0.5 text-[10px] font-bold text-white">
                 {reviewItemCount}
               </span>
-            ) : null}
+              ) : null}
+            </button>
+          <button
+            type="button"
+            onClick={() => openCapture({ bypassThreadReply: true })}
+            aria-label="Open idea voice action"
+            className="inline-flex size-9 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--surface)] text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+          >
+            <Mic size={14} />
           </button>
           <button
             type="button"

@@ -399,6 +399,169 @@ describe('voice capture processor', () => {
     expect(interpretTypedTaskInput).not.toHaveBeenCalled()
   })
 
+  it('falls back to generic task-action clarification when resolver is unresolved', async () => {
+    const interpretTypedTaskInput = vi.fn(async () => {
+      throw new Error('Should not be called')
+    })
+    const processor = createTestVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Mark this task as done',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        interpretTypedTaskInput,
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'unresolved' as const,
+          }
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture({
+      ...sampleUpload,
+      contextIdeaId: 'idea-123',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Mark this task as done',
+      language: 'en',
+      message: 'I understood that as a task action, but voice task actions are not available yet.',
+      questions: ['Do you want to create a new task instead?'],
+      draft: null,
+    })
+    expect(interpretTypedTaskInput).not.toHaveBeenCalled()
+  })
+
+  it('uses current task context first for task-action clarification', async () => {
+    const interpretTypedTaskInput = vi.fn(async () => {
+      throw new Error('Should not be called')
+    })
+    const processor = createTestVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Mark this task as done',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        interpretTypedTaskInput,
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget(input) {
+          expect(input.contextTaskId).toBe('task-123')
+          return {
+            kind: 'resolved' as const,
+            task: {
+              id: 'task-123',
+              title: 'Call the bank',
+              source: 'context_task' as const,
+            },
+          }
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture({
+      ...sampleUpload,
+      contextTaskId: 'task-123',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Mark this task as done',
+      language: 'en',
+      message: 'I understood that as a task action for "Call the bank", but voice task actions are not available yet.',
+      questions: ['Do you want to use this task as the target once voice task actions are enabled?'],
+      draft: null,
+    })
+    expect(interpretTypedTaskInput).not.toHaveBeenCalled()
+  })
+
+  it('asks for disambiguation when idea context maps to multiple tasks', async () => {
+    const processor = createTestVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Mark this task as done',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'ambiguous' as const,
+            candidates: [
+              {
+                id: 'task-1',
+                title: 'Draft launch email',
+                source: 'context_idea' as const,
+              },
+              {
+                id: 'task-2',
+                title: 'Review launch checklist',
+                source: 'context_idea' as const,
+              },
+            ],
+          }
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture({
+      ...sampleUpload,
+      contextIdeaId: 'idea-123',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Mark this task as done',
+      language: 'en',
+      message: 'I need to confirm which task you mean before I can do that.',
+      questions: ['Did you mean "Draft launch email"?', 'Did you mean "Review launch checklist"?'],
+      draft: null,
+    })
+  })
+
   it('routes recognized calendar actions into clarification instead of task creation', async () => {
     const interpretTypedTaskInput = vi.fn(async () => {
       throw new Error('Should not be called')

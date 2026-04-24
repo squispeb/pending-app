@@ -13,11 +13,13 @@ import { createAssistantThreadService } from './assistant-thread-service'
 import { createIdeaAndBootstrapThread } from './ideas'
 import { createIdeasService } from './ideas-service'
 import { createTranscriptionBroker } from './transcription'
+import { createVoiceTaskResolver } from './voice-task-resolver'
 
 const captureService = createCaptureService(db)
 const assistantThreadService = createAssistantThreadService(db)
 const ideasService = createIdeasService(db)
 const transcriptionBroker = createTranscriptionBroker()
+const voiceTaskResolver = createVoiceTaskResolver(db)
 
 export const interpretCaptureInput = createServerFn({ method: 'POST' })
   .inputValidator((input) => interpretCaptureInputSchema.parse(input))
@@ -37,6 +39,13 @@ export const processVoiceCapture = createServerFn({ method: 'POST' })
         interpretTypedTaskInput: (input) => captureService.interpretTypedTaskInput(user.id, input),
         confirmCapturedTask: (input) => captureService.confirmCapturedTask(user.id, input),
         confirmCapturedHabit: (input) => captureService.confirmCapturedHabit(user.id, input),
+      },
+      taskResolver: {
+        resolveTaskTarget: (input) => voiceTaskResolver.resolveTaskTarget({
+          userId: user.id,
+          contextTaskId: input.contextTaskId,
+          contextIdeaId: input.contextIdeaId,
+        }),
       },
     })
     return voiceCaptureProcessor.processVoiceCapture(data)

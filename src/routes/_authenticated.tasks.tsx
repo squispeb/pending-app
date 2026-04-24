@@ -35,6 +35,7 @@ import {
   reopenTask,
   updateTask,
 } from '../server/tasks'
+import { useCaptureContext } from '../contexts/CaptureContext'
 
 const tasksQueryOptions = () =>
   queryOptions({
@@ -78,6 +79,7 @@ const STEP_LINKED_TASK_MARKER = 'Accepted breakdown step #'
 function TasksPage() {
   const queryClient = useQueryClient()
   const { data: tasks } = useSuspenseQuery(tasksQueryOptions())
+  const { openCapture } = useCaptureContext()
   const [filter, setFilter] = useState<TaskFilter>('active')
   const [sort, setSort] = useState<TaskSort>('due-asc')
   const [editingTask, setEditingTask] = useState<Task | null>(null)
@@ -487,6 +489,7 @@ function TasksPage() {
                       key={task.id}
                       task={task}
                       onEdit={() => beginEdit(task)}
+                      onVoiceAction={() => openCapture({ contextTaskId: task.id })}
                       onToggleComplete={() => handleToggleComplete(task)}
                       onArchive={() => archiveTaskMutation.mutate(task.id)}
                       isMutating={activeTaskId === task.id}
@@ -864,12 +867,14 @@ function TasksPage() {
 function TaskCard({
   task,
   onEdit,
+  onVoiceAction,
   onToggleComplete,
   onArchive,
   isMutating,
 }: {
   task: TaskWithCalendarLinks
   onEdit: () => void
+  onVoiceAction: () => void
   onToggleComplete: () => void
   onArchive: () => void
   isMutating: boolean
@@ -950,6 +955,13 @@ function TaskCard({
         </div>
 
         <div className="flex shrink-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={onVoiceAction}
+            className="cursor-pointer text-xs font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+          >
+            Voice action
+          </button>
           <button
             type="button"
             onClick={onEdit}

@@ -386,6 +386,7 @@ function DashboardPage() {
                     <DashboardTaskRow
                       key={task.id}
                       task={task}
+                      onVoiceAction={() => openCapture({ contextTaskId: task.id })}
                       onToggle={() => toggleTaskMutation.mutate(task)}
                       isMutating={activeTaskId === task.id}
                     />
@@ -404,6 +405,7 @@ function DashboardPage() {
                     <DashboardTaskRow
                       key={task.id}
                       task={task}
+                      onVoiceAction={() => openCapture({ contextTaskId: task.id })}
                       onToggle={() => toggleTaskMutation.mutate(task)}
                       isMutating={activeTaskId === task.id}
                     />
@@ -590,10 +592,12 @@ function ReminderPanel({
 
 function DashboardTaskRow({
   task,
+  onVoiceAction,
   onToggle,
   isMutating,
 }: {
   task: Task
+  onVoiceAction: () => void
   onToggle: () => void
   isMutating: boolean
 }) {
@@ -623,14 +627,23 @@ function DashboardTaskRow({
           {getTaskTimingLabel(task)}
         </p>
       </div>
-      <button
-        type="button"
-        onClick={onToggle}
-        disabled={isMutating}
-        className="shrink-0 cursor-pointer text-xs font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {completed ? 'Reopen' : 'Done'}
-      </button>
+      <div className="flex shrink-0 items-center gap-3">
+        <button
+          type="button"
+          onClick={onVoiceAction}
+          className="cursor-pointer text-xs font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+        >
+          Voice action
+        </button>
+        <button
+          type="button"
+          onClick={onToggle}
+          disabled={isMutating}
+          className="shrink-0 cursor-pointer text-xs font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {completed ? 'Reopen' : 'Done'}
+        </button>
+      </div>
     </article>
   )
 }
