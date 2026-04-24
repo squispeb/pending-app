@@ -71,6 +71,66 @@ describe('voice capture processor', () => {
     expect(confirmCapturedTask).toHaveBeenCalledOnce()
   })
 
+  it('auto-saves a high-confidence voice task with a broader relative due date', async () => {
+    const confirmCapturedTask = vi.fn(async () => ({ ok: true as const, id: 'task-2' }))
+    const processor = createVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Planificar presupuesto next week.',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput(input) {
+          expect(input.rawInput).toBe('Planificar presupuesto next week.')
+
+          return {
+            ok: true as const,
+            draft: {
+              rawInput: input.rawInput,
+              normalizedInput: input.rawInput,
+              candidateType: 'task' as const,
+              title: 'Planificar presupuesto',
+              notes: null,
+              dueDate: '2026-04-13',
+              dueTime: null,
+              priority: null,
+              estimatedMinutes: null,
+              cadenceType: null,
+              cadenceDays: [],
+              targetCount: null,
+              matchedCalendarContext: null,
+              preferredStartTime: null,
+              preferredEndTime: null,
+              interpretationNotes: [],
+            },
+          }
+        },
+        confirmCapturedTask,
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture(sampleUpload)
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'auto_saved',
+      candidateType: 'task',
+      createdId: 'task-2',
+      title: 'Planificar presupuesto',
+      transcript: 'Planificar presupuesto next week.',
+      language: 'en',
+      matchedCalendarContext: null,
+    })
+    expect(confirmCapturedTask).toHaveBeenCalledOnce()
+  })
+
   it('returns a review draft when confidence is not high enough', async () => {
     const processor = createVoiceCaptureProcessor({
       transcriptionBroker: {
@@ -215,6 +275,80 @@ describe('voice capture processor', () => {
         interpretationNotes: ['Could not infer a short task title.'],
       },
     })
+  })
+
+  it('requires clarification instead of auto-save when a new task has no due date', async () => {
+    const confirmCapturedTask = vi.fn(async () => ({ ok: true as const, id: 'task-1' }))
+    const processor = createVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Comprar focos para la sala.',
+            language: 'es' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput(input) {
+          return {
+            ok: true as const,
+            draft: {
+              rawInput: input.rawInput,
+              normalizedInput: input.rawInput,
+              candidateType: 'task' as const,
+              title: 'Comprar focos para la sala',
+              notes: null,
+              dueDate: null,
+              dueTime: null,
+              priority: null,
+              estimatedMinutes: null,
+              cadenceType: null,
+              cadenceDays: [],
+              targetCount: null,
+              matchedCalendarContext: null,
+              preferredStartTime: null,
+              preferredEndTime: null,
+              interpretationNotes: [],
+            },
+          }
+        },
+        confirmCapturedTask,
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture(sampleUpload)
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Comprar focos para la sala.',
+      language: 'es',
+      message: 'I need a little more detail before I can save this.',
+      questions: ['When do you want to do it?'],
+      draft: {
+        rawInput: 'Comprar focos para la sala.',
+        normalizedInput: 'Comprar focos para la sala.',
+        candidateType: 'task',
+        title: 'Comprar focos para la sala',
+        notes: null,
+        dueDate: null,
+        dueTime: null,
+        priority: null,
+        estimatedMinutes: null,
+        cadenceType: null,
+        cadenceDays: [],
+        targetCount: null,
+        matchedCalendarContext: null,
+        preferredStartTime: null,
+        preferredEndTime: null,
+        interpretationNotes: [],
+      },
+    })
+    expect(confirmCapturedTask).not.toHaveBeenCalled()
   })
 
   it('routes recognized task actions into clarification instead of task creation', async () => {

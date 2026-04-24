@@ -29,6 +29,21 @@ describe('capture helpers', () => {
     ).toBe('2026-04-12')
   })
 
+  it('infers this friday, next week, and explicit numeric dates', () => {
+    expect(inferDueDateFromInput('Terminar informe este viernes', '2026-04-08', 'America/Lima')).toBe(
+      '2026-04-10',
+    )
+    expect(inferDueDateFromInput('Planificarlo next week', '2026-04-08', 'America/Lima')).toBe(
+      '2026-04-13',
+    )
+    expect(inferDueDateFromInput('Agendarlo para 2026-05-15', '2026-04-08', 'America/Lima')).toBe(
+      '2026-05-15',
+    )
+    expect(inferDueDateFromInput('Agendarlo para 5/15/2026', '2026-04-08', 'America/Lima')).toBe(
+      '2026-05-15',
+    )
+  })
+
   it('uses the provided timezone contract and rejects invalid timezones', () => {
     expect(() => inferDueDateFromInput('Comprar focos mañana', '2026-04-08', 'Invalid/Zone')).toThrow(
       'Invalid timezone: Invalid/Zone',
@@ -149,6 +164,32 @@ describe('capture helpers', () => {
 
     expect(evaluateVoiceCaptureConfidence(highConfidenceDraft, highConfidenceDraft.rawInput)).toBe('high')
     expect(evaluateVoiceCaptureConfidence(reviewDraft, reviewDraft.rawInput)).toBe('review')
+  })
+
+  it('requires clarification for task candidates without a due date', () => {
+    const taskWithoutDueDate = typedTaskDraftSchema.parse({
+      rawInput: 'Comprar focos para la sala.',
+      normalizedInput: 'Comprar focos para la sala.',
+      candidateType: 'task',
+      title: 'Comprar focos para la sala',
+      notes: null,
+      dueDate: null,
+      dueTime: null,
+      priority: null,
+      estimatedMinutes: null,
+      cadenceType: null,
+      cadenceDays: [],
+      targetCount: null,
+      matchedCalendarContext: null,
+      preferredStartTime: null,
+      preferredEndTime: null,
+      interpretationNotes: [],
+    })
+
+    expect(evaluateVoiceCaptureConfidence(taskWithoutDueDate, taskWithoutDueDate.rawInput)).toBe('clarify')
+    expect(buildVoiceClarificationQuestions(taskWithoutDueDate, taskWithoutDueDate.rawInput)).toContain(
+      'When do you want to do it?',
+    )
   })
 
   it('builds a clarification message for very weak voice captures', () => {

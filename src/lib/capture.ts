@@ -360,6 +360,44 @@ function getNextUtcWeekday(parts: LocalDateParts, targetDay: number) {
   return addUtcDays(parts, delta)
 }
 
+function getUtcWeekStart(parts: LocalDateParts) {
+  const currentDay = getUtcWeekday(parts)
+  const daysFromMonday = (currentDay + 6) % 7
+  return addUtcDays(parts, -daysFromMonday)
+}
+
+function normalizeExplicitDateYear(year: number) {
+  if (year >= 1000) {
+    return year
+  }
+
+  return 2000 + year
+}
+
+function isLeapYear(year: number) {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
+}
+
+function getDaysInMonth(year: number, month: number) {
+  const monthLengths = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  return monthLengths[month - 1] ?? 0
+}
+
+function tryBuildExplicitDate(year: number, month: number, day: number) {
+  const normalizedYear = normalizeExplicitDateYear(year)
+  const daysInMonth = getDaysInMonth(normalizedYear, month)
+
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth) {
+    return null
+  }
+
+  return formatDateString({
+    year: normalizedYear,
+    month,
+    day,
+  })
+}
+
 function cleanLeadingVerbPrefix(value: string) {
   return value
     .replace(/^(tengo que|debo|hay que|necesito|i need to|need to|have to|must)\s+/i, '')
@@ -435,9 +473,17 @@ export function inferCadenceFromInput(normalizedInput: string) {
 
 export function inferDueDateFromInput(normalizedInput: string, currentDate: string, timezone: string) {
   const baseDate = parseCurrentDateString(currentDate, timezone)
+  const normalizedForDates = normalizedInput
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
 
   if (/\b(mañana|tomorrow)\b/i.test(normalizedInput)) {
     return formatDateString(addUtcDays(baseDate, 1))
+  }
+
+  if (/\b(next week|la proxima semana|proxima semana)\b/i.test(normalizedForDates)) {
+    return formatDateString(addUtcDays(getUtcWeekStart(baseDate), 7))
   }
 
   if (/\b(domingo que viene|next sunday)\b/i.test(normalizedInput)) {
@@ -449,6 +495,20 @@ export function inferDueDateFromInput(normalizedInput: string, currentDate: stri
     const targetDay = 5
     const delta = currentDay <= targetDay ? targetDay - currentDay : targetDay - currentDay + 7
     return formatDateString(addUtcDays(baseDate, delta))
+  }
+
+  const isoDateMatch = normalizedForDates.match(/\b(\d{4})-(\d{2})-(\d{2})\b/)
+
+  if (isoDateMatch) {
+    const [, year, month, day] = isoDateMatch
+    return tryBuildExplicitDate(Number(year), Number(month), Number(day))
+  }
+
+  const slashDateMatch = normalizedForDates.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/)
+
+  if (slashDateMatch) {
+    const [, month, day, year = `${baseDate.year}`] = slashDateMatch
+    return tryBuildExplicitDate(Number(year), Number(month), Number(day))
   }
 
   return null
@@ -574,6 +634,10 @@ export function evaluateVoiceCaptureConfidence(draft: TypedTaskDraft, transcript
   const transcriptTokens = tokenizeForCaptureMatching(normalizedTranscript)
 
   if (!normalizedTranscript || normalizedTranscript.length < 4 || transcriptTokens.length === 0) {
+    return 'clarify'
+  }
+
+  if (draft.candidateType === 'task' && !draft.dueDate) {
     return 'clarify'
   }
 
