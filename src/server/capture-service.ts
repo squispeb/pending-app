@@ -178,18 +178,6 @@ export function createCaptureService(
         parsed.currentDate,
       )
 
-      if (calendarContext[0]) {
-        heuristicDraft.matchedCalendarContext = {
-          calendarEventId: calendarContext[0].calendarEventId,
-          summary: calendarContext[0].summary,
-          reason: calendarContext[0].reason,
-        }
-        heuristicDraft.interpretationNotes = [
-          ...heuristicDraft.interpretationNotes,
-          calendarContext[0].reason,
-        ]
-      }
-
       if (!heuristicDraft.normalizedInput) {
         return {
           ok: false,

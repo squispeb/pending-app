@@ -400,12 +400,37 @@ function tryBuildExplicitDate(year: number, month: number, day: number) {
 
 function cleanLeadingVerbPrefix(value: string) {
   return value
-    .replace(/^(tengo que|debo|hay que|necesito|i need to|need to|have to|must)\s+/i, '')
+    .replace(
+      /^(tengo que|debo|hay que|necesito|quiero|voy a|vamos a|i need to|need to|have to|must|should|ought to|going to|gotta|gonna)\s+/i,
+      '',
+    )
+    .trim()
+}
+
+function stripTitleDatePhrases(value: string) {
+  return value
+    .replace(/\b(para\s+)?(mañana|tomorrow)\b/gi, '')
+    .replace(/\b(para\s+)?(next week|la proxima semana|proxima semana)\b/gi, '')
+    .replace(/\b(para\s+)?(el\s+)?(domingo que viene|next sunday|este viernes|this friday)\b/gi, '')
+    .replace(/\b(para\s+)?\d{4}-\d{2}-\d{2}\b/g, '')
+    .replace(/\b(para\s+)?\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[,;:\-\s]+|[,;:\-\s]+$/g, '')
     .trim()
 }
 
 export function normalizeCaptureInput(rawInput: string) {
   return rawInput.replace(/\s+/g, ' ').trim()
+}
+
+export function normalizeCaptureNotes(rawInput: string) {
+  return rawInput
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 export function tokenizeForCaptureMatching(value: string) {
@@ -516,7 +541,7 @@ export function inferDueDateFromInput(normalizedInput: string, currentDate: stri
 
 export function inferTitleFromInput(normalizedInput: string) {
   const firstClause = normalizedInput.split(/[,.!?;]/, 1)[0]?.trim() ?? ''
-  const cleaned = cleanLeadingVerbPrefix(firstClause)
+  const cleaned = stripTitleDatePhrases(cleanLeadingVerbPrefix(firstClause))
 
   if (!cleaned) {
     return null
@@ -527,15 +552,54 @@ export function inferTitleFromInput(normalizedInput: string) {
   return normalizedTitle || null
 }
 
+function chooseDraftNotes(
+  heuristicNotes: string | null,
+  providerNotes: string | null | undefined,
+) {
+  if (providerNotes === undefined || providerNotes === null) {
+    return heuristicNotes
+  }
+
+  if (!heuristicNotes) {
+    return normalizeCaptureNotes(providerNotes)
+  }
+
+  const normalizedHeuristicNotes = normalizeCaptureNotes(heuristicNotes)
+  const normalizedProviderNotes = normalizeCaptureNotes(providerNotes)
+
+  if (!normalizedProviderNotes) {
+    return normalizedHeuristicNotes || null
+  }
+
+  if (normalizedHeuristicNotes === normalizedProviderNotes) {
+    return normalizedProviderNotes
+  }
+
+  const heuristicHasExplicitStructure = normalizedHeuristicNotes.includes('\n')
+  const providerHasExplicitStructure = normalizedProviderNotes.includes('\n')
+
+  if (heuristicHasExplicitStructure && !providerHasExplicitStructure) {
+    return normalizedHeuristicNotes
+  }
+
+  if (normalizedHeuristicNotes.length >= normalizedProviderNotes.length + 24) {
+    return normalizedHeuristicNotes
+  }
+
+  return normalizedProviderNotes
+}
+
 export function buildHeuristicTaskDraft(
   input: Pick<InterpretCaptureInput, 'rawInput' | 'currentDate' | 'timezone'>,
 ) {
   const normalizedInput = normalizeCaptureInput(input.rawInput)
+  const normalizedNotes = normalizeCaptureNotes(input.rawInput)
+  const titleInput = normalizeCaptureInput(input.rawInput.split(/\r?\n/, 1)[0] ?? input.rawInput)
   const interpretationNotes: Array<string> = []
   const priority = inferPriorityFromInput(normalizedInput)
   const dueDate = inferDueDateFromInput(normalizedInput, input.currentDate, input.timezone)
-  const title = inferTitleFromInput(normalizedInput)
-  const notes = title && normalizedInput !== title ? normalizedInput : null
+  const title = inferTitleFromInput(titleInput)
+  const notes = title && normalizedNotes.length > title.length + 5 ? normalizedNotes : null
   const cadence = inferCadenceFromInput(normalizedInput)
 
   if (/\b(domingo que viene)\b/i.test(normalizedInput) && dueDate) {
@@ -583,7 +647,7 @@ export function mergeTypedTaskDrafts(
     normalizedInput: heuristicDraft.normalizedInput,
     candidateType: providerDraft?.candidateType ?? heuristicDraft.candidateType,
     title: providerDraft?.title ?? heuristicDraft.title,
-    notes: providerDraft?.notes ?? heuristicDraft.notes,
+    notes: chooseDraftNotes(heuristicDraft.notes, providerDraft?.notes),
     dueDate: providerDraft?.dueDate ?? heuristicDraft.dueDate,
     dueTime: providerDraft?.dueTime ?? heuristicDraft.dueTime,
     priority: providerDraft?.priority ?? heuristicDraft.priority,

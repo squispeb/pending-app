@@ -286,19 +286,6 @@ function normalizeMatchedCalendarContext(
 
   if (typeof value === 'object' && value !== null) {
     const objectValue = value as Partial<MatchedCalendarContext>
-
-    if (
-      typeof objectValue.calendarEventId === 'string' &&
-      typeof objectValue.summary === 'string' &&
-      typeof objectValue.reason === 'string'
-    ) {
-      return {
-        calendarEventId: objectValue.calendarEventId,
-        summary: objectValue.summary,
-        reason: objectValue.reason,
-      }
-    }
-
     if (typeof objectValue.calendarEventId === 'string') {
       const match = candidates.find((candidate) => candidate.calendarEventId === objectValue.calendarEventId)
 

@@ -58,13 +58,40 @@ describe('capture helpers', () => {
       timezone: 'America/Lima',
     })
 
-    expect(draft.title).toBe('entregar para el domingo que viene la primera tarea del curso Cloud Computing')
+    expect(draft.title).toBe('entregar la primera tarea del curso Cloud Computing')
     expect(draft.dueDate).toBe('2026-04-12')
     expect(draft.priority).toBe('high')
     expect(draft.candidateType).toBe('task')
+    expect(draft.notes).toBe(
+      'Tengo que entregar para el domingo que viene la primera tarea del curso Cloud Computing, en este tengo que resolverlo lo antes posible.',
+    )
     expect(draft.interpretationNotes).toContain(
       "Interpreted 'domingo que viene' as the next upcoming Sunday.",
     )
+  })
+
+  it('preserves multiline checklist structure in heuristic notes', () => {
+    const draft = buildHeuristicTaskDraft({
+      rawInput: 'Preparar entrega de Cloud Computing\n1. Revisar rúbrica\n2. Terminar informe\n3. Subir PDF el jueves',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+    })
+
+    expect(draft.title).toBe('Preparar entrega de Cloud Computing')
+    expect(draft.notes).toBe(
+      'Preparar entrega de Cloud Computing\n1. Revisar rúbrica\n2. Terminar informe\n3. Subir PDF el jueves',
+    )
+  })
+
+  it('strips more leading intent language and date phrasing from heuristic titles', () => {
+    const draft = buildHeuristicTaskDraft({
+      rawInput: 'Voy a planificar presupuesto para next week',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+    })
+
+    expect(draft.title).toBe('planificar presupuesto')
+    expect(draft.notes).toBe('Voy a planificar presupuesto para next week')
   })
 
   it('detects recurring intent and extracts cadence for habit candidates', () => {
@@ -112,6 +139,25 @@ describe('capture helpers', () => {
     })
     expect(merged.interpretationNotes).toContain('Provider inferred a cleaner task title.')
     expect(() => typedTaskDraftSchema.parse(merged)).not.toThrow()
+  })
+
+  it('keeps fuller heuristic notes when provider notes are shorter', () => {
+    const heuristicDraft = buildHeuristicTaskDraft({
+      rawInput: 'Preparar entrega de Cloud Computing\n1. Revisar rúbrica\n2. Terminar informe\n3. Subir PDF el jueves',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+    })
+
+    const merged = mergeTypedTaskDrafts(heuristicDraft, {
+      title: 'Preparar entrega de Cloud Computing',
+      notes: 'Terminar entrega del curso.',
+      candidateType: 'task',
+      interpretationNotes: ['Provider rewrote the task more concisely.'],
+    })
+
+    expect(merged.notes).toBe(
+      'Preparar entrega de Cloud Computing\n1. Revisar rúbrica\n2. Terminar informe\n3. Subir PDF el jueves',
+    )
   })
 
   it('allows provider habit output with cadence extraction', () => {

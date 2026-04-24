@@ -268,6 +268,72 @@ describe('capture service', () => {
     expect(result.draft.interpretationNotes).toContain('Hosted interpreter inferred a cleaner title.')
   })
 
+  it('does not prefill calendar context before the provider selects a candidate', async () => {
+    await seedSelectedCalendar(db)
+    await db.run(sql`
+      INSERT INTO calendar_events (
+        id,
+        user_id,
+        calendar_id,
+        google_event_id,
+        google_recurring_event_id,
+        status,
+        summary,
+        starts_at,
+        ends_at,
+        all_day,
+        synced_at,
+        created_at,
+        updated_at
+      ) VALUES (
+        'evt-cloud-1',
+        ${userId},
+        'calendar-1',
+        'google-event-1',
+        'series-cloud',
+        'confirmed',
+        'Cloud Computing',
+        strftime('%s', '2026-04-10 15:00:00') * 1000,
+        strftime('%s', '2026-04-10 16:00:00') * 1000,
+        0,
+        (unixepoch() * 1000),
+        (unixepoch() * 1000),
+        (unixepoch() * 1000)
+      );
+    `)
+
+    const interpreter: CaptureInterpreter = {
+      async interpretTypedTask(input) {
+        expect(input.calendarContext).toHaveLength(1)
+
+        return {
+          candidateType: 'task',
+          title: 'Entregar primera tarea de Cloud Computing',
+          notes: 'Resolver y entregar la primera tarea del curso Cloud Computing.',
+          dueDate: '2026-04-12',
+          interpretationNotes: ['Did not ground a calendar match.'],
+        }
+      },
+    }
+    const service = createCaptureService(db, interpreter)
+
+    const result = await service.interpretTypedTaskInput(userId, {
+      rawInput: 'Crea una tarea para el día jueves próximo para el curso de Cloud Computing.',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+      languageHint: 'es',
+    })
+
+    expect(result.ok).toBe(true)
+
+    if (!result.ok) {
+      throw new Error('Expected successful capture interpretation')
+    }
+
+    expect(result.draft.matchedCalendarContext).toBeNull()
+    expect(result.draft.interpretationNotes).not.toContain('Matched recurring event: Cloud Computing')
+  })
+
   it('keeps calendar context empty when there is no relevant local event match', async () => {
     await seedSelectedCalendar(db)
     const interpreter: CaptureInterpreter = {

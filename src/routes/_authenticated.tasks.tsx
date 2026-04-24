@@ -897,7 +897,7 @@ function TaskCard({
           </div>
 
           {task.notes ? (
-            <p className="mb-0 ml-4 mt-1.5 text-xs leading-5 text-[var(--ink-soft)]">
+            <p className="mb-0 ml-4 mt-1.5 whitespace-pre-line text-xs leading-5 text-[var(--ink-soft)]">
               {task.notes}
             </p>
           ) : null}

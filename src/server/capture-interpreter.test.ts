@@ -431,6 +431,74 @@ describe('capture interpreter', () => {
     })
   })
 
+  it('drops matchedCalendarContext objects that are not grounded in supplied candidates', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  candidateType: 'task',
+                  title: 'Entregar primera tarea del curso Cloud Computing',
+                  notes: 'Resolver y entregar la primera tarea.',
+                  dueDate: '2026-04-12',
+                  matchedCalendarContext: {
+                    calendarEventId: 'evt-made-up',
+                    summary: 'Invented match',
+                    reason: 'Invented by the model',
+                  },
+                  interpretationNotes: ['Provider attempted an ungrounded calendar match.'],
+                }),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        },
+      ),
+    )
+
+    const interpreter = createRemoteCaptureInterpreter(
+      {
+        url: 'https://openrouter.ai/api/v1/chat/completions',
+        apiKey: 'secret-key',
+        model: 'openai/gpt-5-mini',
+        timeoutMs: 1000,
+      },
+      fetchMock,
+    )
+
+    const result = await interpreter?.interpretTypedTask({
+      normalizedInput: 'Tengo que entregar la primera tarea de Cloud Computing',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+      languageHint: 'es',
+      calendarContext: [
+        {
+          calendarEventId: 'evt-cloud-1',
+          summary: 'Cloud Computing',
+          calendarName: 'Primary',
+          startsAt: '2026-04-10T15:00:00.000Z',
+          recurring: true,
+          reason: 'Matched recurring event: Cloud Computing',
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      candidateType: 'task',
+      title: 'Entregar primera tarea del curso Cloud Computing',
+      notes: 'Resolver y entregar la primera tarea.',
+      dueDate: '2026-04-12',
+      interpretationNotes: ['Provider attempted an ungrounded calendar match.'],
+    })
+  })
+
   it('coerces provider priority urgent to high', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
