@@ -1291,6 +1291,133 @@ describe('voice capture processor', () => {
     })
   })
 
+  it('returns a task action confirmation for resolved archive requests', async () => {
+    const processor = createVoiceCaptureProcessor({
+      voiceIntentClassifier: {
+        async classify() {
+          return { family: 'task_action' as const, kind: 'archive_task' as const }
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'resolved' as const,
+            task: {
+              id: 'task-123',
+              title: 'Better onboarding',
+              status: 'active' as const,
+              dueDate: null,
+              dueTime: null,
+              priority: 'medium' as const,
+              completedAt: null,
+              source: 'visible_window' as const,
+            },
+          }
+        },
+      },
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'I want us to close the better on boarding as archived.',
+            language: 'unknown' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture(sampleUpload)
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'task_action_confirmation',
+      transcript: 'I want us to close the better on boarding as archived.',
+      language: 'unknown',
+      message: 'I understood that as archiving the task "Better onboarding". Confirm if you want me to archive it.',
+      action: 'archive_task',
+      task: {
+        id: 'task-123',
+        title: 'Better onboarding',
+        status: 'active',
+        dueDate: null,
+        dueTime: null,
+        priority: 'medium',
+        completedAt: null,
+        source: 'visible_window',
+      },
+    })
+  })
+
+  it('clarifies when an archive request targets an already archived task', async () => {
+    const processor = createVoiceCaptureProcessor({
+      voiceIntentClassifier: {
+        async classify() {
+          return { family: 'task_action' as const, kind: 'archive_task' as const }
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'resolved' as const,
+            task: {
+              id: 'task-123',
+              title: 'Better onboarding',
+              status: 'archived' as const,
+              dueDate: null,
+              dueTime: null,
+              priority: 'medium' as const,
+              completedAt: null,
+              source: 'visible_window' as const,
+            },
+          }
+        },
+      },
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Archive this task',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture(sampleUpload)
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Archive this task',
+      language: 'en',
+      message: 'The task "Better onboarding" is already archived.',
+      questions: ['Do you want to do anything else with this task?'],
+      draft: null,
+    })
+  })
+
   it('routes recognized calendar actions into clarification instead of task creation', async () => {
     const interpretTypedTaskInput = vi.fn(async () => {
       throw new Error('Should not be called')

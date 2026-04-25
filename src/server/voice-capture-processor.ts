@@ -99,7 +99,11 @@ export function createVoiceCaptureProcessor(
     action: ConfirmVoiceTaskActionKind,
     status: 'active' | 'completed' | 'archived',
   ) {
-    return (action === 'complete_task' && status === 'completed') || (action === 'reopen_task' && status === 'active')
+    return (
+      (action === 'complete_task' && status === 'completed') ||
+      (action === 'reopen_task' && status === 'active') ||
+      (action === 'archive_task' && status === 'archived')
+    )
   }
 
   return {
@@ -115,6 +119,20 @@ export function createVoiceCaptureProcessor(
       }
 
       const voiceIntent = await voiceIntentRouter.classifyVoiceIntent(transcription.transcript)
+
+      if (voiceIntent.family === 'task_action' && voiceIntent.kind === 'unsupported_task_action') {
+        const clarification = buildVoiceActionClarification(voiceIntent)
+
+        return {
+          ok: true,
+          outcome: 'clarify',
+          transcript: transcription.transcript,
+          language: transcription.language,
+          message: clarification.message,
+          questions: clarification.questions,
+          draft: null,
+        }
+      }
 
       if (voiceIntent.family === 'task_action' && dependencies.taskResolver) {
         const resolution = await dependencies.taskResolver.resolveTaskTarget({
@@ -148,7 +166,11 @@ export function createVoiceCaptureProcessor(
             }
           }
 
-          if (voiceIntent.kind === 'complete_task' || voiceIntent.kind === 'reopen_task') {
+          if (
+            voiceIntent.kind === 'complete_task' ||
+            voiceIntent.kind === 'reopen_task' ||
+            voiceIntent.kind === 'archive_task'
+          ) {
             if (isTaskActionAlreadyApplied(voiceIntent.kind, resolution.task.status)) {
               return {
                 ok: true,

@@ -22,10 +22,11 @@ export const voiceTaskActionKindSchema = z.enum([
   'task_status',
   'complete_task',
   'reopen_task',
+  'archive_task',
   'edit_task',
   'unsupported_task_action',
 ])
-export const confirmVoiceTaskActionKindSchema = z.enum(['complete_task', 'reopen_task'])
+export const confirmVoiceTaskActionKindSchema = z.enum(['complete_task', 'reopen_task', 'archive_task'])
 export const voiceCalendarActionKindSchema = z.enum([
   'create_calendar_event',
   'edit_calendar_event',
@@ -909,14 +910,26 @@ export function buildVoiceTaskActionConfirmationMessage(
   language: z.infer<typeof transcriptionDetectedLanguageSchema>,
 ) {
   if (language === 'es') {
-    return action === 'complete_task'
-      ? `Entendí eso como completar la tarea "${task.title}". Confirma si quieres que la marque como completada.`
-      : `Entendí eso como reabrir la tarea "${task.title}". Confirma si quieres que la vuelva a marcar como activa.`
+    if (action === 'complete_task') {
+      return `Entendí eso como completar la tarea "${task.title}". Confirma si quieres que la marque como completada.`
+    }
+
+    if (action === 'archive_task') {
+      return `Entendí eso como archivar la tarea "${task.title}". Confirma si quieres que la archive.`
+    }
+
+    return `Entendí eso como reabrir la tarea "${task.title}". Confirma si quieres que la vuelva a marcar como activa.`
   }
 
-  return action === 'complete_task'
-    ? `I understood that as completing the task "${task.title}". Confirm if you want me to mark it as completed.`
-    : `I understood that as reopening the task "${task.title}". Confirm if you want me to move it back to active.`
+  if (action === 'complete_task') {
+    return `I understood that as completing the task "${task.title}". Confirm if you want me to mark it as completed.`
+  }
+
+  if (action === 'archive_task') {
+    return `I understood that as archiving the task "${task.title}". Confirm if you want me to archive it.`
+  }
+
+  return `I understood that as reopening the task "${task.title}". Confirm if you want me to move it back to active.`
 }
 
 export function buildVoiceTaskActionAlreadyAppliedMessage(
@@ -925,14 +938,26 @@ export function buildVoiceTaskActionAlreadyAppliedMessage(
   language: z.infer<typeof transcriptionDetectedLanguageSchema>,
 ) {
   if (language === 'es') {
-    return action === 'complete_task'
-      ? `La tarea "${task.title}" ya está completada.`
-      : `La tarea "${task.title}" ya está activa.`
+    if (action === 'complete_task') {
+      return `La tarea "${task.title}" ya está completada.`
+    }
+
+    if (action === 'archive_task') {
+      return `La tarea "${task.title}" ya está archivada.`
+    }
+
+    return `La tarea "${task.title}" ya está activa.`
   }
 
-  return action === 'complete_task'
-    ? `The task "${task.title}" is already completed.`
-    : `The task "${task.title}" is already active.`
+  if (action === 'complete_task') {
+    return `The task "${task.title}" is already completed.`
+  }
+
+  if (action === 'archive_task') {
+    return `The task "${task.title}" is already archived.`
+  }
+
+  return `The task "${task.title}" is already active.`
 }
 
 export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCaptureInput {

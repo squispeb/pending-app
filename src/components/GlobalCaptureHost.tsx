@@ -1023,7 +1023,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     : captureMode === 'task_action_confirmation'
       ? captureTaskActionConfirmation?.action === 'reopen_task'
         ? 'Reopen task'
-        : 'Complete task'
+        : captureTaskActionConfirmation?.action === 'archive_task'
+          ? 'Archive task'
+          : 'Complete task'
     : captureType === 'idea'
       ? 'Create thread'
       : captureType === 'habit'
@@ -1031,7 +1033,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
       : 'Create task'
 
   const taskActionSummaryLabel = (action: ConfirmVoiceTaskActionKind) =>
-    action === 'reopen_task' ? 'Reopen this task' : 'Complete this task'
+    action === 'reopen_task' ? 'Reopen this task' : action === 'archive_task' ? 'Archive this task' : 'Complete this task'
 
   // ---------------------------------------------------------------------------
   // Waveform bar renderer — live amplitude bars during recording

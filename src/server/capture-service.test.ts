@@ -750,4 +750,58 @@ describe('capture service', () => {
     expect(task?.status).toBe('active')
     expect(task?.completedAt).toBeNull()
   })
+
+  it('archives a task through the existing task service on voice action confirmation', async () => {
+    const service = createCaptureService(db, null)
+
+    await db.run(sql`
+      INSERT INTO users (
+        id,
+        email,
+        timezone,
+        created_at,
+        updated_at
+      ) VALUES (
+        ${userId},
+        'me@example.com',
+        'UTC',
+        (unixepoch() * 1000),
+        (unixepoch() * 1000)
+      );
+    `)
+
+    await db.run(sql`
+      INSERT INTO tasks (
+        id,
+        user_id,
+        title,
+        status,
+        priority,
+        created_at,
+        updated_at
+      ) VALUES (
+        'task-1',
+        ${userId},
+        'Call the bank',
+        'active',
+        'medium',
+        (unixepoch() * 1000),
+        (unixepoch() * 1000)
+      );
+    `)
+
+    const result = await service.confirmVoiceTaskAction(userId, {
+      taskId: 'task-1',
+      action: 'archive_task',
+    })
+
+    expect(result).toEqual({ ok: true })
+
+    const task = await db.query.tasks.findFirst({
+      where: (tasks, { eq }) => eq(tasks.id, 'task-1'),
+    })
+
+    expect(task?.status).toBe('archived')
+    expect(task?.archivedAt).not.toBeNull()
+  })
 })

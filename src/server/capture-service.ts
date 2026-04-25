@@ -281,6 +281,10 @@ export function createCaptureService(
         return tasksService.completeTask(parsed.taskId, userId)
       }
 
+      if (parsed.action === 'archive_task') {
+        return tasksService.archiveTask(parsed.taskId, userId)
+      }
+
       return tasksService.reopenTask(parsed.taskId, userId)
     },
   }

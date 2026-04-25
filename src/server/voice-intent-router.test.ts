@@ -69,9 +69,18 @@ describe('voice intent router', () => {
   it('classifies unsupported task commands as task actions instead of creation', () => {
     const router = createVoiceIntentRouter({ classifier: null })
 
-    return expect(router.classifyVoiceIntent('Archive this task')).resolves.toEqual({
+    return expect(router.classifyVoiceIntent('Delete this task')).resolves.toEqual({
       family: 'task_action',
       kind: 'unsupported_task_action',
+    })
+  })
+
+  it('classifies task archive requests as task actions', () => {
+    const router = createVoiceIntentRouter({ classifier: null })
+
+    return expect(router.classifyVoiceIntent('Archive this task')).resolves.toEqual({
+      family: 'task_action',
+      kind: 'archive_task',
     })
   })
 
@@ -126,6 +135,22 @@ describe('voice intent router', () => {
     })
   })
 
+  it('overrides provider completion misclassification for archive task commands', async () => {
+    const classifier = {
+      classify: vi.fn(async () => ({
+        family: 'task_action' as const,
+        kind: 'complete_task' as const,
+      })),
+    }
+
+    const router = createVoiceIntentRouter({ classifier })
+
+    await expect(router.classifyVoiceIntent('I want us to close the better on boarding as archived.')).resolves.toEqual({
+      family: 'task_action',
+      kind: 'archive_task',
+    })
+  })
+
   it('falls back to regex when the provider fails', async () => {
     const classifier = {
       classify: vi.fn(async () => {
@@ -135,7 +160,7 @@ describe('voice intent router', () => {
 
     const router = createVoiceIntentRouter({ classifier })
 
-    await expect(router.classifyVoiceIntent('Archive this task')).resolves.toEqual({
+    await expect(router.classifyVoiceIntent('Delete this task')).resolves.toEqual({
       family: 'task_action',
       kind: 'unsupported_task_action',
     })

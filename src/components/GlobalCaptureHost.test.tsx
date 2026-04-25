@@ -222,6 +222,33 @@ describe('GlobalCaptureHost voice panels', () => {
     expect(markup).toContain('Cancel')
   })
 
+  it('renders archive confirmation labels for task archive actions', () => {
+    const markup = renderToStaticMarkup(
+      <VoiceTaskActionConfirmationPanel
+        transcript="Archive this task"
+        message='I understood that as archiving the task "Call the bank". Confirm if you want me to archive it.'
+        actionLabel="Archive this task"
+        confirmLabel="Archive task"
+        isConfirming={false}
+        error={null}
+        task={{
+          title: 'Call the bank',
+          status: 'active',
+          dueDate: null,
+          dueTime: null,
+          priority: 'medium',
+          source: 'context_task',
+        }}
+        onConfirm={(event) => event.preventDefault()}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Archive this task')
+    expect(markup).toContain('Archive task')
+    expect(markup).toContain('Call the bank')
+  })
+
   it('renders voice action confirmation errors inline', () => {
     const markup = renderToStaticMarkup(
       <VoiceTaskActionConfirmationPanel

@@ -27,14 +27,22 @@ const TASK_REOPEN_PATTERNS = [
   /\b(reabre|reabrir|deshacer)\b.*\b(tarea)\b/i,
 ] as const
 
+const TASK_ARCHIVE_PATTERNS = [
+  /\b(archive|archived)\b.*\b(task|todo|tarea)\b/i,
+  /\b(task|todo|tarea)\b.*\b(archive|archived)\b/i,
+  /\bclose\b.*\barchived\b/i,
+  /\b(archiva|archivar|archivado|archivada)\b.*\b(tarea)\b/i,
+  /\b(tarea)\b.*\b(archiva|archivar|archivado|archivada)\b/i,
+] as const
+
 const TASK_EDIT_PATTERNS = [
   /\b(rename|edit|update|change)\b.*\b(task|todo|tarea)\b/i,
   /\b(renombra|renombrar|edita|editar|actualiza|actualizar|cambia|cambiar)\b.*\b(tarea)\b/i,
 ] as const
 
 const TASK_UNSUPPORTED_ACTION_PATTERNS = [
-  /\b(archive|delete|remove|cancel|snooze|defer)\b.*\b(task|todo|tarea)\b/i,
-  /\b(archiva|archivar|elimina|eliminar|borra|borrar|cancela|cancelar|pospone|posponer|difiere|diferir)\b.*\b(tarea)\b/i,
+  /\b(delete|remove|cancel|snooze|defer)\b.*\b(task|todo|tarea)\b/i,
+  /\b(elimina|eliminar|borra|borrar|cancela|cancelar|pospone|posponer|difiere|diferir)\b.*\b(tarea)\b/i,
 ] as const
 
 const CALENDAR_CREATE_PATTERNS = [
@@ -80,6 +88,7 @@ const VOICE_INTENT_JSON_SCHEMA = {
           'task_status',
           'complete_task',
           'reopen_task',
+          'archive_task',
           'edit_task',
           'unsupported_task_action',
           'create_calendar_event',
@@ -99,7 +108,7 @@ export const VOICE_INTENT_CLASSIFICATION_SYSTEM_PROMPT = [
   'Return only a JSON object with exactly two keys: family and kind.',
   'Classify the utterance into one of these bounded intents.',
   'Use family creation with kind creation for new task, habit, or idea capture requests.',
-  'Use family task_action for task status, complete, reopen, edit, and unsupported task actions.',
+  'Use family task_action for task status, complete, reopen, archive, edit, and unsupported task actions.',
   'Use family calendar_action for create, edit, cancel, and unsupported calendar actions.',
   'Use family unsupported_action for planner commands that target unsupported entities such as habits or ideas.',
   'Be conservative. If the utterance is clearly a planner command but not supported, do not map it to creation.',
@@ -147,6 +156,51 @@ function matchesAnyPattern(value: string, patterns: readonly RegExp[]) {
 
 function mentionsTask(value: string) {
   return TASK_REFERENCE_PATTERN.test(value)
+}
+
+function hasUnsupportedTaskCommandCue(transcript: string) {
+  return /\b(delete|remove|cancel|snooze|defer|elimina|eliminar|borra|borrar|cancela|cancelar|pospone|posponer|difiere|diferir)\b/i.test(
+    transcript,
+  )
+}
+
+function looksLikeTaskTargetReference(transcript: string) {
+  return /\b(task|todo|tarea|this|that|the|my|mi|esta|este|esa|ese)\b/i.test(transcript)
+}
+
+function getDeterministicTaskIntentOverride(
+  transcript: string,
+  providerIntent: VoiceIntentClassification,
+  regexIntent: VoiceIntentClassification,
+) {
+  if (providerIntent.family !== 'task_action') {
+    return null
+  }
+
+  if (regexIntent.family === 'task_action' && regexIntent.kind === 'unsupported_task_action' && providerIntent.kind !== 'unsupported_task_action') {
+    return regexIntent
+  }
+
+  if (regexIntent.family === 'task_action' && regexIntent.kind === 'task_status' && providerIntent.kind !== 'task_status') {
+    return regexIntent
+  }
+
+  if (regexIntent.family === 'task_action' && regexIntent.kind === 'archive_task' && providerIntent.kind !== 'archive_task') {
+    return regexIntent
+  }
+
+  if (
+    providerIntent.kind !== 'unsupported_task_action' &&
+    hasUnsupportedTaskCommandCue(transcript) &&
+    looksLikeTaskTargetReference(transcript)
+  ) {
+    return voiceIntentClassificationSchema.parse({
+      family: 'task_action',
+      kind: 'unsupported_task_action',
+    })
+  }
+
+  return null
 }
 
 function classifyVoiceIntentByRegex(transcript: string): VoiceIntentClassification {
@@ -200,6 +254,13 @@ function classifyVoiceIntentByRegex(transcript: string): VoiceIntentClassificati
     return voiceIntentClassificationSchema.parse({
       family: 'task_action',
       kind: 'reopen_task',
+    })
+  }
+
+  if (matchesAnyPattern(normalizedTranscript, TASK_ARCHIVE_PATTERNS)) {
+    return voiceIntentClassificationSchema.parse({
+      family: 'task_action',
+      kind: 'archive_task',
     })
   }
 
@@ -480,14 +541,23 @@ export function createVoiceIntentRouter(dependencies?: { classifier?: VoiceInten
 
   return {
     async classifyVoiceIntent(transcript: string): Promise<VoiceIntentClassification> {
+      const regexIntent = classifyVoiceIntentByRegex(transcript)
+
       if (!classifier) {
-        return classifyVoiceIntentByRegex(transcript)
+        return regexIntent
       }
 
       try {
-        return await classifier.classify(transcript)
+        const providerIntent = await classifier.classify(transcript)
+        const overrideIntent = getDeterministicTaskIntentOverride(transcript, providerIntent, regexIntent)
+
+        if (overrideIntent) {
+          return overrideIntent
+        }
+
+        return providerIntent
       } catch {
-        return classifyVoiceIntentByRegex(transcript)
+        return regexIntent
       }
     },
   }
