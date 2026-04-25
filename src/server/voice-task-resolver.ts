@@ -272,6 +272,7 @@ export type ResolvedVoiceTaskTarget = {
   id: string
   title: string
   status: 'active' | 'completed' | 'archived'
+  notes?: string | null
   dueDate: string | null
   dueTime: string | null
   priority: 'low' | 'medium' | 'high'
@@ -315,6 +316,7 @@ export function createVoiceTaskResolver(database: Database) {
               id: task.id,
               title: task.title,
               status: task.status,
+              notes: task.notes,
               dueDate: task.dueDate,
               dueTime: task.dueTime,
               priority: task.priority,
@@ -345,6 +347,7 @@ export function createVoiceTaskResolver(database: Database) {
               id: task.id,
               title: task.title,
               status: task.status,
+              notes: task.notes,
               dueDate: task.dueDate,
               dueTime: task.dueTime,
               priority: task.priority,

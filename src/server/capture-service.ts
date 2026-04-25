@@ -17,6 +17,7 @@ import {
   type InterpretCaptureInput,
   type InterpretCaptureSuccess,
 } from '../lib/capture'
+import { toDatetimeLocalValue } from '../lib/tasks'
 import type { CaptureInterpreter } from './capture-interpreter'
 import { CaptureInterpreterError, createRemoteCaptureInterpreter } from './capture-interpreter'
 import { createHabitsService } from './habits-service'
@@ -285,7 +286,32 @@ export function createCaptureService(
         return tasksService.archiveTask(parsed.taskId, userId)
       }
 
-      return tasksService.reopenTask(parsed.taskId, userId)
+      if (parsed.action === 'reopen_task') {
+        return tasksService.reopenTask(parsed.taskId, userId)
+      }
+
+      if (!parsed.edits) {
+        throw new Error('Task edits are required.')
+      }
+
+      const existingTask = await tasksService.getTaskStatusDetails(parsed.taskId, userId)
+
+      if (!existingTask) {
+        throw new Error('Task not found')
+      }
+
+      return tasksService.updateTask(userId, {
+        id: parsed.taskId,
+        title: parsed.edits.title ?? existingTask.title,
+        notes: parsed.edits.description ?? (existingTask.notes ?? ''),
+        priority: existingTask.priority,
+        dueDate: parsed.edits.dueDate ?? existingTask.dueDate ?? '',
+        dueTime: existingTask.dueTime ?? '',
+        reminderAt: toDatetimeLocalValue(existingTask.reminderAt),
+        estimatedMinutes: existingTask.estimatedMinutes ?? undefined,
+        preferredStartTime: existingTask.preferredStartTime ?? '',
+        preferredEndTime: existingTask.preferredEndTime ?? '',
+      })
     },
   }
 }

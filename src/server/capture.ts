@@ -6,6 +6,7 @@ import {
   confirmCapturedTaskInputSchema,
   confirmVoiceTaskActionInputSchema,
   interpretCaptureInputSchema,
+  processVoiceCaptureTextInputSchema,
   parseProcessVoiceCaptureFormData,
 } from '../lib/capture'
 import { resolveAuthenticatedPlannerUser } from './authenticated-user'
@@ -54,6 +55,34 @@ export const processVoiceCapture = createServerFn({ method: 'POST' })
       },
     })
     return voiceCaptureProcessor.processVoiceCapture(data)
+  })
+
+export const processVoiceCaptureTranscript = createServerFn({ method: 'POST' })
+  .inputValidator((input) => processVoiceCaptureTextInputSchema.parse(input))
+  .handler(async ({ data }) => {
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    const { createVoiceCaptureProcessor } = await import('./voice-capture-processor')
+    const voiceCaptureProcessor = createVoiceCaptureProcessor({
+      transcriptionBroker,
+      captureService: {
+        interpretTypedTaskInput: (input) => captureService.interpretTypedTaskInput(user.id, input),
+        confirmCapturedTask: (input) => captureService.confirmCapturedTask(user.id, input),
+        confirmCapturedHabit: (input) => captureService.confirmCapturedHabit(user.id, input),
+      },
+      taskResolver: {
+        resolveTaskTarget: (input) => voiceTaskResolver.resolveTaskTarget({
+          userId: user.id,
+          transcript: input.transcript,
+          currentDate: data.currentDate,
+          timezone: data.timezone,
+          contextTaskId: input.contextTaskId,
+          contextIdeaId: input.contextIdeaId,
+          visibleTaskWindow: input.visibleTaskWindow,
+        }),
+      },
+    })
+
+    return voiceCaptureProcessor.processVoiceTranscript(data)
   })
 
 export const confirmCapturedTask = createServerFn({ method: 'POST' })

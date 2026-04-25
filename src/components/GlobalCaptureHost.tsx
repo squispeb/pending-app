@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { CalendarDays, CheckCircle, ChevronDown, Lightbulb, Mic, RotateCcw, SendHorizonal, Square, X } from 'lucide-react'
+import { CalendarDays, CheckCircle, ChevronDown, Lightbulb, Mic, RotateCcw, SendHorizonal, Sparkles, Square, X } from 'lucide-react'
 import {
   useMutation,
   useQueryClient,
@@ -24,6 +24,7 @@ import type {
   CandidateType,
   ConfirmVoiceTaskActionKind,
   ProcessVoiceCaptureAutoSaved,
+  ProcessVoiceCaptureClarify,
   ProcessVoiceCaptureTaskActionConfirmation,
   ProcessVoiceCaptureTaskStatus,
   TypedTaskDraft,
@@ -37,6 +38,7 @@ import {
   confirmVoiceTaskAction as confirmVoiceTaskActionFn,
   interpretCaptureInput,
   processVoiceCapture,
+  processVoiceCaptureTranscript,
 } from '../server/capture'
 import { submitIdeaThreadTurn } from '../server/ideas'
 import { transcribeCaptureAudio } from '../server/transcription'
@@ -77,6 +79,7 @@ const WEEKDAYS: Array<{ value: HabitWeekday; label: string }> = [
 type SelectedTaskSummaryCardProps = {
   title: string
   status: string
+  notes?: string | null
   dueDate?: string | null
   dueTime?: string | null
   priority?: string | null
@@ -104,6 +107,7 @@ const SOURCE_LABELS: Record<string, string> = {
 export function SelectedTaskSummaryCard({
   title,
   status,
+  notes,
   dueDate,
   dueTime,
   priority,
@@ -119,6 +123,9 @@ export function SelectedTaskSummaryCard({
         Task
       </span>
       <p className="m-0 text-sm font-semibold leading-5 text-[var(--ink-strong)]">{title}</p>
+      {notes ? (
+        <p className="mt-2 m-0 text-sm leading-6 text-[var(--ink-soft)]">{notes}</p>
+      ) : null}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
         {/* Status badge */}
         <span
@@ -148,6 +155,137 @@ export function SelectedTaskSummaryCard({
           <span className="text-xs text-[var(--ink-soft)]">{sourceLabel}</span>
         ) : null}
       </div>
+    </div>
+  )
+}
+
+type VoiceTaskClarifyPanelProps = {
+  transcript: string
+  message: string
+  questions: string[]
+  reply: string
+  isSubmitting: boolean
+  isRecording: boolean
+  error: string | null
+  taskAction?: ConfirmVoiceTaskActionKind | null
+  task?: SelectedTaskSummaryCardProps | null
+  onReplyChange: (value: string) => void
+  onSubmit: (event: React.FormEvent) => void
+  onStartVoiceReply: () => void
+  onEditFromScratch: () => void
+  onCancel: () => void
+}
+
+export function VoiceTaskClarifyPanel({
+  transcript,
+  message,
+  questions,
+  reply,
+  isSubmitting,
+  isRecording,
+  error,
+  taskAction,
+  task,
+  onReplyChange,
+  onSubmit,
+  onStartVoiceReply,
+  onEditFromScratch,
+  onCancel,
+}: VoiceTaskClarifyPanelProps) {
+  const isEditTask = taskAction === 'edit_task'
+
+  return (
+    <div className="space-y-4">
+      {task ? <SelectedTaskSummaryCard {...task} /> : null}
+
+      <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
+        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+          Transcript
+        </span>
+        <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{transcript}</p>
+      </div>
+
+      <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3">
+        <p className="m-0 text-sm font-medium text-amber-200">{message}</p>
+        {questions.length > 0 ? (
+          <ul className="m-0 mt-3 space-y-1 pl-4">
+            {questions.map((question, index) => (
+              <li key={index} className="text-sm leading-6 text-amber-100">
+                {question}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+
+      {isEditTask ? (
+        <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+          <div className="mb-2 flex items-center gap-2 text-[var(--ink-soft)]">
+            <Sparkles size={15} />
+            <span className="text-xs font-semibold uppercase tracking-[0.1em]">Assistant tip</span>
+          </div>
+          <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">
+            Say or type the exact change, like “rename it to Quick Discovery Sprint”, “change the due date to tomorrow”, or “update the description to include stakeholder notes”.
+          </p>
+        </div>
+      ) : null}
+
+      <form onSubmit={onSubmit} className="space-y-3">
+        <label className="block">
+          <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Your reply</span>
+          <textarea
+            autoFocus
+            value={reply}
+            onChange={(e) => onReplyChange(e.target.value)}
+            rows={3}
+            placeholder={isEditTask ? 'Describe the task change you want…' : 'Answer the questions above…'}
+            className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                onSubmit(e as unknown as React.FormEvent)
+              }
+            }}
+          />
+        </label>
+
+        {error ? <p className="m-0 text-sm font-medium text-red-500">{error}</p> : null}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            disabled={isSubmitting || !reply.trim()}
+            className="primary-pill inline-flex cursor-pointer items-center gap-1.5 border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <SendHorizonal size={14} />
+            {isSubmitting ? 'Interpreting…' : 'Send reply'}
+          </button>
+          <button
+            type="button"
+            onClick={onStartVoiceReply}
+            disabled={isSubmitting || isRecording}
+            className="secondary-pill inline-flex cursor-pointer items-center gap-1.5 border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Mic size={14} />
+            {isRecording ? 'Listening…' : 'Reply with voice'}
+          </button>
+          <button
+            type="button"
+            onClick={onEditFromScratch}
+            className="inline-flex cursor-pointer items-center gap-1 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+          >
+            <RotateCcw size={13} />
+            Edit from scratch
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
     </div>
   )
 }
@@ -297,6 +435,8 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   const [captureClarifyMessage, setCaptureClarifyMessage] = useState<string | null>(null)
   const [captureClarifyQuestions, setCaptureClarifyQuestions] = useState<string[]>([])
   const [captureClarifyReply, setCaptureClarifyReply] = useState('')
+  const [captureClarifyTaskActionContext, setCaptureClarifyTaskActionContext] =
+    useState<ProcessVoiceCaptureClarify['taskActionContext'] | null>(null)
   const [captureShowAdvanced, setCaptureShowAdvanced] = useState(false)
   const [captureThreadIdeaId, setCaptureThreadIdeaId] = useState<string | null>(null)
   const [captureContextIdeaId, setCaptureContextIdeaId] = useState<string | null>(null)
@@ -338,6 +478,50 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     }
     setAudioLevels(Array(BAR_COUNT).fill(0))
   }, [])
+
+  function applyVoiceProcessResult(
+    result:
+      | ProcessVoiceCaptureAutoSaved
+      | ProcessVoiceCaptureClarify
+      | ProcessVoiceCaptureTaskStatus
+      | ProcessVoiceCaptureTaskActionConfirmation
+      | { ok: true; outcome: 'idea_confirmation'; transcript: string; draft: TypedTaskDraft }
+      | { ok: true; outcome: 'review'; transcript: string; draft: TypedTaskDraft },
+  ) {
+    if (result.outcome === 'auto_saved') {
+      setCaptureAutoSaved(result)
+      setCaptureClarifyTaskActionContext(null)
+      setCaptureMode('success')
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      void queryClient.invalidateQueries({ queryKey: ['habits'] })
+      void queryClient.invalidateQueries({ queryKey: ['habit-completions'] })
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      autoDismissTimerRef.current = setTimeout(() => resetCapture(), 4000)
+      return
+    }
+
+    if (result.outcome === 'clarify') {
+      applyClarifyState(result)
+      return
+    }
+
+    if (result.outcome === 'task_status') {
+      applyTaskStatusState(result)
+      return
+    }
+
+    if (result.outcome === 'task_action_confirmation') {
+      applyTaskActionConfirmationState(result)
+      return
+    }
+
+    if (result.outcome === 'idea_confirmation') {
+      applyDraftForReview(result.draft, result.transcript, 'recording')
+      return
+    }
+
+    applyDraftForReview(result.draft, result.transcript, 'recording')
+  }
 
   // Cleanup on unmount
   useEffect(() => {
@@ -487,6 +671,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
         data: {
           taskId: captureTaskActionConfirmation.task.id,
           action: captureTaskActionConfirmation.action,
+          edits: captureTaskActionConfirmation.edits,
         },
       })
     },
@@ -496,7 +681,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
       await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
     onError: (error) => {
-      setCaptureError(error instanceof Error ? error.message : 'Failed to update task status.')
+      setCaptureError(error instanceof Error ? error.message : 'Failed to update task.')
     },
   })
 
@@ -569,6 +754,39 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     },
   })
 
+  const voiceTranscriptFollowUpMutation = useMutation({
+    mutationFn: async (transcript: string) => {
+      return processVoiceCaptureTranscript({
+        data: {
+          transcript,
+          language: 'unknown',
+          currentDate: getTodayDateString(),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          routeIntent,
+          contextTaskId: captureClarifyTaskActionContext?.task.id ?? captureContextTaskId ?? undefined,
+          contextIdeaId: captureContextIdeaId ?? undefined,
+          visibleTaskWindow:
+            captureVisibleTaskWindow && captureVisibleTaskWindow.length > 0 && !captureClarifyTaskActionContext?.task.id
+              ? captureVisibleTaskWindow
+              : undefined,
+          followUpTaskAction: captureClarifyTaskActionContext?.action ?? undefined,
+        },
+      })
+    },
+    onSuccess: (result) => {
+      if (!result.ok) {
+        setTranscribeError(result.message)
+        return
+      }
+
+      applyVoiceProcessResult(result)
+      setTranscribeError(null)
+    },
+    onError: (error) => {
+      setTranscribeError(error instanceof Error ? error.message : 'Follow-up failed.')
+    },
+  })
+
   const voiceProcessMutation = useMutation({
     mutationFn: async (audioBlob: Blob) => {
       const audioFile = new File([audioBlob], 'recording.webm', { type: audioBlob.type || 'audio/webm' })
@@ -596,43 +814,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
         return
       }
 
-      if (result.outcome === 'auto_saved') {
-        setCaptureAutoSaved(result)
-        setCaptureMode('success')
-        void queryClient.invalidateQueries({ queryKey: ['tasks'] })
-        void queryClient.invalidateQueries({ queryKey: ['habits'] })
-        void queryClient.invalidateQueries({ queryKey: ['habit-completions'] })
-        void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
-        // Auto-dismiss after 4 s — wired here in the event handler, not a useEffect
-        autoDismissTimerRef.current = setTimeout(() => resetCapture(), 4000)
-        return
-      }
-
-      if (result.outcome === 'clarify') {
-        applyClarifyState(result.message, result.questions, result.transcript, result.draft)
-        setTranscribeError(null)
-        return
-      }
-
-      if (result.outcome === 'task_status') {
-        applyTaskStatusState(result)
-        setTranscribeError(null)
-        return
-      }
-
-      if (result.outcome === 'task_action_confirmation') {
-        applyTaskActionConfirmationState(result)
-        setTranscribeError(null)
-        return
-      }
-
-      if (result.outcome === 'idea_confirmation') {
-        applyDraftForReview(result.draft, result.transcript, 'recording')
-        setTranscribeError(null)
-        return
-      }
-
-      applyDraftForReview(result.draft, result.transcript, 'recording')
+      applyVoiceProcessResult(result)
       setTranscribeError(null)
     },
     onError: (error) => {
@@ -643,7 +825,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   // ---------------------------------------------------------------------------
   // Recording
   // ---------------------------------------------------------------------------
-  async function startRecording(threadIdeaId: string | null = captureThreadIdeaId) {
+  async function startRecording(threadIdeaId: string | null = captureThreadIdeaId, options?: { asFollowUp?: boolean }) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const recorder = new MediaRecorder(stream)
@@ -657,6 +839,29 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
         if (threadIdeaId) {
           voiceThreadReplyMutation.mutate(blob)
+          return
+        }
+
+        if (options?.asFollowUp) {
+          const audioFile = new File([blob], 'clarify-reply.webm', { type: blob.type || 'audio/webm' })
+          const formData = new FormData()
+          formData.set('audio', audioFile, audioFile.name)
+          formData.set('languageHint', 'auto')
+          formData.set('source', 'pending-app')
+
+          transcribeCaptureAudio({ data: formData })
+            .then((transcription) => {
+              if (!transcription.ok) {
+                throw new Error(transcription.message)
+              }
+
+              setCaptureMode('interpreting')
+              voiceTranscriptFollowUpMutation.mutate(transcription.transcript)
+            })
+            .catch((error) => {
+              setTranscribeError(error instanceof Error ? error.message : 'Transcription failed.')
+              setCaptureMode('clarify')
+            })
           return
         }
 
@@ -729,6 +934,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureClarifyMessage(null)
     setCaptureClarifyQuestions([])
     setCaptureClarifyReply('')
+    setCaptureClarifyTaskActionContext(null)
     setCaptureNotes([])
     setCaptureShowAdvanced(false)
     setCaptureThreadIdeaId(null)
@@ -887,18 +1093,17 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   // ---------------------------------------------------------------------------
   // Voice capture helper transitions
   // ---------------------------------------------------------------------------
-  function applyClarifyState(
-    message: string,
-    questions: string[],
-    transcript: string,
-    draft: TypedTaskDraft | null,
-  ) {
-    setCaptureRawInput(transcript)
-    setCaptureDraft(draft)
-    setCaptureNotes(draft?.interpretationNotes ?? [])
-    setCaptureClarifyMessage(message)
-    setCaptureClarifyQuestions(questions)
+  function applyClarifyState(result: ProcessVoiceCaptureClarify) {
+    setCaptureRawInput(result.transcript)
+    setCaptureDraft(result.draft)
+    setCaptureNotes(result.draft?.interpretationNotes ?? [])
+    setCaptureClarifyMessage(result.message)
+    setCaptureClarifyQuestions(result.questions)
     setCaptureClarifyReply('')
+    setCaptureClarifyTaskActionContext(result.taskActionContext ?? null)
+    if (result.taskActionContext?.task.id) {
+      setCaptureContextTaskId(result.taskActionContext.task.id)
+    }
     setCaptureError(null)
     setCaptureTaskStatus(null)
     setCaptureTaskActionConfirmation(null)
@@ -912,6 +1117,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureError(null)
     setCaptureClarifyMessage(null)
     setCaptureClarifyQuestions([])
+    setCaptureClarifyTaskActionContext(null)
     setCaptureTaskActionConfirmation(null)
     setCaptureTaskStatus(result)
     setCaptureMode('task_status')
@@ -924,6 +1130,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureError(null)
     setCaptureClarifyMessage(null)
     setCaptureClarifyQuestions([])
+    setCaptureClarifyTaskActionContext(null)
     setCaptureTaskStatus(null)
     setCaptureTaskActionConfirmation(result)
     setCaptureMode('task_action_confirmation')
@@ -933,9 +1140,15 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     event.preventDefault()
     const reply = captureClarifyReply.trim()
     if (!reply) return
-    // Combine original transcript + reply so the interpreter has full context
-    const combined = `${captureRawInput}\n\n${reply}`
     setCaptureError(null)
+
+    if (captureClarifyTaskActionContext) {
+      const combined = `${captureRawInput}\n\n${reply}`
+      voiceTranscriptFollowUpMutation.mutate(combined)
+      return
+    }
+
+    const combined = `${captureRawInput}\n\n${reply}`
     interpretMutation.mutate(combined)
   }
 
@@ -1003,14 +1216,18 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
             : captureType === 'idea'
               ? 'Start idea thread'
             : 'Review task'
-          : captureMode === 'task_action_confirmation'
+        : captureMode === 'task_action_confirmation'
             ? captureTaskActionConfirmation?.action === 'reopen_task'
               ? 'Confirm task reopen'
+              : captureTaskActionConfirmation?.action === 'edit_task'
+                ? 'Confirm task edits'
               : 'Confirm task completion'
             : captureMode === 'task_status'
               ? 'Task status'
           : captureMode === 'clarify'
-            ? 'Need a bit more detail'
+            ? captureClarifyTaskActionContext?.action === 'edit_task'
+              ? 'Edit task'
+              : 'Need a bit more detail'
             : isThreadReplyCapture
               ? 'Reply to idea'
               : isOpeningIdea
@@ -1025,7 +1242,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
         ? 'Reopen task'
         : captureTaskActionConfirmation?.action === 'archive_task'
           ? 'Archive task'
-          : 'Complete task'
+          : captureTaskActionConfirmation?.action === 'edit_task'
+            ? 'Apply edits'
+            : 'Complete task'
     : captureType === 'idea'
       ? 'Create thread'
       : captureType === 'habit'
@@ -1033,7 +1252,13 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
       : 'Create task'
 
   const taskActionSummaryLabel = (action: ConfirmVoiceTaskActionKind) =>
-    action === 'reopen_task' ? 'Reopen this task' : action === 'archive_task' ? 'Archive this task' : 'Complete this task'
+    action === 'reopen_task'
+      ? 'Reopen this task'
+      : action === 'archive_task'
+        ? 'Archive this task'
+        : action === 'edit_task'
+          ? 'Apply these edits'
+          : 'Complete this task'
 
   // ---------------------------------------------------------------------------
   // Waveform bar renderer — live amplitude bars during recording
@@ -1705,108 +1930,136 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                   ) : null}
 
                   {captureMode === 'clarify' ? (
-                    <div className="space-y-4">
-                      <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
-                          Transcript
-                        </span>
-                        <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureRawInput}</p>
-                      </div>
-
-                      <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3">
-                        <p className="m-0 text-sm font-medium text-amber-200">{captureClarifyMessage}</p>
-                        {captureClarifyQuestions.length > 0 ? (
-                          <ul className="m-0 mt-3 space-y-1 pl-4">
-                            {captureClarifyQuestions.map((question, index) => (
-                              <li key={index} className="text-sm leading-6 text-amber-100">
-                                {question}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </div>
-
-                      {captureDraft?.matchedCalendarContext ? (
-                        <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
-                          <div className="mb-2 flex items-center gap-2">
-                            <CalendarDays size={15} className="text-[var(--ink-soft)]" />
-                            <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
-                              Linked calendar context
+                    <>
+                      {captureClarifyTaskActionContext ? (
+                        <VoiceTaskClarifyPanel
+                          transcript={captureRawInput}
+                          message={captureClarifyMessage ?? ''}
+                          questions={captureClarifyQuestions}
+                          reply={captureClarifyReply}
+                          isSubmitting={interpretMutation.isPending || voiceTranscriptFollowUpMutation.isPending}
+                          isRecording={isRecording}
+                          error={captureError ?? transcribeError}
+                          taskAction={captureClarifyTaskActionContext.action}
+                          task={captureClarifyTaskActionContext.task}
+                          onReplyChange={setCaptureClarifyReply}
+                          onSubmit={handleClarifyReplySubmit}
+                          onStartVoiceReply={() => {
+                            setTranscribeError(null)
+                            setCaptureMode('recording')
+                            void startRecording(null, { asFollowUp: true })
+                          }}
+                          onEditFromScratch={() => {
+                            setCaptureClarifyReply('')
+                            setCaptureClarifyTaskActionContext(null)
+                            setCaptureMode('input')
+                          }}
+                          onCancel={resetCapture}
+                        />
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
+                            <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                              Transcript
                             </span>
+                            <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureRawInput}</p>
                           </div>
-                          <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">
-                            {captureDraft.matchedCalendarContext.summary}
-                          </p>
-                          <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
-                            {captureDraft.matchedCalendarContext.reason}
-                          </p>
-                        </div>
-                      ) : null}
 
-                      {/* Inline reply input */}
-                      <form onSubmit={handleClarifyReplySubmit} className="space-y-3">
-                        <label className="block">
-                          <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Your reply</span>
-                          <textarea
-                            autoFocus
-                            value={captureClarifyReply}
-                            onChange={(e) => setCaptureClarifyReply(e.target.value)}
-                            rows={3}
-                            placeholder="Answer the questions above…"
-                            className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                                e.preventDefault()
-                                handleClarifyReplySubmit(e as unknown as React.FormEvent)
-                              }
-                            }}
-                          />
-                        </label>
+                          <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3">
+                            <p className="m-0 text-sm font-medium text-amber-200">{captureClarifyMessage}</p>
+                            {captureClarifyQuestions.length > 0 ? (
+                              <ul className="m-0 mt-3 space-y-1 pl-4">
+                                {captureClarifyQuestions.map((question, index) => (
+                                  <li key={index} className="text-sm leading-6 text-amber-100">
+                                    {question}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
 
-                        {captureError ? (
-                          <p className="m-0 text-sm font-medium text-red-500">{captureError}</p>
-                        ) : null}
-
-                        <div className="flex flex-wrap items-center gap-3">
-                          <button
-                            type="submit"
-                            disabled={interpretMutation.isPending || !captureClarifyReply.trim()}
-                            className="primary-pill inline-flex cursor-pointer items-center gap-1.5 border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            <SendHorizonal size={14} />
-                            {interpretMutation.isPending ? 'Interpreting…' : 'Send reply'}
-                          </button>
-                          {captureDraft ? (
-                            <button
-                              type="button"
-                              onClick={() => applyDraftForReview(captureDraft, captureRawInput)}
-                              className="secondary-pill cursor-pointer border-0 text-sm font-semibold"
-                            >
-                              Review draft anyway
-                            </button>
+                          {captureDraft?.matchedCalendarContext ? (
+                            <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+                              <div className="mb-2 flex items-center gap-2">
+                                <CalendarDays size={15} className="text-[var(--ink-soft)]" />
+                                <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+                                  Linked calendar context
+                                </span>
+                              </div>
+                              <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">
+                                {captureDraft.matchedCalendarContext.summary}
+                              </p>
+                              <p className="m-0 mt-1 text-xs leading-5 text-[var(--ink-soft)]">
+                                {captureDraft.matchedCalendarContext.reason}
+                              </p>
+                            </div>
                           ) : null}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCaptureClarifyReply('')
-                              setCaptureRawInput(captureRawInput)
-                              setCaptureMode('input')
-                            }}
-                            className="inline-flex cursor-pointer items-center gap-1 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
-                          >
-                            <RotateCcw size={13} />
-                            Edit from scratch
-                          </button>
-                          <button
-                            type="button"
-                            onClick={resetCapture}
-                            className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
-                          >
-                            Cancel
-                          </button>
+
+                          <form onSubmit={handleClarifyReplySubmit} className="space-y-3">
+                            <label className="block">
+                              <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Your reply</span>
+                              <textarea
+                                autoFocus
+                                value={captureClarifyReply}
+                                onChange={(e) => setCaptureClarifyReply(e.target.value)}
+                                rows={3}
+                                placeholder="Answer the questions above…"
+                                className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                                    e.preventDefault()
+                                    handleClarifyReplySubmit(e as unknown as React.FormEvent)
+                                  }
+                                }}
+                              />
+                            </label>
+
+                            {captureError ? (
+                              <p className="m-0 text-sm font-medium text-red-500">{captureError}</p>
+                            ) : null}
+
+                            <div className="flex flex-wrap items-center gap-3">
+                              <button
+                                type="submit"
+                                disabled={interpretMutation.isPending || !captureClarifyReply.trim()}
+                                className="primary-pill inline-flex cursor-pointer items-center gap-1.5 border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                <SendHorizonal size={14} />
+                                {interpretMutation.isPending ? 'Interpreting…' : 'Send reply'}
+                              </button>
+                              {captureDraft ? (
+                                <button
+                                  type="button"
+                                  onClick={() => applyDraftForReview(captureDraft, captureRawInput)}
+                                  className="secondary-pill cursor-pointer border-0 text-sm font-semibold"
+                                >
+                                  Review draft anyway
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCaptureClarifyReply('')
+                                  setCaptureRawInput(captureRawInput)
+                                  setCaptureMode('input')
+                                }}
+                                className="inline-flex cursor-pointer items-center gap-1 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                              >
+                                <RotateCcw size={13} />
+                                Edit from scratch
+                              </button>
+                              <button
+                                type="button"
+                                onClick={resetCapture}
+                                className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </form>
                         </div>
-                      </form>
-                    </div>
+                      )}
+                    </>
                   ) : null}
 
                   {captureMode === 'success' && threadReplySucceeded ? (

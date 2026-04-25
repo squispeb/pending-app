@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   SelectedTaskSummaryCard,
   VoiceTaskActionConfirmationPanel,
+  VoiceTaskClarifyPanel,
   VoiceTaskStatusPanel,
 } from './GlobalCaptureHost'
 
@@ -104,6 +105,18 @@ describe('SelectedTaskSummaryCard', () => {
     )
     expect(markup).not.toContain('Due')
     expect(markup).not.toContain('priority')
+  })
+
+  it('renders task notes when provided', () => {
+    const markup = renderToStaticMarkup(
+      <SelectedTaskSummaryCard
+        title="Run Quick Discovery"
+        status="active"
+        notes="Capture risks, constraints, and candidate customer calls."
+      />,
+    )
+
+    expect(markup).toContain('Capture risks, constraints, and candidate customer calls.')
   })
 })
 
@@ -264,5 +277,40 @@ describe('GlobalCaptureHost voice panels', () => {
     )
 
     expect(markup).toContain('Failed to update task status.')
+  })
+
+  it('renders the task clarify panel with task details and voice reply affordance', () => {
+    const markup = renderToStaticMarkup(
+      <VoiceTaskClarifyPanel
+        transcript="I want us to edit the Run Quick Discovery task."
+        message="I need a little more detail before I can edit this task."
+        questions={['What should I change?']}
+        reply=""
+        isSubmitting={false}
+        isRecording={false}
+        error={null}
+        taskAction="edit_task"
+        task={{
+          title: 'Run Quick Discovery',
+          status: 'active',
+          notes: 'Capture risks, constraints, and candidate customer calls.',
+          dueDate: '2026-04-10',
+          dueTime: null,
+          priority: 'high',
+          source: 'context_task',
+        }}
+        onReplyChange={() => {}}
+        onSubmit={(event) => event.preventDefault()}
+        onStartVoiceReply={() => {}}
+        onEditFromScratch={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Run Quick Discovery')
+    expect(markup).toContain('Capture risks, constraints, and candidate customer calls.')
+    expect(markup).toContain('What should I change?')
+    expect(markup).toContain('Reply with voice')
+    expect(markup).toContain('Describe the task change you want…')
   })
 })

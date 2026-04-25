@@ -804,4 +804,68 @@ describe('capture service', () => {
     expect(task?.status).toBe('archived')
     expect(task?.archivedAt).not.toBeNull()
   })
+
+  it('applies voice task edits through the task update boundary on confirmation', async () => {
+    const service = createCaptureService(db, null)
+
+    await db.run(sql`
+      INSERT INTO users (
+        id,
+        email,
+        timezone,
+        created_at,
+        updated_at
+      ) VALUES (
+        ${userId},
+        'me@example.com',
+        'UTC',
+        (unixepoch() * 1000),
+        (unixepoch() * 1000)
+      );
+    `)
+
+    await db.run(sql`
+      INSERT INTO tasks (
+        id,
+        user_id,
+        title,
+        notes,
+        status,
+        priority,
+        due_date,
+        created_at,
+        updated_at
+      ) VALUES (
+        'task-1',
+        ${userId},
+        'Call the bank',
+        'Original note',
+        'active',
+        'medium',
+        '2026-04-09',
+        (unixepoch() * 1000),
+        (unixepoch() * 1000)
+      );
+    `)
+
+    const result = await service.confirmVoiceTaskAction(userId, {
+      taskId: 'task-1',
+      action: 'edit_task',
+      edits: {
+        title: 'Call the bank and verify the transfer',
+        description: 'Updated note',
+        dueDate: '2026-04-10',
+      },
+    })
+
+    expect(result).toEqual({ ok: true })
+
+    const task = await db.query.tasks.findFirst({
+      where: (tasks, { eq }) => eq(tasks.id, 'task-1'),
+    })
+
+    expect(task?.title).toBe('Call the bank and verify the transfer')
+    expect(task?.notes).toBe('Updated note')
+    expect(task?.dueDate).toBe('2026-04-10')
+  })
 })

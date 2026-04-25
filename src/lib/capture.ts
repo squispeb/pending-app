@@ -26,7 +26,26 @@ export const voiceTaskActionKindSchema = z.enum([
   'edit_task',
   'unsupported_task_action',
 ])
-export const confirmVoiceTaskActionKindSchema = z.enum(['complete_task', 'reopen_task', 'archive_task'])
+export const confirmVoiceTaskActionKindSchema = z.enum([
+  'complete_task',
+  'reopen_task',
+  'archive_task',
+  'edit_task',
+])
+export const voiceTaskEditChangesSchema = z
+  .object({
+    title: z.string().trim().min(1).max(120).optional(),
+    description: z.string().trim().min(1).max(2000).optional(),
+    dueDate: captureDateSchema.optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.title && value.description === undefined && value.dueDate === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'At least one task edit is required',
+      })
+    }
+  })
 export const voiceCalendarActionKindSchema = z.enum([
   'create_calendar_event',
   'edit_calendar_event',
@@ -207,6 +226,15 @@ export const confirmCapturedIdeaInputSchema = z.object({
 export const confirmVoiceTaskActionInputSchema = z.object({
   taskId: z.string().trim().min(1).max(120),
   action: confirmVoiceTaskActionKindSchema,
+  edits: voiceTaskEditChangesSchema.optional(),
+}).superRefine((value, ctx) => {
+  if (value.action === 'edit_task' && !value.edits) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['edits'],
+      message: 'Task edits are required for edit confirmations',
+    })
+  }
 })
 
 export const processVoiceCaptureInputSchema = transcribeAudioUploadInputSchema.extend({
@@ -216,6 +244,19 @@ export const processVoiceCaptureInputSchema = transcribeAudioUploadInputSchema.e
   contextTaskId: z.string().trim().min(1).max(120).optional(),
   contextIdeaId: z.string().trim().min(1).max(120).optional(),
   visibleTaskWindow: visibleTaskWindowSchema.optional(),
+  followUpTaskAction: confirmVoiceTaskActionKindSchema.optional(),
+})
+
+export const processVoiceCaptureTextInputSchema = z.object({
+  transcript: z.string().trim().min(1).max(4000),
+  language: transcriptionDetectedLanguageSchema.default('unknown'),
+  currentDate: captureDateSchema,
+  timezone: z.string().trim().min(1).max(120),
+  routeIntent: captureRouteIntentSchema.optional(),
+  contextTaskId: z.string().trim().min(1).max(120).optional(),
+  contextIdeaId: z.string().trim().min(1).max(120).optional(),
+  visibleTaskWindow: visibleTaskWindowSchema.optional(),
+  followUpTaskAction: confirmVoiceTaskActionKindSchema.optional(),
 })
 
 export const processVoiceCaptureAutoSavedSchema = z.object({
@@ -245,6 +286,23 @@ export const processVoiceCaptureReviewSchema = z.object({
   draft: typedTaskDraftSchema,
 })
 
+const resolvedVoiceTaskSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().trim().min(1),
+  status: taskStatusSchema,
+  notes: z.string().trim().max(2000).nullable().optional(),
+  dueDate: z.string().nullable(),
+  dueTime: z.string().nullable(),
+  priority: taskPrioritySchema,
+  completedAt: z.string().nullable(),
+  source: z.enum(['context_task', 'context_idea', 'visible_window']),
+})
+
+const processVoiceCaptureClarifyTaskActionContextSchema = z.object({
+  action: confirmVoiceTaskActionKindSchema,
+  task: resolvedVoiceTaskSchema,
+})
+
 export const processVoiceCaptureClarifySchema = z.object({
   ok: z.literal(true),
   outcome: z.literal('clarify'),
@@ -253,17 +311,7 @@ export const processVoiceCaptureClarifySchema = z.object({
   message: z.string().trim().min(1),
   questions: z.array(z.string().trim().min(1)).min(1),
   draft: typedTaskDraftSchema.nullable(),
-})
-
-const resolvedVoiceTaskSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().trim().min(1),
-  status: taskStatusSchema,
-  dueDate: z.string().nullable(),
-  dueTime: z.string().nullable(),
-  priority: taskPrioritySchema,
-  completedAt: z.string().nullable(),
-  source: z.enum(['context_task', 'context_idea', 'visible_window']),
+  taskActionContext: processVoiceCaptureClarifyTaskActionContextSchema.optional(),
 })
 
 export const processVoiceCaptureTaskStatusSchema = z.object({
@@ -283,6 +331,7 @@ export const processVoiceCaptureTaskActionConfirmationSchema = z.object({
   message: z.string().trim().min(1),
   action: confirmVoiceTaskActionKindSchema,
   task: resolvedVoiceTaskSchema,
+  edits: voiceTaskEditChangesSchema.optional(),
 })
 
 export const processVoiceCaptureFailureSchema = z.object({
@@ -306,6 +355,7 @@ export type CaptureRouteIntent = z.infer<typeof captureRouteIntentSchema>
 export type VoiceIntentFamily = z.infer<typeof voiceIntentFamilySchema>
 export type VoiceTaskActionKind = z.infer<typeof voiceTaskActionKindSchema>
 export type ConfirmVoiceTaskActionKind = z.infer<typeof confirmVoiceTaskActionKindSchema>
+export type VoiceTaskEditChanges = z.infer<typeof voiceTaskEditChangesSchema>
 export type VoiceCalendarActionKind = z.infer<typeof voiceCalendarActionKindSchema>
 export type VoiceIntentClassification = z.infer<typeof voiceIntentClassificationSchema>
 export type CandidateType = z.infer<typeof candidateTypeSchema>
@@ -321,6 +371,7 @@ export type ConfirmCapturedIdeaInput = z.infer<typeof confirmCapturedIdeaInputSc
 export type ConfirmVoiceTaskActionInput = z.infer<typeof confirmVoiceTaskActionInputSchema>
 export type MatchedCalendarContext = z.infer<typeof matchedCalendarContextSchema>
 export type ProcessVoiceCaptureInput = z.infer<typeof processVoiceCaptureInputSchema>
+export type ProcessVoiceCaptureTextInput = z.infer<typeof processVoiceCaptureTextInputSchema>
 export type ProcessVoiceCaptureAutoSaved = z.infer<typeof processVoiceCaptureAutoSavedSchema>
 export type ProcessVoiceCaptureIdeaConfirmation = z.infer<typeof processVoiceCaptureIdeaConfirmationSchema>
 export type ProcessVoiceCaptureReview = z.infer<typeof processVoiceCaptureReviewSchema>
@@ -932,6 +983,111 @@ export function buildVoiceTaskActionConfirmationMessage(
   return `I understood that as reopening the task "${task.title}". Confirm if you want me to move it back to active.`
 }
 
+export function buildVoiceTaskEditConfirmationMessage(
+  task: { title: string },
+  edits: VoiceTaskEditChanges,
+  language: z.infer<typeof transcriptionDetectedLanguageSchema>,
+) {
+  const changeParts: Array<string> = []
+
+  if (edits.title) {
+    changeParts.push(language === 'es' ? `título \"${edits.title}\"` : `title "${edits.title}"`)
+  }
+
+  if (edits.description !== undefined) {
+    changeParts.push(language === 'es' ? 'descripción actualizada' : 'description updated')
+  }
+
+  if (edits.dueDate !== undefined) {
+    changeParts.push(language === 'es' ? `fecha de vencimiento \"${edits.dueDate}\"` : `due date "${edits.dueDate}"`)
+  }
+
+  if (language === 'es') {
+    return `Entendí eso como editar la tarea "${task.title}" para ${changeParts.join(', ')}. Confirma si quieres que aplique esos cambios.`
+  }
+
+  return `I understood that as editing the task "${task.title}" to ${changeParts.join(', ')}. Confirm if you want me to apply those changes.`
+}
+
+function extractVoiceTaskEditFieldValue(value: string, cues: Array<RegExp>) {
+  for (const cue of cues) {
+    const match = value.match(cue)
+
+    if (match?.[1]) {
+      return match[1].replace(/^[\s:,-]+|[\s:,-]+$/g, '').trim() || null
+    }
+  }
+
+  return null
+}
+
+function splitVoiceTaskEditClauses(value: string) {
+  return value
+    .split(/\s*(?:,|;|\band\b|\by\b)\s*/i)
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
+function normalizeVoiceTaskEditClause(value: string) {
+  return value
+    .replace(/^update\s+(?:the\s+)?description\s+to\s+/i, 'description ')
+    .replace(/^change\s+(?:the\s+)?description\s+to\s+/i, 'description ')
+    .replace(/^set\s+(?:the\s+)?description\s+to\s+/i, 'description ')
+    .replace(/^update\s+(?:the\s+)?notes?\s+to\s+/i, 'notes ')
+    .replace(/^change\s+(?:the\s+)?notes?\s+to\s+/i, 'notes ')
+    .replace(/^set\s+(?:the\s+)?notes?\s+to\s+/i, 'notes ')
+    .trim()
+}
+
+export function inferVoiceTaskEditChanges(
+  input: Pick<InterpretCaptureInput, 'rawInput' | 'currentDate' | 'timezone'>,
+) {
+  const normalizedInput = normalizeCaptureInput(input.rawInput)
+
+  if (!normalizedInput) {
+    return null
+  }
+
+  const clauses = splitVoiceTaskEditClauses(normalizedInput)
+  let title: string | undefined
+  let description: string | undefined
+  let dueDate: string | undefined
+
+  for (const clause of clauses) {
+    const normalizedClause = normalizeVoiceTaskEditClause(clause)
+
+    if (!title) {
+      title = extractVoiceTaskEditFieldValue(normalizedClause, [
+        /\b(?:rename|renombra(?:r)?|retitle|set title|change title)\s+(?:this\s+task\s+)?(?:to|as|a|al)?\s+(.+)$/i,
+        /\b(?:title)\s*(?:to|as|:)?\s+(.+)$/i,
+      ]) ?? undefined
+    }
+
+    if (!description) {
+      description = extractVoiceTaskEditFieldValue(normalizedClause, [
+        /\b(?:description|descripci[oó]n|notes?|nota(?:s)?)\s*(?:to|as|:)?\s+(.+)$/i,
+      ]) ?? undefined
+    }
+
+    if (!dueDate) {
+      const inferredDueDate = inferDueDateFromInput(clause, input.currentDate, input.timezone)
+      if (inferredDueDate) {
+        dueDate = inferredDueDate
+      }
+    }
+  }
+
+  if (!title && !description && !dueDate) {
+    return null
+  }
+
+  return voiceTaskEditChangesSchema.parse({
+    title,
+    description,
+    dueDate,
+  })
+}
+
 export function buildVoiceTaskActionAlreadyAppliedMessage(
   task: { title: string },
   action: ConfirmVoiceTaskActionKind,
@@ -974,6 +1130,7 @@ export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCa
   const contextTaskId = input.get('contextTaskId')
   const contextIdeaId = input.get('contextIdeaId')
   const visibleTaskWindow = input.get('visibleTaskWindow')
+  const followUpTaskAction = input.get('followUpTaskAction')
 
   let parsedVisibleTaskWindow: unknown = undefined
 
@@ -995,5 +1152,7 @@ export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCa
     contextTaskId: typeof contextTaskId === 'string' && contextTaskId ? contextTaskId : undefined,
     contextIdeaId: typeof contextIdeaId === 'string' && contextIdeaId ? contextIdeaId : undefined,
     visibleTaskWindow: parsedVisibleTaskWindow,
+    followUpTaskAction:
+      typeof followUpTaskAction === 'string' && followUpTaskAction ? followUpTaskAction : undefined,
   })
 }

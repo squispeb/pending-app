@@ -547,6 +547,234 @@ describe('voice capture processor', () => {
     })
   })
 
+  it('returns a task edit confirmation with prepared task field changes', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Rename this task to Draft launch email, update the description to include the Q2 launch checklist, and move it to tomorrow',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'resolved' as const,
+            task: {
+              id: 'task-123',
+              title: 'Draft launch note',
+              status: 'active' as const,
+              dueDate: '2026-04-09',
+              dueTime: null,
+              priority: 'medium' as const,
+              completedAt: null,
+              source: 'context_task' as const,
+            },
+          }
+        },
+      },
+    }, {
+      async classify() {
+        return {
+          family: 'task_action',
+          kind: 'edit_task',
+        }
+      },
+    })
+
+    const result = await processor.processVoiceCapture(sampleUpload)
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'task_action_confirmation',
+      transcript: 'Rename this task to Draft launch email, update the description to include the Q2 launch checklist, and move it to tomorrow',
+      language: 'en',
+      message: 'I understood that as editing the task "Draft launch note" to title "Draft launch email", description updated, due date "2026-04-09". Confirm if you want me to apply those changes.',
+      action: 'edit_task',
+      task: {
+        id: 'task-123',
+        title: 'Draft launch note',
+        status: 'active',
+        dueDate: '2026-04-09',
+        dueTime: null,
+        priority: 'medium',
+        completedAt: null,
+        source: 'context_task',
+      },
+      edits: {
+        title: 'Draft launch email',
+        description: 'include the Q2 launch checklist',
+        dueDate: '2026-04-09',
+      },
+    })
+  })
+
+  it('keeps resolved task context when an edit request needs more detail', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'I want us to edit the Run Quick Discovery task.',
+            language: 'unknown' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'resolved' as const,
+            task: {
+              id: 'task-quick-discovery',
+              title: 'Run Quick Discovery',
+              status: 'active' as const,
+              notes: 'Capture risks, constraints, and candidate customer calls.',
+              dueDate: '2026-04-10',
+              dueTime: null,
+              priority: 'high' as const,
+              completedAt: null,
+              source: 'context_task' as const,
+            },
+          }
+        },
+      },
+    }, {
+      async classify() {
+        return {
+          family: 'task_action',
+          kind: 'edit_task',
+        }
+      },
+    })
+
+    const result = await processor.processVoiceCapture(sampleUpload)
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'I want us to edit the Run Quick Discovery task.',
+      language: 'unknown',
+      message: 'I need a little more detail before I can edit this task.',
+      questions: ['What should I change?'],
+      draft: null,
+      taskActionContext: {
+        action: 'edit_task',
+        task: {
+          id: 'task-quick-discovery',
+          title: 'Run Quick Discovery',
+          status: 'active',
+          notes: 'Capture risks, constraints, and candidate customer calls.',
+          dueDate: '2026-04-10',
+          dueTime: null,
+          priority: 'high',
+          completedAt: null,
+          source: 'context_task',
+        },
+      },
+    })
+  })
+
+  it('processes typed follow-up edit replies against the same task context', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          throw new Error('Should not be called')
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget(input) {
+          expect(input.contextTaskId).toBe('task-quick-discovery')
+
+          return {
+            kind: 'resolved' as const,
+            task: {
+              id: 'task-quick-discovery',
+              title: 'Run Quick Discovery',
+              status: 'active' as const,
+              notes: 'Capture risks, constraints, and candidate customer calls.',
+              dueDate: '2026-04-10',
+              dueTime: null,
+              priority: 'high' as const,
+              completedAt: null,
+              source: 'context_task' as const,
+            },
+          }
+        },
+      },
+    }, {
+      async classify() {
+        throw new Error('Should not be called')
+      },
+    })
+
+    const result = await processor.processVoiceTranscript({
+      transcript: 'change the due date to tomorrow',
+      language: 'en',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+      contextTaskId: 'task-quick-discovery',
+      followUpTaskAction: 'edit_task',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'task_action_confirmation',
+      transcript: 'change the due date to tomorrow',
+      language: 'en',
+      message: 'I understood that as editing the task "Run Quick Discovery" to due date "2026-04-09". Confirm if you want me to apply those changes.',
+      action: 'edit_task',
+      task: {
+        id: 'task-quick-discovery',
+        title: 'Run Quick Discovery',
+        status: 'active',
+        notes: 'Capture risks, constraints, and candidate customer calls.',
+        dueDate: '2026-04-10',
+        dueTime: null,
+        priority: 'high',
+        completedAt: null,
+        source: 'context_task',
+      },
+      edits: {
+        dueDate: '2026-04-09',
+      },
+    })
+  })
+
   it('uses visible task window timing cues to prepare a completion confirmation', async () => {
     const processor = createProcessorWithIntentClassifier({
       transcriptionBroker: {
@@ -770,6 +998,19 @@ describe('voice capture processor', () => {
       message: 'The task "Call the bank" is already completed.',
       questions: ['Do you want to do anything else with this task?'],
       draft: null,
+      taskActionContext: {
+        action: 'complete_task',
+        task: {
+          id: 'task-123',
+          title: 'Call the bank',
+          status: 'completed',
+          dueDate: null,
+          dueTime: null,
+          priority: 'medium',
+          completedAt: '2026-04-09T15:00:00.000Z',
+          source: 'context_task',
+        },
+      },
     })
   })
 
@@ -830,6 +1071,19 @@ describe('voice capture processor', () => {
       message: 'The task "Call the bank" is already active.',
       questions: ['Do you want to do anything else with this task?'],
       draft: null,
+      taskActionContext: {
+        action: 'reopen_task',
+        task: {
+          id: 'task-123',
+          title: 'Call the bank',
+          status: 'active',
+          dueDate: null,
+          dueTime: null,
+          priority: 'medium',
+          completedAt: null,
+          source: 'context_task',
+        },
+      },
     })
   })
 
@@ -1415,6 +1669,19 @@ describe('voice capture processor', () => {
       message: 'The task "Better onboarding" is already archived.',
       questions: ['Do you want to do anything else with this task?'],
       draft: null,
+      taskActionContext: {
+        action: 'archive_task',
+        task: {
+          id: 'task-123',
+          title: 'Better onboarding',
+          status: 'archived',
+          dueDate: null,
+          dueTime: null,
+          priority: 'medium',
+          completedAt: null,
+          source: 'visible_window',
+        },
+      },
     })
   })
 
