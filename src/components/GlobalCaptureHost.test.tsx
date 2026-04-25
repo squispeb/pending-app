@@ -111,7 +111,7 @@ describe('SelectedTaskSummaryCard', () => {
 // VoiceTaskStatusPanel
 // ---------------------------------------------------------------------------
 describe('GlobalCaptureHost voice panels', () => {
-  it('renders the task status panel with transcript and status message', () => {
+  it('renders the task status panel with status message and done button', () => {
     const markup = renderToStaticMarkup(
       <VoiceTaskStatusPanel
         transcript="What is the status of this task?"
@@ -120,11 +120,11 @@ describe('GlobalCaptureHost voice panels', () => {
       />,
     )
 
-    expect(markup).toContain('Transcript')
-    expect(markup).toContain('What is the status of this task?')
-    expect(markup).toContain('Status')
     expect(markup).toContain('The task &quot;Call the bank&quot; is completed.')
     expect(markup).toContain('Done')
+    // Transcript block removed
+    expect(markup).not.toContain('Transcript')
+    expect(markup).not.toContain('What is the status of this task?')
   })
 
   it('renders the task status panel with a selected task summary card', () => {
@@ -149,9 +149,9 @@ describe('GlobalCaptureHost voice panels', () => {
     expect(markup).toContain('Due 2026-05-10 at 10:00')
     expect(markup).toContain('High priority')
     expect(markup).toContain('From screen')
-    // Still has transcript and status message
-    expect(markup).toContain('What is the status of my call task?')
     expect(markup).toContain('The task')
+    // Transcript not rendered
+    expect(markup).not.toContain('What is the status of my call task?')
   })
 
   it('renders the task status panel without a task card when task is not provided', () => {
@@ -167,7 +167,7 @@ describe('GlobalCaptureHost voice panels', () => {
     expect(markup).not.toContain('>Task<')
   })
 
-  it('renders the task action confirmation panel with action summary and controls', () => {
+  it('renders the task action confirmation panel with action prompt and controls', () => {
     const markup = renderToStaticMarkup(
       <VoiceTaskActionConfirmationPanel
         transcript="Mark this task as done"
@@ -181,12 +181,15 @@ describe('GlobalCaptureHost voice panels', () => {
       />,
     )
 
-    expect(markup).toContain('Transcript')
-    expect(markup).toContain('Mark this task as done')
-    expect(markup).toContain('Pending action')
     expect(markup).toContain('Complete this task')
     expect(markup).toContain('Complete task')
     expect(markup).toContain('Cancel')
+    // Transcript and "Pending action" label removed
+    expect(markup).not.toContain('Transcript')
+    expect(markup).not.toContain('Mark this task as done')
+    expect(markup).not.toContain('Pending action')
+    // Long interpretation sentence not rendered
+    expect(markup).not.toContain('I understood that as')
   })
 
   it('renders the task action confirmation panel with a selected task summary card', () => {
@@ -215,8 +218,6 @@ describe('GlobalCaptureHost voice panels', () => {
     expect(markup).toContain('Active')
     expect(markup).toContain('Due 2026-05-15')
     expect(markup).toContain('Medium priority')
-    // Transcript and action blocks preserved
-    expect(markup).toContain('Complete my bank task')
     expect(markup).toContain('Complete this task')
     expect(markup).toContain('Cancel')
   })

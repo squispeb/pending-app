@@ -159,24 +159,12 @@ type VoiceTaskStatusPanelProps = {
   onDone: () => void
 }
 
-export function VoiceTaskStatusPanel({ transcript, message, task, onDone }: VoiceTaskStatusPanelProps) {
+export function VoiceTaskStatusPanel({ transcript: _transcript, message, task, onDone }: VoiceTaskStatusPanelProps) {
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
-        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
-          Transcript
-        </span>
-        <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{transcript}</p>
-      </div>
-
       {task ? <SelectedTaskSummaryCard {...task} /> : null}
 
-      <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-4">
-        <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
-          Status
-        </span>
-        <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{message}</p>
-      </div>
+      <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{message}</p>
 
       <div className="flex flex-wrap items-center gap-3">
         <button
@@ -204,8 +192,8 @@ type VoiceTaskActionConfirmationPanelProps = {
 }
 
 export function VoiceTaskActionConfirmationPanel({
-  transcript,
-  message,
+  transcript: _transcript,
+  message: _message,
   actionLabel,
   confirmLabel,
   isConfirming,
@@ -216,22 +204,9 @@ export function VoiceTaskActionConfirmationPanel({
 }: VoiceTaskActionConfirmationPanelProps) {
   return (
     <form className="space-y-4" onSubmit={onConfirm}>
-      <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
-        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
-          Transcript
-        </span>
-        <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{transcript}</p>
-      </div>
-
       {task ? <SelectedTaskSummaryCard {...task} /> : null}
 
-      <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-4">
-        <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
-          Pending action
-        </span>
-        <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">{actionLabel}</p>
-        <p className="m-0 mt-2 text-sm leading-6 text-[var(--ink-soft)]">{message}</p>
-      </div>
+      <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">{actionLabel}</p>
 
       {error ? <p className="m-0 text-sm font-medium text-red-500">{error}</p> : null}
 
