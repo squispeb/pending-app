@@ -1,6 +1,103 @@
 import { z } from 'zod'
 import { env } from '../lib/env'
 
+const assistantSessionChannelSchema = z.enum(['voice', 'text', 'mixed'])
+const assistantTranscriptLanguageSchema = z.enum(['es', 'en', 'unknown'])
+
+const assistantSessionTurnSchema = z.object({
+  turnId: z.string().min(1),
+  source: z.enum(['text', 'voice']),
+  userMessage: z.string().min(1),
+  transcriptLanguage: assistantTranscriptLanguageSchema.nullable(),
+  state: z.enum(['queued', 'processing', 'streaming', 'completed', 'failed']),
+  createdAt: z.string().min(1),
+  completedAt: z.string().min(1).nullable(),
+})
+
+const assistantSessionVisibleEventBaseSchema = z.object({
+  eventId: z.string().min(1),
+  createdAt: z.string().min(1),
+  summary: z.string().min(1),
+  visibleToUser: z.literal(true),
+})
+
+const assistantSessionEventSchema = z.discriminatedUnion('type', [
+  assistantSessionVisibleEventBaseSchema.extend({ type: z.literal('session_started') }),
+  assistantSessionVisibleEventBaseSchema.extend({ type: z.literal('user_turn_added') }),
+  assistantSessionVisibleEventBaseSchema.extend({ type: z.literal('assistant_question') }),
+  assistantSessionVisibleEventBaseSchema.extend({ type: z.literal('assistant_synthesis') }),
+  assistantSessionVisibleEventBaseSchema.extend({ type: z.literal('assistant_failed') }),
+])
+
+const taskEditChangesSchema = z.object({
+  title: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dueTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+})
+
+const assistantTaskEditWorkflowSchema = z.object({
+  kind: z.literal('task_edit'),
+  phase: z.enum(['collecting', 'ready_to_confirm', 'completed', 'blocked']),
+  task: z.object({
+    taskId: z.string().min(1),
+    title: z.string().min(1),
+    notes: z.string().nullable().optional(),
+    dueDate: z.string().nullable().optional(),
+    dueTime: z.string().nullable().optional(),
+    priority: z.enum(['low', 'medium', 'high']).nullable().optional(),
+  }),
+  requestedFields: z.array(z.enum(['title', 'description', 'dueDate', 'dueTime'])),
+  missingFields: z.array(z.enum(['title', 'description', 'dueDate', 'dueTime'])),
+  activeField: z.enum(['title', 'description', 'dueDate', 'dueTime']).nullable(),
+  fieldAttempts: z.object({
+    title: z.number().int().nonnegative(),
+    description: z.number().int().nonnegative(),
+    dueDate: z.number().int().nonnegative(),
+    dueTime: z.number().int().nonnegative(),
+  }),
+  changes: taskEditChangesSchema,
+  result: z.object({
+    outcome: z.enum(['confirmed', 'cancelled']),
+    completedAt: z.string().min(1),
+    applyPayload: z.object({
+      action: z.literal('edit_task'),
+      taskId: z.string().min(1),
+      edits: taskEditChangesSchema,
+    }).nullable(),
+  }).nullable(),
+})
+
+const assistantSessionViewSchema = z.object({
+  sessionId: z.string().min(1),
+  userId: z.string().min(1),
+  channel: assistantSessionChannelSchema,
+  status: z.enum(['idle', 'queued', 'processing', 'streaming', 'failed']),
+  activeTurn: assistantSessionTurnSchema.nullable(),
+  queuedTurns: z.array(assistantSessionTurnSchema),
+  lastTurn: assistantSessionTurnSchema.nullable(),
+  visibleEvents: z.array(assistantSessionEventSchema),
+  context: z.object({
+    routeIntent: z.enum(['tasks', 'habits', 'ideas', 'auto']).optional(),
+    target: z.object({
+      kind: z.enum(['task', 'idea', 'calendar_event', 'general']),
+      id: z.string().min(1).optional(),
+      label: z.string().min(1),
+    }).nullable().optional(),
+    notes: z.array(z.string().min(1)).max(10).optional(),
+  }).nullable(),
+  workflow: z.discriminatedUnion('kind', [assistantTaskEditWorkflowSchema]).nullable(),
+})
+
+const submitAssistantSessionTurnResponseSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('accepted'),
+  turnId: z.string().min(1),
+  state: z.enum(['processing', 'queued']),
+  queueDepth: z.number().int().nonnegative(),
+  session: assistantSessionViewSchema,
+})
+
 const visibleThreadEventBaseSchema = z.object({
   eventId: z.string().min(1),
   createdAt: z.string().min(1),
@@ -578,6 +675,160 @@ export async function streamAssistantIdeaThread(
   return response
 }
 
+export async function streamAssistantSession(
+  input: { sessionId: string; authHeaders: HeadersInit; lastEventId?: string | null },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+
+  if (!baseUrl) {
+    throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  }
+
+  const headers = new Headers(input.authHeaders)
+  headers.set('accept', 'text/event-stream')
+
+  if (input.lastEventId) {
+    headers.set('last-event-id', input.lastEventId)
+  }
+
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/sessions/${input.sessionId}/stream`, {
+    method: 'GET',
+    headers,
+  })
+
+  if (!response.ok) {
+    const payload = await parseAssistantResponse(response)
+    throw new Error(typeof payload === 'object' && payload && 'message' in payload ? String(payload.message) : 'Assistant session stream request failed')
+  }
+
+  if (!response.body) {
+    throw new Error('Assistant session stream did not return a response body')
+  }
+
+  return response
+}
+
+export async function resolveAssistantTaskEditSession(
+  input: {
+    sessionId?: string
+    authHeaders: HeadersInit
+    task: {
+      taskId: string
+      title: string
+      notes?: string | null
+      dueDate?: string | null
+      dueTime?: string | null
+      priority?: 'low' | 'medium' | 'high' | null
+    }
+    routeIntent?: 'tasks' | 'habits' | 'ideas' | 'auto'
+    requestedFields?: Array<'title' | 'description' | 'dueDate' | 'dueTime'>
+    activeField?: 'title' | 'description' | 'dueDate' | 'dueTime' | null
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+
+  if (!baseUrl) {
+    throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  }
+
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/sessions/resolve`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      channel: 'mixed',
+      context: {
+        ...(input.routeIntent ? { routeIntent: input.routeIntent } : {}),
+        target: {
+          kind: 'task',
+          id: input.task.taskId,
+          label: input.task.title,
+        },
+      },
+      workflow: {
+        kind: 'task_edit',
+        phase: 'collecting',
+        task: input.task,
+        requestedFields: input.requestedFields ?? [],
+        missingFields: input.requestedFields ?? [],
+        activeField: input.activeField ?? null,
+        fieldAttempts: {
+          title: 0,
+          description: 0,
+          dueDate: 0,
+          dueTime: 0,
+        },
+        changes: {},
+        result: null,
+      },
+    }),
+  })
+
+  const payload = await parseAssistantResponse(response)
+  return assistantSessionViewSchema.parse(payload)
+}
+
+export async function getAssistantSession(
+  input: { sessionId: string; authHeaders: HeadersInit },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+
+  if (!baseUrl) {
+    throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  }
+
+  const headers = new Headers(input.authHeaders)
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/sessions/${input.sessionId}`, {
+    method: 'GET',
+    headers,
+  })
+
+  const payload = await parseAssistantResponse(response)
+  return assistantSessionViewSchema.parse(payload)
+}
+
+export async function submitAssistantSessionTurn(
+  input: {
+    sessionId: string
+    authHeaders: HeadersInit
+    message: string
+    source: 'text' | 'voice'
+    transcriptLanguage?: 'es' | 'en' | 'unknown' | null
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+
+  if (!baseUrl) {
+    throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  }
+
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/sessions/${input.sessionId}/turns`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      message: input.message,
+      source: input.source,
+      ...(input.transcriptLanguage !== undefined ? { transcriptLanguage: input.transcriptLanguage } : {}),
+    }),
+  })
+
+  const payload = await parseAssistantResponse(response)
+  return submitAssistantSessionTurnResponseSchema.parse(payload)
+}
+
+export type AssistantSessionView = z.infer<typeof assistantSessionViewSchema>
+export type SubmitAssistantSessionTurnResponse = z.infer<typeof submitAssistantSessionTurnResponseSchema>
+
 export async function approveIdeaThreadProposal(
   input: {
     ideaId: string
@@ -788,3 +1039,4 @@ export async function rejectIdeaThreadStructuredAction(
 }
 
 export type GetIdeaThreadResponse = z.infer<typeof getIdeaThreadResponseSchema>
+export type AssistantSessionView = z.infer<typeof assistantSessionViewSchema>

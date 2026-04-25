@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { CalendarDays, CheckCircle, ChevronDown, Lightbulb, Mic, RotateCcw, SendHorizonal, Sparkles, Square, X } from 'lucide-react'
+import { CalendarDays, CheckCircle, ChevronDown, Lightbulb, Mic, RotateCcw, SendHorizonal, Square, X } from 'lucide-react'
 import {
   useMutation,
   useQueryClient,
@@ -20,6 +20,7 @@ import {
   getTodayDateString,
   type TaskFormValues,
 } from '../lib/tasks'
+import { formatDisplayDate, formatDisplayTime } from '../lib/date-time'
 import type {
   CandidateType,
   ConfirmVoiceTaskActionKind,
@@ -31,6 +32,8 @@ import type {
 } from '../lib/capture'
 import { shouldAutoCreateIdeaCapture } from '../lib/capture-flow'
 import { getIdeaThreadTarget, getRouteIntent, routeContext } from '../lib/capture-routing'
+import { createAssistantSessionStreamState } from '../lib/assistant-session-stream'
+import { applyAssistantSessionStreamResponse } from '../lib/assistant-session-streaming'
 import {
   confirmCapturedIdea as confirmCapturedIdeaFn,
   confirmCapturedHabit as confirmCapturedHabitFn,
@@ -39,6 +42,8 @@ import {
   interpretCaptureInput,
   processVoiceCapture,
   processVoiceCaptureTranscript,
+  submitAssistantTaskEditSessionTurn,
+  streamAssistantTaskEditSession,
 } from '../server/capture'
 import { submitIdeaThreadTurn } from '../server/ideas'
 import { transcribeCaptureAudio } from '../server/transcription'
@@ -167,6 +172,7 @@ type VoiceTaskClarifyPanelProps = {
   isSubmitting: boolean
   isRecording: boolean
   error: string | null
+  streamingAssistantText?: string
   taskAction?: ConfirmVoiceTaskActionKind | null
   task?: SelectedTaskSummaryCardProps | null
   onReplyChange: (value: string) => void
@@ -184,6 +190,7 @@ export function VoiceTaskClarifyPanel({
   isSubmitting,
   isRecording,
   error,
+  streamingAssistantText,
   taskAction,
   task,
   onReplyChange,
@@ -192,8 +199,6 @@ export function VoiceTaskClarifyPanel({
   onEditFromScratch,
   onCancel,
 }: VoiceTaskClarifyPanelProps) {
-  const isEditTask = taskAction === 'edit_task'
-
   return (
     <div className="space-y-4">
       {task ? <SelectedTaskSummaryCard {...task} /> : null}
@@ -207,6 +212,9 @@ export function VoiceTaskClarifyPanel({
 
       <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3">
         <p className="m-0 text-sm font-medium text-amber-200">{message}</p>
+        {streamingAssistantText ? (
+          <p className="m-0 mt-3 whitespace-pre-wrap text-sm leading-6 text-amber-100">{streamingAssistantText}</p>
+        ) : null}
         {questions.length > 0 ? (
           <ul className="m-0 mt-3 space-y-1 pl-4">
             {questions.map((question, index) => (
@@ -218,18 +226,6 @@ export function VoiceTaskClarifyPanel({
         ) : null}
       </div>
 
-      {isEditTask ? (
-        <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
-          <div className="mb-2 flex items-center gap-2 text-[var(--ink-soft)]">
-            <Sparkles size={15} />
-            <span className="text-xs font-semibold uppercase tracking-[0.1em]">Assistant tip</span>
-          </div>
-          <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">
-            Say or type the exact change, like “rename it to Quick Discovery Sprint”, “change the due date to tomorrow”, or “update the description to include stakeholder notes”.
-          </p>
-        </div>
-      ) : null}
-
       <form onSubmit={onSubmit} className="space-y-3">
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Your reply</span>
@@ -238,7 +234,7 @@ export function VoiceTaskClarifyPanel({
             value={reply}
             onChange={(e) => onReplyChange(e.target.value)}
             rows={3}
-            placeholder={isEditTask ? 'Describe the task change you want…' : 'Answer the questions above…'}
+            placeholder={taskAction === 'edit_task' ? 'Describe the task change you want…' : 'Answer the questions above…'}
             className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -325,8 +321,37 @@ type VoiceTaskActionConfirmationPanelProps = {
   isConfirming: boolean
   error: string | null
   task?: SelectedTaskSummaryCardProps | null
+  edits?: ProcessVoiceCaptureTaskActionConfirmation['edits']
   onConfirm: (event: React.FormEvent) => void
   onCancel: () => void
+}
+
+function formatTaskEditFieldLabel(field: 'title' | 'description' | 'dueDate' | 'dueTime') {
+  if (field === 'dueDate') {
+    return 'Due date'
+  }
+
+  if (field === 'dueTime') {
+    return 'Due time'
+  }
+
+  if (field === 'description') {
+    return 'Description'
+  }
+
+  return 'Title'
+}
+
+function formatTaskEditFieldValue(field: 'title' | 'description' | 'dueDate' | 'dueTime', value: string) {
+  if (field === 'dueDate') {
+    return formatDisplayDate(value)
+  }
+
+  if (field === 'dueTime') {
+    return formatDisplayTime(value)
+  }
+
+  return value
 }
 
 export function VoiceTaskActionConfirmationPanel({
@@ -337,14 +362,45 @@ export function VoiceTaskActionConfirmationPanel({
   isConfirming,
   error,
   task,
+  edits,
   onConfirm,
   onCancel,
 }: VoiceTaskActionConfirmationPanelProps) {
+  const editEntries: Array<{ field: 'title' | 'description' | 'dueDate' | 'dueTime'; value: string }> = []
+
+  if (edits?.title) {
+    editEntries.push({ field: 'title', value: edits.title })
+  }
+
+  if (edits?.description) {
+    editEntries.push({ field: 'description', value: edits.description })
+  }
+
+  if (edits?.dueDate) {
+    editEntries.push({
+      field: 'dueDate',
+      value: edits.dueTime ? `${formatDisplayDate(edits.dueDate)} at ${formatDisplayTime(edits.dueTime)}` : formatDisplayDate(edits.dueDate),
+    })
+  } else if (edits?.dueTime) {
+    editEntries.push({ field: 'dueTime', value: formatDisplayTime(edits.dueTime) })
+  }
+
   return (
     <form className="space-y-4" onSubmit={onConfirm}>
       {task ? <SelectedTaskSummaryCard {...task} /> : null}
 
       <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">{actionLabel}</p>
+
+      {editEntries.length > 0 ? (
+        <dl className="m-0 space-y-3 rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+          {editEntries.map(({ field, value }) => (
+            <div key={field} className="space-y-1">
+              <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">{formatTaskEditFieldLabel(field)}</dt>
+              <dd className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{field === 'dueDate' && edits?.dueTime ? value : formatTaskEditFieldValue(field, value)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
 
       {error ? <p className="m-0 text-sm font-medium text-red-500">{error}</p> : null}
 
@@ -435,8 +491,10 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   const [captureClarifyMessage, setCaptureClarifyMessage] = useState<string | null>(null)
   const [captureClarifyQuestions, setCaptureClarifyQuestions] = useState<string[]>([])
   const [captureClarifyReply, setCaptureClarifyReply] = useState('')
+  const [captureStreamingAssistantText, setCaptureStreamingAssistantText] = useState('')
   const [captureClarifyTaskActionContext, setCaptureClarifyTaskActionContext] =
     useState<ProcessVoiceCaptureClarify['taskActionContext'] | null>(null)
+  const [captureTaskEditSessionId, setCaptureTaskEditSessionId] = useState<string | null>(null)
   const [captureShowAdvanced, setCaptureShowAdvanced] = useState(false)
   const [captureThreadIdeaId, setCaptureThreadIdeaId] = useState<string | null>(null)
   const [captureContextIdeaId, setCaptureContextIdeaId] = useState<string | null>(null)
@@ -465,6 +523,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   // Refs for imperative teardown (no useEffect needed)
   const escapeHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null)
   const autoDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const taskEditStreamSessionRef = useRef(createAssistantSessionStreamState())
 
   const stopVisualizer = useCallback(() => {
     if (rafRef.current !== null) {
@@ -521,6 +580,151 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     }
 
     applyDraftForReview(result.draft, result.transcript, 'recording')
+  }
+
+  async function submitTaskEditFollowUpAndStream(input: {
+    transcript: string
+    source: 'text' | 'voice'
+    transcriptLanguage: 'es' | 'en' | 'unknown'
+  }) {
+    if (!captureTaskEditSessionId) {
+      return processVoiceCaptureTranscript({
+        data: {
+          transcript: input.transcript,
+          language: input.transcriptLanguage,
+          currentDate: getTodayDateString(),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          routeIntent,
+          contextTaskId: captureClarifyTaskActionContext?.task.id ?? captureContextTaskId ?? undefined,
+          contextIdeaId: captureContextIdeaId ?? undefined,
+          visibleTaskWindow:
+            captureVisibleTaskWindow && captureVisibleTaskWindow.length > 0 && !captureClarifyTaskActionContext?.task.id
+              ? captureVisibleTaskWindow
+              : undefined,
+          followUpTaskAction: captureClarifyTaskActionContext?.action ?? undefined,
+        },
+      })
+    }
+
+    setCaptureStreamingAssistantText('')
+    taskEditStreamSessionRef.current = createAssistantSessionStreamState()
+
+    const acceptedTurn = await submitAssistantTaskEditSessionTurn({
+      data: {
+        sessionId: captureTaskEditSessionId,
+        message: input.transcript,
+        source: input.source,
+        transcriptLanguage: input.transcriptLanguage,
+      },
+    })
+
+    const response = await streamAssistantTaskEditSession({
+      data: {
+        sessionId: captureTaskEditSessionId,
+        lastEventId: taskEditStreamSessionRef.current.lastStreamEventId,
+      },
+    })
+
+    await applyAssistantSessionStreamResponse({
+      response,
+      sessionState: taskEditStreamSessionRef.current,
+      onSessionState: (nextState) => {
+        taskEditStreamSessionRef.current = nextState
+      },
+      onStreamingAssistantText: setCaptureStreamingAssistantText,
+      onSessionSnapshot: () => {},
+      shouldStop: (event) => (
+        (event.type === 'turn_completed' || event.type === 'turn_failed')
+        && event.turnId === acceptedTurn.turnId
+      ),
+    })
+
+    const settledSession = taskEditStreamSessionRef.current.latestSession
+
+    if (!settledSession || !captureClarifyTaskActionContext?.task) {
+      throw new Error('Task edit session did not settle')
+    }
+
+    const workflow = settledSession.workflow
+
+    if (!workflow || workflow.kind !== 'task_edit') {
+      throw new Error('Task edit session workflow missing')
+    }
+
+    const latestQuestion = settledSession.visibleEvents
+      .filter((event) => event.type === 'assistant_question')
+      .at(-1)?.summary
+    const latestSynthesis = settledSession.visibleEvents
+      .filter((event) => event.type === 'assistant_synthesis')
+      .at(-1)?.summary
+
+    if (workflow.phase === 'ready_to_confirm') {
+      return {
+        ok: true as const,
+        outcome: 'task_action_confirmation' as const,
+        transcript: input.transcript,
+        language: input.transcriptLanguage,
+        message: latestQuestion ?? '',
+        action: 'edit_task' as const,
+        task: captureClarifyTaskActionContext.task,
+        edits: workflow.changes,
+        taskEditSession: {
+          sessionId: settledSession.sessionId,
+        },
+      }
+    }
+
+    if (workflow.phase === 'collecting') {
+      return {
+        ok: true as const,
+        outcome: 'clarify' as const,
+        transcript: input.transcript,
+        language: input.transcriptLanguage,
+        message: latestQuestion ?? 'What should I change?',
+        questions: [],
+        draft: null,
+        taskActionContext: {
+          action: 'edit_task' as const,
+          task: captureClarifyTaskActionContext.task,
+        },
+        taskEditSession: {
+          sessionId: settledSession.sessionId,
+        },
+      }
+    }
+
+    if (workflow.phase === 'completed' && workflow.result?.applyPayload) {
+      return {
+        ok: true as const,
+        outcome: 'task_action_confirmation' as const,
+        transcript: input.transcript,
+        language: input.transcriptLanguage,
+        message: latestSynthesis ?? latestQuestion ?? '',
+        action: 'edit_task' as const,
+        task: captureClarifyTaskActionContext.task,
+        edits: workflow.result.applyPayload.edits,
+        taskEditSession: {
+          sessionId: settledSession.sessionId,
+        },
+      }
+    }
+
+    return {
+      ok: true as const,
+      outcome: 'clarify' as const,
+      transcript: input.transcript,
+      language: input.transcriptLanguage,
+      message: latestSynthesis ?? 'I did not apply any task changes.',
+      questions: [latestQuestion ?? 'Do you want to try a different task edit?'],
+      draft: null,
+      taskActionContext: {
+        action: 'edit_task' as const,
+        task: captureClarifyTaskActionContext.task,
+      },
+      taskEditSession: {
+        sessionId: settledSession.sessionId,
+      },
+    }
   }
 
   // Cleanup on unmount
@@ -756,6 +960,14 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
 
   const voiceTranscriptFollowUpMutation = useMutation({
     mutationFn: async (transcript: string) => {
+      if (captureTaskEditSessionId && captureClarifyTaskActionContext?.action === 'edit_task') {
+        return submitTaskEditFollowUpAndStream({
+          transcript,
+          source: 'text',
+          transcriptLanguage: 'unknown',
+        })
+      }
+
       return processVoiceCaptureTranscript({
         data: {
           transcript,
@@ -770,9 +982,33 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
               ? captureVisibleTaskWindow
               : undefined,
           followUpTaskAction: captureClarifyTaskActionContext?.action ?? undefined,
+          taskEditSessionId: captureTaskEditSessionId ?? undefined,
         },
       })
     },
+    onSuccess: (result) => {
+      if (!result.ok) {
+        setTranscribeError(result.message)
+        return
+      }
+
+      applyVoiceProcessResult(result)
+      setTranscribeError(null)
+    },
+    onError: (error) => {
+      setTranscribeError(error instanceof Error ? error.message : 'Follow-up failed.')
+    },
+  })
+
+  const voiceTaskEditFollowUpMutation = useMutation({
+    mutationFn: async (input: {
+      transcript: string
+      transcriptLanguage: 'es' | 'en' | 'unknown'
+    }) => submitTaskEditFollowUpAndStream({
+      transcript: input.transcript,
+      source: 'voice',
+      transcriptLanguage: input.transcriptLanguage,
+    }),
     onSuccess: (result) => {
       if (!result.ok) {
         setTranscribeError(result.message)
@@ -805,6 +1041,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
       }
       if (captureVisibleTaskWindow && captureVisibleTaskWindow.length > 0 && !captureContextTaskId) {
         formData.set('visibleTaskWindow', JSON.stringify(captureVisibleTaskWindow))
+      }
+      if (captureTaskEditSessionId) {
+        formData.set('taskEditSessionId', captureTaskEditSessionId)
       }
       return processVoiceCapture({ data: formData })
     },
@@ -855,7 +1094,17 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                 throw new Error(transcription.message)
               }
 
+              if (captureTaskEditSessionId && captureClarifyTaskActionContext?.action === 'edit_task') {
+                setCaptureMode('clarify')
+                voiceTaskEditFollowUpMutation.mutate({
+                  transcript: transcription.transcript,
+                  transcriptLanguage: transcription.language,
+                })
+                return
+              }
+
               setCaptureMode('interpreting')
+
               voiceTranscriptFollowUpMutation.mutate(transcription.transcript)
             })
             .catch((error) => {
@@ -935,6 +1184,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureClarifyQuestions([])
     setCaptureClarifyReply('')
     setCaptureClarifyTaskActionContext(null)
+    setCaptureTaskEditSessionId(null)
+    setCaptureStreamingAssistantText('')
+    taskEditStreamSessionRef.current = createAssistantSessionStreamState()
     setCaptureNotes([])
     setCaptureShowAdvanced(false)
     setCaptureThreadIdeaId(null)
@@ -1100,7 +1352,10 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureClarifyMessage(result.message)
     setCaptureClarifyQuestions(result.questions)
     setCaptureClarifyReply('')
+    setCaptureStreamingAssistantText('')
+    taskEditStreamSessionRef.current = createAssistantSessionStreamState()
     setCaptureClarifyTaskActionContext(result.taskActionContext ?? null)
+    setCaptureTaskEditSessionId(result.taskEditSession?.sessionId ?? null)
     if (result.taskActionContext?.task.id) {
       setCaptureContextTaskId(result.taskActionContext.task.id)
     }
@@ -1117,6 +1372,8 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureError(null)
     setCaptureClarifyMessage(null)
     setCaptureClarifyQuestions([])
+    setCaptureStreamingAssistantText('')
+    taskEditStreamSessionRef.current = createAssistantSessionStreamState()
     setCaptureClarifyTaskActionContext(null)
     setCaptureTaskActionConfirmation(null)
     setCaptureTaskStatus(result)
@@ -1130,7 +1387,10 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureError(null)
     setCaptureClarifyMessage(null)
     setCaptureClarifyQuestions([])
+    setCaptureStreamingAssistantText('')
+    taskEditStreamSessionRef.current = createAssistantSessionStreamState()
     setCaptureClarifyTaskActionContext(null)
+    setCaptureTaskEditSessionId(result.taskEditSession?.sessionId ?? null)
     setCaptureTaskStatus(null)
     setCaptureTaskActionConfirmation(result)
     setCaptureMode('task_action_confirmation')
@@ -1144,7 +1404,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
 
     if (captureClarifyTaskActionContext) {
       const combined = `${captureRawInput}\n\n${reply}`
-      voiceTranscriptFollowUpMutation.mutate(combined)
+      voiceTranscriptFollowUpMutation.mutate(captureTaskEditSessionId ? reply : combined)
       return
     }
 
@@ -1181,6 +1441,8 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureError(null)
     setCaptureClarifyMessage(null)
     setCaptureClarifyQuestions([])
+    setCaptureStreamingAssistantText('')
+    taskEditStreamSessionRef.current = createAssistantSessionStreamState()
     setCaptureTaskStatus(null)
     setCaptureTaskActionConfirmation(null)
     setCaptureMode('review')
@@ -1192,6 +1454,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     confirmHabitMutation.isPending ||
     confirmIdeaMutation.isPending ||
     confirmVoiceTaskActionMutation.isPending
+  const isSubmittingTaskEditFollowUp = voiceTranscriptFollowUpMutation.isPending || voiceTaskEditFollowUpMutation.isPending
   const isVoiceStep = captureMode === 'recording' || captureMode === 'transcribing' || captureMode === 'interpreting'
   const isThreadReplyCapture = captureThreadIdeaId !== null
   const isSubmittingThreadReply = submitThreadTurnMutation.isPending || voiceThreadReplyMutation.isPending
@@ -1924,6 +2187,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                       isConfirming={isConfirming}
                       error={captureError}
                       task={captureTaskActionConfirmation.task}
+                      edits={captureTaskActionConfirmation.edits}
                       onConfirm={handleConfirm}
                       onCancel={resetCapture}
                     />
@@ -1937,9 +2201,10 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                           message={captureClarifyMessage ?? ''}
                           questions={captureClarifyQuestions}
                           reply={captureClarifyReply}
-                          isSubmitting={interpretMutation.isPending || voiceTranscriptFollowUpMutation.isPending}
+                          isSubmitting={interpretMutation.isPending || isSubmittingTaskEditFollowUp}
                           isRecording={isRecording}
                           error={captureError ?? transcribeError}
+                          streamingAssistantText={captureStreamingAssistantText}
                           taskAction={captureClarifyTaskActionContext.action}
                           task={captureClarifyTaskActionContext.task}
                           onReplyChange={setCaptureClarifyReply}
@@ -1952,6 +2217,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                           onEditFromScratch={() => {
                             setCaptureClarifyReply('')
                             setCaptureClarifyTaskActionContext(null)
+                            setCaptureTaskEditSessionId(null)
                             setCaptureMode('input')
                           }}
                           onCancel={resetCapture}
@@ -2041,6 +2307,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                                 onClick={() => {
                                   setCaptureClarifyReply('')
                                   setCaptureRawInput(captureRawInput)
+                                  setCaptureTaskEditSessionId(null)
                                   setCaptureMode('input')
                                 }}
                                 className="inline-flex cursor-pointer items-center gap-1 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"

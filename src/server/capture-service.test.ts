@@ -855,6 +855,7 @@ describe('capture service', () => {
         title: 'Call the bank and verify the transfer',
         description: 'Updated note',
         dueDate: '2026-04-10',
+        dueTime: '18:00',
       },
     })
 
@@ -867,5 +868,6 @@ describe('capture service', () => {
     expect(task?.title).toBe('Call the bank and verify the transfer')
     expect(task?.notes).toBe('Updated note')
     expect(task?.dueDate).toBe('2026-04-10')
+    expect(task?.dueTime).toBe('18:00')
   })
 })

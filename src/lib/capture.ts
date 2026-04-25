@@ -37,9 +37,10 @@ export const voiceTaskEditChangesSchema = z
     title: z.string().trim().min(1).max(120).optional(),
     description: z.string().trim().min(1).max(2000).optional(),
     dueDate: captureDateSchema.optional(),
+    dueTime: captureTimeSchema.optional(),
   })
   .superRefine((value, ctx) => {
-    if (!value.title && value.description === undefined && value.dueDate === undefined) {
+    if (!value.title && value.description === undefined && value.dueDate === undefined && value.dueTime === undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'At least one task edit is required',
@@ -245,6 +246,7 @@ export const processVoiceCaptureInputSchema = transcribeAudioUploadInputSchema.e
   contextIdeaId: z.string().trim().min(1).max(120).optional(),
   visibleTaskWindow: visibleTaskWindowSchema.optional(),
   followUpTaskAction: confirmVoiceTaskActionKindSchema.optional(),
+  taskEditSessionId: z.string().trim().min(1).max(120).optional(),
 })
 
 export const processVoiceCaptureTextInputSchema = z.object({
@@ -257,6 +259,7 @@ export const processVoiceCaptureTextInputSchema = z.object({
   contextIdeaId: z.string().trim().min(1).max(120).optional(),
   visibleTaskWindow: visibleTaskWindowSchema.optional(),
   followUpTaskAction: confirmVoiceTaskActionKindSchema.optional(),
+  taskEditSessionId: z.string().trim().min(1).max(120).optional(),
 })
 
 export const processVoiceCaptureAutoSavedSchema = z.object({
@@ -303,6 +306,10 @@ const processVoiceCaptureClarifyTaskActionContextSchema = z.object({
   task: resolvedVoiceTaskSchema,
 })
 
+const processVoiceTaskEditSessionSchema = z.object({
+  sessionId: z.string().min(1),
+})
+
 export const processVoiceCaptureClarifySchema = z.object({
   ok: z.literal(true),
   outcome: z.literal('clarify'),
@@ -312,6 +319,7 @@ export const processVoiceCaptureClarifySchema = z.object({
   questions: z.array(z.string().trim().min(1)).min(1),
   draft: typedTaskDraftSchema.nullable(),
   taskActionContext: processVoiceCaptureClarifyTaskActionContextSchema.optional(),
+  taskEditSession: processVoiceTaskEditSessionSchema.optional(),
 })
 
 export const processVoiceCaptureTaskStatusSchema = z.object({
@@ -332,6 +340,7 @@ export const processVoiceCaptureTaskActionConfirmationSchema = z.object({
   action: confirmVoiceTaskActionKindSchema,
   task: resolvedVoiceTaskSchema,
   edits: voiceTaskEditChangesSchema.optional(),
+  taskEditSession: processVoiceTaskEditSessionSchema.optional(),
 })
 
 export const processVoiceCaptureFailureSchema = z.object({
@@ -380,6 +389,7 @@ export type ProcessVoiceCaptureTaskActionConfirmation = z.infer<typeof processVo
 export type ProcessVoiceCaptureClarify = z.infer<typeof processVoiceCaptureClarifySchema>
 export type ProcessVoiceCaptureFailure = z.infer<typeof processVoiceCaptureFailureSchema>
 export type ProcessVoiceCaptureResponse = z.infer<typeof processVoiceCaptureResponseSchema>
+export type ProcessVoiceTaskEditSession = z.infer<typeof processVoiceTaskEditSessionSchema>
 
 export type VoiceCaptureConfidence = 'high' | 'review' | 'clarify'
 
@@ -1002,6 +1012,10 @@ export function buildVoiceTaskEditConfirmationMessage(
     changeParts.push(language === 'es' ? `fecha de vencimiento \"${edits.dueDate}\"` : `due date "${edits.dueDate}"`)
   }
 
+  if (edits.dueTime !== undefined) {
+    changeParts.push(language === 'es' ? `hora de vencimiento \"${edits.dueTime}\"` : `due time "${edits.dueTime}"`)
+  }
+
   if (language === 'es') {
     return `Entendí eso como editar la tarea "${task.title}" para ${changeParts.join(', ')}. Confirma si quieres que aplique esos cambios.`
   }
@@ -1052,6 +1066,84 @@ export function inferVoiceTaskEditChanges(
   let title: string | undefined
   let description: string | undefined
   let dueDate: string | undefined
+  let dueTime: string | undefined
+
+  const explicitTimeRegex = /\b(?:at|a las)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?\b/i
+  const spokenTimeRegex = /\b(?:at|a las)\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)\b(?:\s+(in the morning|in the afternoon|in the evening|at night|de la manana|de la mañana|de la tarde|de la noche))?/i
+
+  const spokenHours: Record<string, number> = {
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+    una: 1,
+    uno: 1,
+    dos: 2,
+    tres: 3,
+    cuatro: 4,
+    cinco: 5,
+    seis: 6,
+    siete: 7,
+    ocho: 8,
+    nueve: 9,
+    diez: 10,
+    once: 11,
+    doce: 12,
+  }
+
+  function inferDueTimeFromClause(value: string) {
+    const explicitTime = value.match(explicitTimeRegex)
+
+    if (explicitTime) {
+      let hour = Number(explicitTime[1])
+      const minute = Number(explicitTime[2] ?? '0')
+      const meridiem = explicitTime[3]?.replace(/\./g, '').toLowerCase()
+
+      if (!Number.isNaN(hour) && !Number.isNaN(minute) && hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+        if (meridiem === 'pm' && hour < 12) {
+          hour += 12
+        }
+
+        if (meridiem === 'am' && hour === 12) {
+          hour = 0
+        }
+
+        return `${`${hour}`.padStart(2, '0')}:${`${minute}`.padStart(2, '0')}`
+      }
+    }
+
+    const spokenTime = value.match(spokenTimeRegex)
+
+    if (!spokenTime) {
+      return null
+    }
+
+    let hour = spokenHours[spokenTime[1].toLowerCase()]
+
+    if (!hour) {
+      return null
+    }
+
+    const timeQualifier = spokenTime[2]?.toLowerCase() ?? ''
+
+    if (/afternoon|evening|night|de la tarde|de la noche/.test(timeQualifier) && hour < 12) {
+      hour += 12
+    }
+
+    if (/morning|de la manana|de la mañana/.test(timeQualifier) && hour === 12) {
+      hour = 0
+    }
+
+    return `${`${hour}`.padStart(2, '0')}:00`
+  }
 
   for (const clause of clauses) {
     const normalizedClause = normalizeVoiceTaskEditClause(clause)
@@ -1075,9 +1167,16 @@ export function inferVoiceTaskEditChanges(
         dueDate = inferredDueDate
       }
     }
+
+    if (!dueTime) {
+      const inferredDueTime = inferDueTimeFromClause(clause)
+      if (inferredDueTime) {
+        dueTime = inferredDueTime
+      }
+    }
   }
 
-  if (!title && !description && !dueDate) {
+  if (!title && !description && !dueDate && !dueTime) {
     return null
   }
 
@@ -1085,6 +1184,7 @@ export function inferVoiceTaskEditChanges(
     title,
     description,
     dueDate,
+    dueTime,
   })
 }
 
@@ -1131,6 +1231,7 @@ export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCa
   const contextIdeaId = input.get('contextIdeaId')
   const visibleTaskWindow = input.get('visibleTaskWindow')
   const followUpTaskAction = input.get('followUpTaskAction')
+  const taskEditSessionId = input.get('taskEditSessionId')
 
   let parsedVisibleTaskWindow: unknown = undefined
 
@@ -1154,5 +1255,7 @@ export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCa
     visibleTaskWindow: parsedVisibleTaskWindow,
     followUpTaskAction:
       typeof followUpTaskAction === 'string' && followUpTaskAction ? followUpTaskAction : undefined,
+    taskEditSessionId:
+      typeof taskEditSessionId === 'string' && taskEditSessionId ? taskEditSessionId : undefined,
   })
 }

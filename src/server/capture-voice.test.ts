@@ -569,6 +569,39 @@ describe('voice capture processor', () => {
           throw new Error('Should not be called')
         },
       },
+      assistantSessionService: {
+        async resolveTaskEditSession() {
+          return {
+            sessionId: 'session-edit-1',
+          }
+        },
+        async submitSessionTurn() {
+          return undefined
+        },
+        async getSession() {
+          return {
+            sessionId: 'session-edit-1',
+            workflow: {
+              kind: 'task_edit' as const,
+              phase: 'ready_to_confirm' as const,
+              activeField: null,
+              changes: {
+                title: 'Draft launch email',
+                description: 'include the Q2 launch checklist',
+                dueDate: '2026-04-09',
+                dueTime: '18:00',
+              },
+              result: null,
+            },
+            visibleEvents: [
+              {
+                type: 'assistant_question' as const,
+                summary: 'I understood that as editing "Draft launch note" to set title to "Draft launch email", description, due date to 2026-04-09 and due time to 18:00. Confirm if you want me to apply those changes.',
+              },
+            ],
+          }
+        },
+      },
       taskResolver: {
         async resolveTaskTarget() {
           return {
@@ -602,7 +635,7 @@ describe('voice capture processor', () => {
       outcome: 'task_action_confirmation',
       transcript: 'Rename this task to Draft launch email, update the description to include the Q2 launch checklist, and move it to tomorrow',
       language: 'en',
-      message: 'I understood that as editing the task "Draft launch note" to title "Draft launch email", description updated, due date "2026-04-09". Confirm if you want me to apply those changes.',
+      message: 'I understood that as editing "Draft launch note" to set title to "Draft launch email", description, due date to 2026-04-09 and due time to 18:00. Confirm if you want me to apply those changes.',
       action: 'edit_task',
       task: {
         id: 'task-123',
@@ -618,11 +651,17 @@ describe('voice capture processor', () => {
         title: 'Draft launch email',
         description: 'include the Q2 launch checklist',
         dueDate: '2026-04-09',
+        dueTime: '18:00',
+      },
+      taskEditSession: {
+        sessionId: 'session-edit-1',
       },
     })
   })
 
   it('keeps resolved task context when an edit request needs more detail', async () => {
+    let readCount = 0
+
     const processor = createProcessorWithIntentClassifier({
       transcriptionBroker: {
         async transcribeAudioUpload() {
@@ -642,6 +681,62 @@ describe('voice capture processor', () => {
         },
         async confirmCapturedHabit() {
           throw new Error('Should not be called')
+        },
+      },
+      assistantSessionService: {
+        async resolveTaskEditSession() {
+          return {
+            sessionId: 'session-edit-2',
+          }
+        },
+        async submitSessionTurn() {
+          return {
+            turnId: 'turn-edit-2',
+          }
+        },
+        async getSession() {
+          readCount += 1
+
+          if (readCount === 1) {
+            return {
+              sessionId: 'session-edit-2',
+              activeTurn: {
+                turnId: 'turn-edit-2',
+                state: 'processing' as const,
+              },
+              lastTurn: null,
+              workflow: {
+                kind: 'task_edit' as const,
+                phase: 'collecting' as const,
+                activeField: null,
+                changes: {},
+                result: null,
+              },
+              visibleEvents: [],
+            }
+          }
+
+          return {
+            sessionId: 'session-edit-2',
+            activeTurn: null,
+            lastTurn: {
+              turnId: 'turn-edit-2',
+              state: 'completed' as const,
+            },
+            workflow: {
+              kind: 'task_edit' as const,
+              phase: 'collecting' as const,
+              activeField: 'dueDate' as const,
+              changes: {},
+              result: null,
+            },
+            visibleEvents: [
+              {
+                type: 'assistant_question' as const,
+                summary: 'What due date would you like to set for "Run Quick Discovery"?',
+              },
+            ],
+          }
         },
       },
       taskResolver: {
@@ -678,8 +773,8 @@ describe('voice capture processor', () => {
       outcome: 'clarify',
       transcript: 'I want us to edit the Run Quick Discovery task.',
       language: 'unknown',
-      message: 'I need a little more detail before I can edit this task.',
-      questions: ['What should I change?'],
+      message: 'What due date would you like to set for "Run Quick Discovery"?',
+      questions: [],
       draft: null,
       taskActionContext: {
         action: 'edit_task',
@@ -695,7 +790,12 @@ describe('voice capture processor', () => {
           source: 'context_task',
         },
       },
+      taskEditSession: {
+        sessionId: 'session-edit-2',
+      },
     })
+
+    expect(readCount).toBeGreaterThan(1)
   })
 
   it('processes typed follow-up edit replies against the same task context', async () => {
@@ -714,6 +814,39 @@ describe('voice capture processor', () => {
         },
         async confirmCapturedHabit() {
           throw new Error('Should not be called')
+        },
+      },
+      assistantSessionService: {
+        async resolveTaskEditSession(input) {
+          expect(input.sessionId).toBe('session-edit-3')
+          return {
+            sessionId: 'session-edit-3',
+          }
+        },
+        async submitSessionTurn(input) {
+          expect(input.message).toBe('change the due date to tomorrow')
+          expect(input.sessionId).toBe('session-edit-3')
+          return undefined
+        },
+        async getSession() {
+          return {
+            sessionId: 'session-edit-3',
+            workflow: {
+              kind: 'task_edit' as const,
+              phase: 'ready_to_confirm' as const,
+              activeField: null,
+              changes: {
+                dueDate: '2026-04-09',
+              },
+              result: null,
+            },
+            visibleEvents: [
+              {
+                type: 'assistant_question' as const,
+                summary: 'I understood that as editing "Run Quick Discovery" to set due date to 2026-04-09. Confirm if you want me to apply those changes.',
+              },
+            ],
+          }
         },
       },
       taskResolver: {
@@ -749,6 +882,7 @@ describe('voice capture processor', () => {
       timezone: 'America/Lima',
       contextTaskId: 'task-quick-discovery',
       followUpTaskAction: 'edit_task',
+      taskEditSessionId: 'session-edit-3',
     })
 
     expect(result).toEqual({
@@ -756,7 +890,7 @@ describe('voice capture processor', () => {
       outcome: 'task_action_confirmation',
       transcript: 'change the due date to tomorrow',
       language: 'en',
-      message: 'I understood that as editing the task "Run Quick Discovery" to due date "2026-04-09". Confirm if you want me to apply those changes.',
+      message: 'I understood that as editing "Run Quick Discovery" to set due date to 2026-04-09. Confirm if you want me to apply those changes.',
       action: 'edit_task',
       task: {
         id: 'task-quick-discovery',
@@ -771,6 +905,128 @@ describe('voice capture processor', () => {
       },
       edits: {
         dueDate: '2026-04-09',
+      },
+      taskEditSession: {
+        sessionId: 'session-edit-3',
+      },
+    })
+  })
+
+  it('returns a time-aware task edit confirmation for follow-up session replies', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          throw new Error('Should not be called')
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      assistantSessionService: {
+        async resolveTaskEditSession(input) {
+          expect(input.sessionId).toBe('session-edit-6')
+          return {
+            sessionId: 'session-edit-6',
+          }
+        },
+        async submitSessionTurn() {
+          return {
+            turnId: 'turn-edit-6',
+          }
+        },
+        async getSession() {
+          return {
+            sessionId: 'session-edit-6',
+            activeTurn: null,
+            lastTurn: {
+              turnId: 'turn-edit-6',
+              state: 'completed' as const,
+            },
+            workflow: {
+              kind: 'task_edit' as const,
+              phase: 'ready_to_confirm' as const,
+              activeField: null,
+              changes: {
+                dueDate: '2026-05-02',
+                dueTime: '18:00',
+              },
+              result: null,
+            },
+            visibleEvents: [
+              {
+                type: 'assistant_question' as const,
+                summary: 'I understood that as editing "Run Quick Discovery" to set due date to 2026-05-02 and due time to 18:00. Confirm if you want me to apply those changes.',
+              },
+            ],
+          }
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'resolved' as const,
+            task: {
+              id: 'task-quick-discovery',
+              title: 'Run Quick Discovery',
+              status: 'active' as const,
+              notes: 'Capture risks, constraints, and candidate customer calls.',
+              dueDate: '2026-04-10',
+              dueTime: null,
+              priority: 'high' as const,
+              completedAt: null,
+              source: 'context_task' as const,
+            },
+          }
+        },
+      },
+    }, {
+      async classify() {
+        throw new Error('Should not be called')
+      },
+    })
+
+    const result = await processor.processVoiceTranscript({
+      transcript: 'next Saturday at six p.m.',
+      language: 'en',
+      currentDate: '2026-04-25',
+      timezone: 'America/Lima',
+      contextTaskId: 'task-quick-discovery',
+      followUpTaskAction: 'edit_task',
+      taskEditSessionId: 'session-edit-6',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'task_action_confirmation',
+      transcript: 'next Saturday at six p.m.',
+      language: 'en',
+      message: 'I understood that as editing "Run Quick Discovery" to set due date to 2026-05-02 and due time to 18:00. Confirm if you want me to apply those changes.',
+      action: 'edit_task',
+      task: {
+        id: 'task-quick-discovery',
+        title: 'Run Quick Discovery',
+        status: 'active',
+        notes: 'Capture risks, constraints, and candidate customer calls.',
+        dueDate: '2026-04-10',
+        dueTime: null,
+        priority: 'high',
+        completedAt: null,
+        source: 'context_task',
+      },
+      edits: {
+        dueDate: '2026-05-02',
+        dueTime: '18:00',
+      },
+      taskEditSession: {
+        sessionId: 'session-edit-6',
       },
     })
   })

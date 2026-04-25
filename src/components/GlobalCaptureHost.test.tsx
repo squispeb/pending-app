@@ -201,8 +201,6 @@ describe('GlobalCaptureHost voice panels', () => {
     expect(markup).not.toContain('Transcript')
     expect(markup).not.toContain('Mark this task as done')
     expect(markup).not.toContain('Pending action')
-    // Long interpretation sentence not rendered
-    expect(markup).not.toContain('I understood that as')
   })
 
   it('renders the task action confirmation panel with a selected task summary card', () => {
@@ -233,6 +231,68 @@ describe('GlobalCaptureHost voice panels', () => {
     expect(markup).toContain('Medium priority')
     expect(markup).toContain('Complete this task')
     expect(markup).toContain('Cancel')
+  })
+
+  it('renders structured task edit confirmation fields instead of prose', () => {
+    const markup = renderToStaticMarkup(
+      <VoiceTaskActionConfirmationPanel
+        transcript="Change the due date"
+        message='I understood that as editing the task "Run Quick Discovery" to set due date to 2026-05-01. Confirm if you want me to apply those changes.'
+        actionLabel="Apply these edits"
+        confirmLabel="Apply edits"
+        isConfirming={false}
+        error={null}
+        task={{
+          title: 'Run Quick Discovery',
+          status: 'active',
+          dueDate: '2026-04-10',
+          dueTime: null,
+          priority: 'medium',
+          source: 'visible_window',
+        }}
+        edits={{
+          dueDate: '2026-05-01',
+        }}
+        onConfirm={(event) => event.preventDefault()}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Apply these edits')
+    expect(markup).toContain('Due date')
+    expect(markup).toContain('May 1, 2026')
+    expect(markup).not.toContain('I understood that as editing the task')
+  })
+
+  it('renders combined due date and due time in the structured edit summary', () => {
+    const markup = renderToStaticMarkup(
+      <VoiceTaskActionConfirmationPanel
+        transcript="Move it to next Saturday at six p.m."
+        message='I understood that as editing the task "Run Quick Discovery" to set due date to 2026-05-02 and due time to 18:00. Confirm if you want me to apply those changes.'
+        actionLabel="Apply these edits"
+        confirmLabel="Apply edits"
+        isConfirming={false}
+        error={null}
+        task={{
+          title: 'Run Quick Discovery',
+          status: 'active',
+          dueDate: '2026-04-10',
+          dueTime: null,
+          priority: 'medium',
+          source: 'visible_window',
+        }}
+        edits={{
+          dueDate: '2026-05-02',
+          dueTime: '18:00',
+        }}
+        onConfirm={(event) => event.preventDefault()}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Due date')
+    expect(markup).toContain('May 2, 2026 at 6:00 PM')
+    expect(markup).not.toContain('Due time')
   })
 
   it('renders archive confirmation labels for task archive actions', () => {
@@ -283,12 +343,13 @@ describe('GlobalCaptureHost voice panels', () => {
     const markup = renderToStaticMarkup(
       <VoiceTaskClarifyPanel
         transcript="I want us to edit the Run Quick Discovery task."
-        message="I need a little more detail before I can edit this task."
-        questions={['What should I change?']}
+        message='What would you like to change on "Run Quick Discovery"?'
+        questions={[]}
         reply=""
         isSubmitting={false}
         isRecording={false}
         error={null}
+        streamingAssistantText="Updating the due date..."
         taskAction="edit_task"
         task={{
           title: 'Run Quick Discovery',
@@ -309,8 +370,10 @@ describe('GlobalCaptureHost voice panels', () => {
 
     expect(markup).toContain('Run Quick Discovery')
     expect(markup).toContain('Capture risks, constraints, and candidate customer calls.')
-    expect(markup).toContain('What should I change?')
+    expect(markup).toContain('What would you like to change on &quot;Run Quick Discovery&quot;?')
+    expect(markup).toContain('Updating the due date...')
     expect(markup).toContain('Reply with voice')
     expect(markup).toContain('Describe the task change you want…')
+    expect(markup).not.toContain('Assistant tip')
   })
 })

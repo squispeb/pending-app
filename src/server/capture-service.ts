@@ -306,7 +306,7 @@ export function createCaptureService(
         notes: parsed.edits.description ?? (existingTask.notes ?? ''),
         priority: existingTask.priority,
         dueDate: parsed.edits.dueDate ?? existingTask.dueDate ?? '',
-        dueTime: existingTask.dueTime ?? '',
+        dueTime: parsed.edits.dueTime ?? existingTask.dueTime ?? '',
         reminderAt: toDatetimeLocalValue(existingTask.reminderAt),
         estimatedMinutes: existingTask.estimatedMinutes ?? undefined,
         preferredStartTime: existingTask.preferredStartTime ?? '',

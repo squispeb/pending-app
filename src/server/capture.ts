@@ -11,13 +11,16 @@ import {
 } from '../lib/capture'
 import { resolveAuthenticatedPlannerUser } from './authenticated-user'
 import { createCaptureService } from './capture-service'
+import { createAssistantSessionService } from './assistant-session-service'
 import { createAssistantThreadService } from './assistant-thread-service'
 import { createIdeaAndBootstrapThread } from './ideas'
+import { markServerFnRawResponse } from './ideas'
 import { createIdeasService } from './ideas-service'
 import { createTranscriptionBroker } from './transcription'
 import { createVoiceTaskResolver } from './voice-task-resolver'
 
 const captureService = createCaptureService(db)
+const assistantSessionService = createAssistantSessionService(db)
 const assistantThreadService = createAssistantThreadService(db)
 const ideasService = createIdeasService(db)
 const transcriptionBroker = createTranscriptionBroker()
@@ -41,6 +44,11 @@ export const processVoiceCapture = createServerFn({ method: 'POST' })
         interpretTypedTaskInput: (input) => captureService.interpretTypedTaskInput(user.id, input),
         confirmCapturedTask: (input) => captureService.confirmCapturedTask(user.id, input),
         confirmCapturedHabit: (input) => captureService.confirmCapturedHabit(user.id, input),
+      },
+      assistantSessionService: {
+        resolveTaskEditSession: (input) => assistantSessionService.resolveTaskEditSession(input),
+        getSession: (sessionId) => assistantSessionService.getSession(sessionId),
+        submitSessionTurn: (input) => assistantSessionService.submitSessionTurn(input),
       },
       taskResolver: {
         resolveTaskTarget: (input) => voiceTaskResolver.resolveTaskTarget({
@@ -69,6 +77,11 @@ export const processVoiceCaptureTranscript = createServerFn({ method: 'POST' })
         confirmCapturedTask: (input) => captureService.confirmCapturedTask(user.id, input),
         confirmCapturedHabit: (input) => captureService.confirmCapturedHabit(user.id, input),
       },
+      assistantSessionService: {
+        resolveTaskEditSession: (input) => assistantSessionService.resolveTaskEditSession(input),
+        getSession: (sessionId) => assistantSessionService.getSession(sessionId),
+        submitSessionTurn: (input) => assistantSessionService.submitSessionTurn(input),
+      },
       taskResolver: {
         resolveTaskTarget: (input) => voiceTaskResolver.resolveTaskTarget({
           userId: user.id,
@@ -83,6 +96,17 @@ export const processVoiceCaptureTranscript = createServerFn({ method: 'POST' })
     })
 
     return voiceCaptureProcessor.processVoiceTranscript(data)
+  })
+
+export const submitAssistantTaskEditSessionTurn = createServerFn({ method: 'POST' })
+  .inputValidator((input: {
+    sessionId: string
+    message: string
+    source: 'text' | 'voice'
+    transcriptLanguage?: 'es' | 'en' | 'unknown' | null
+  }) => input)
+  .handler(async ({ data }) => {
+    return assistantSessionService.submitSessionTurn(data)
   })
 
 export const confirmCapturedTask = createServerFn({ method: 'POST' })
@@ -130,4 +154,14 @@ export const confirmVoiceTaskAction = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const { user } = await resolveAuthenticatedPlannerUser(db)
     return captureService.confirmVoiceTaskAction(user.id, data)
+  })
+
+export const streamAssistantTaskEditSession = createServerFn({ method: 'GET' })
+  .inputValidator((input: { sessionId: string; lastEventId?: string | null }) => input)
+  .handler(async ({ data }) => {
+    const response = await assistantSessionService.streamSession(data.sessionId, {
+      lastEventId: data.lastEventId ?? null,
+    })
+
+    return markServerFnRawResponse(response)
   })

@@ -41,6 +41,64 @@ type VoiceCaptureService = {
     : never
 }
 
+type AssistantSessionService = {
+  resolveTaskEditSession: (input: {
+    sessionId?: string
+    task: {
+      taskId: string
+      title: string
+      notes?: string | null
+      dueDate?: string | null
+      dueTime?: string | null
+      priority?: 'low' | 'medium' | 'high' | null
+    }
+    routeIntent?: ProcessVoiceCaptureTextInput['routeIntent']
+    requestedFields?: Array<'title' | 'description' | 'dueDate' | 'dueTime'>
+    activeField?: 'title' | 'description' | 'dueDate' | 'dueTime' | null
+  }) => Promise<{
+    sessionId: string
+  }>
+  getSession: (sessionId: string) => Promise<{
+    sessionId: string
+    workflow: {
+      kind: 'task_edit'
+      phase: 'collecting' | 'ready_to_confirm' | 'completed' | 'blocked'
+      activeField: 'title' | 'description' | 'dueDate' | 'dueTime' | null
+      changes: {
+        title?: string
+        description?: string
+        dueDate?: string
+        dueTime?: string
+      }
+      result: {
+        outcome: 'confirmed' | 'cancelled'
+        applyPayload: {
+          action: 'edit_task'
+          taskId: string
+          edits: {
+            title?: string
+            description?: string
+            dueDate?: string
+            dueTime?: string
+          }
+        } | null
+      } | null
+    } | null
+    visibleEvents: Array<{
+      type: 'session_started' | 'user_turn_added' | 'assistant_question' | 'assistant_synthesis' | 'assistant_failed'
+      summary: string
+    }>
+  }>
+  submitSessionTurn: (input: {
+    sessionId: string
+    message: string
+    source: 'text' | 'voice'
+    transcriptLanguage?: 'es' | 'en' | 'unknown' | null
+  }) => Promise<{
+    turnId?: string
+  } | unknown>
+}
+
 type ResolvedTask = {
   id: string
   title: string
@@ -92,12 +150,72 @@ type TaskActionTranscriptInput = {
   contextIdeaId?: string | null
   visibleTaskWindow?: ProcessVoiceCaptureTextInput['visibleTaskWindow']
   followUpTaskAction?: ConfirmVoiceTaskActionKind
+  taskEditSessionId?: string | null
+}
+
+function mapTaskEditRequestedFields(changes: ReturnType<typeof inferVoiceTaskEditChanges>) {
+  if (!changes) {
+    return []
+  }
+
+  const fields: Array<'title' | 'description' | 'dueDate' | 'dueTime'> = []
+
+  if (changes.title) {
+    fields.push('title')
+  }
+
+  if (changes.description !== undefined) {
+    fields.push('description')
+  }
+
+  if (changes.dueDate !== undefined) {
+    fields.push('dueDate')
+  }
+
+  if (changes.dueTime !== undefined) {
+    fields.push('dueTime')
+  }
+
+  return fields
+}
+
+function getLatestAssistantSessionSummary(
+  session: Awaited<ReturnType<AssistantSessionService['getSession']>>,
+  type: 'assistant_question' | 'assistant_synthesis' | 'assistant_failed',
+) {
+  return session.visibleEvents
+    .filter((event) => event.type === type)
+    .at(-1)?.summary ?? null
+}
+
+async function waitForAssistantSessionTurnSettlement(args: {
+  assistantSessionService: AssistantSessionService
+  sessionId: string
+  submittedTurnId?: string | null
+}) {
+  const maxAttempts = 40
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const session = await args.assistantSessionService.getSession(args.sessionId)
+    const lastTurn = session.lastTurn
+    const turnMatches = args.submittedTurnId ? lastTurn?.turnId === args.submittedTurnId : true
+    const isSettled = !session.activeTurn && turnMatches && !!lastTurn && (lastTurn.state === 'completed' || lastTurn.state === 'failed')
+
+    if (isSettled) {
+      return session
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+
+  return args.assistantSessionService.getSession(args.sessionId)
 }
 
 export function createVoiceCaptureProcessor(
   dependencies: {
     transcriptionBroker: Pick<ReturnType<typeof createTranscriptionBroker>, 'transcribeAudioUpload'>
     captureService: VoiceCaptureService
+    assistantSessionService?: AssistantSessionService
     voiceIntentClassifier?: VoiceIntentClassifier | null
     taskResolver?: VoiceTaskResolver
   },
@@ -222,35 +340,148 @@ export function createVoiceCaptureProcessor(
         }
 
         if (voiceIntent.kind === 'edit_task') {
-          if (!taskEditChanges) {
+          if (!dependencies.assistantSessionService) {
+            if (!taskEditChanges) {
+              return {
+                ok: true,
+                outcome: 'clarify',
+                transcript: data.transcript,
+                language: data.language,
+                message: 'I need a little more detail before I can edit this task.',
+                questions: ['What should I change?'],
+                draft: null,
+                taskActionContext: {
+                  action: 'edit_task',
+                  task: resolution.task,
+                },
+              }
+            }
+
+            return {
+              ok: true,
+              outcome: 'task_action_confirmation',
+              transcript: data.transcript,
+              language: data.language,
+              message: buildVoiceTaskEditConfirmationMessage(
+                resolution.task,
+                taskEditChanges,
+                data.language,
+              ),
+              action: 'edit_task',
+              task: resolution.task,
+              edits: taskEditChanges,
+            }
+          }
+
+          const requestedFields = mapTaskEditRequestedFields(taskEditChanges)
+          const session = await dependencies.assistantSessionService.resolveTaskEditSession({
+            sessionId: data.taskEditSessionId ?? undefined,
+            task: {
+              taskId: resolution.task.id,
+              title: resolution.task.title,
+              notes: resolution.task.notes ?? null,
+              dueDate: resolution.task.dueDate,
+              dueTime: resolution.task.dueTime,
+              priority: resolution.task.priority,
+            },
+            routeIntent: data.routeIntent,
+            requestedFields,
+            activeField: requestedFields[0] ?? null,
+          })
+
+          const submittedTurn = await dependencies.assistantSessionService.submitSessionTurn({
+            sessionId: session.sessionId,
+            message: data.transcript,
+            source: data.followUpTaskAction ? 'text' : 'voice',
+            transcriptLanguage: data.language,
+          })
+
+          const settledSession = await waitForAssistantSessionTurnSettlement({
+            assistantSessionService: dependencies.assistantSessionService,
+            sessionId: session.sessionId,
+            submittedTurnId:
+              submittedTurn && typeof submittedTurn === 'object' && submittedTurn && 'turnId' in submittedTurn && typeof submittedTurn.turnId === 'string'
+                ? submittedTurn.turnId
+                : null,
+          })
+          const workflow = settledSession.workflow
+
+          if (!workflow || workflow.kind !== 'task_edit') {
+            throw new Error('Task edit session workflow missing')
+          }
+
+          if (workflow.phase === 'ready_to_confirm') {
+            return {
+              ok: true,
+              outcome: 'task_action_confirmation',
+              transcript: data.transcript,
+              language: data.language,
+              message:
+                getLatestAssistantSessionSummary(settledSession, 'assistant_question')
+                ?? buildVoiceTaskEditConfirmationMessage(resolution.task, workflow.changes, data.language),
+              action: 'edit_task',
+              task: resolution.task,
+              edits: workflow.changes,
+              taskEditSession: {
+                sessionId: settledSession.sessionId,
+              },
+            }
+          }
+
+          if (workflow.phase === 'collecting') {
+            const assistantQuestion = getLatestAssistantSessionSummary(settledSession, 'assistant_question')
+
             return {
               ok: true,
               outcome: 'clarify',
               transcript: data.transcript,
               language: data.language,
-              message: 'I need a little more detail before I can edit this task.',
-              questions: ['What should I change?'],
+              message: assistantQuestion ?? 'What should I change?',
+              questions: [],
               draft: null,
               taskActionContext: {
                 action: 'edit_task',
                 task: resolution.task,
+              },
+              taskEditSession: {
+                sessionId: settledSession.sessionId,
+              },
+            }
+          }
+
+          if (workflow.phase === 'completed' && workflow.result?.applyPayload) {
+            return {
+              ok: true,
+              outcome: 'task_action_confirmation',
+              transcript: data.transcript,
+              language: data.language,
+              message: getLatestAssistantSessionSummary(settledSession, 'assistant_synthesis')
+                ?? buildVoiceTaskEditConfirmationMessage(resolution.task, workflow.result.applyPayload.edits, data.language),
+              action: 'edit_task',
+              task: resolution.task,
+              edits: workflow.result.applyPayload.edits,
+              taskEditSession: {
+                sessionId: settledSession.sessionId,
               },
             }
           }
 
           return {
             ok: true,
-            outcome: 'task_action_confirmation',
+            outcome: 'clarify',
             transcript: data.transcript,
             language: data.language,
-            message: buildVoiceTaskEditConfirmationMessage(
-              resolution.task,
-              taskEditChanges,
-              data.language,
-            ),
-            action: 'edit_task',
-            task: resolution.task,
-            edits: taskEditChanges,
+            message: getLatestAssistantSessionSummary(settledSession, 'assistant_synthesis')
+              ?? 'I did not apply any task changes.',
+            questions: ['Do you want to try a different task edit?'],
+            draft: null,
+            taskActionContext: {
+              action: 'edit_task',
+              task: resolution.task,
+            },
+            taskEditSession: {
+              sessionId: settledSession.sessionId,
+            },
           }
         }
 
@@ -445,6 +676,7 @@ export function createVoiceCaptureProcessor(
         contextIdeaId: data.contextIdeaId,
         visibleTaskWindow: data.visibleTaskWindow,
         followUpTaskAction: data.followUpTaskAction,
+        taskEditSessionId: data.taskEditSessionId,
       })
     },
     async processVoiceTranscript(data: ProcessVoiceCaptureTextInput): Promise<ProcessVoiceCaptureResponse> {
