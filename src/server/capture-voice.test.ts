@@ -875,8 +875,8 @@ describe('voice capture processor', () => {
       outcome: 'clarify',
       transcript: 'Mark this task as done',
       language: 'en',
-      message: 'I understood that as a task action, but voice task actions are not available yet.',
-      questions: ['Do you want to create a new task instead?'],
+      message: 'I need to know which task you mean before I can do that.',
+      questions: ['Which task do you mean?'],
       draft: null,
     })
     expect(interpretTypedTaskInput).not.toHaveBeenCalled()
@@ -1226,6 +1226,68 @@ describe('voice capture processor', () => {
         completedAt: null,
         source: 'visible_window',
       },
+    })
+  })
+
+  it('clarifies instead of guessing when the visible task window has no meaningful match', async () => {
+    const processor = createVoiceCaptureProcessor({
+      voiceIntentClassifier: {
+        async classify() {
+          return { family: 'task_action' as const, kind: 'complete_task' as const }
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'unresolved' as const,
+          }
+        },
+      },
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Quiero que completemos la tarea relacionada a las tobilleras para el buen treno de básquetbol.',
+            language: 'es' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture({
+      ...sampleUpload,
+      visibleTaskWindow: [
+        {
+          id: 'task-1',
+          title: 'Tarea pendiente para el día sábado a las seis de la tarde',
+          status: 'active',
+          dueDate: '2026-04-11',
+          dueTime: '18:00',
+          priority: 'medium',
+          completedAt: null,
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Quiero que completemos la tarea relacionada a las tobilleras para el buen treno de básquetbol.',
+      language: 'es',
+      message: 'I need to know which task you mean before I can do that.',
+      questions: ['Which task do you mean?'],
+      draft: null,
     })
   })
 

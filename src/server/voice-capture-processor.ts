@@ -207,6 +207,21 @@ export function createVoiceCaptureProcessor(
             draft: null,
           }
         }
+
+        if (voiceIntent.kind !== 'unsupported_task_action') {
+          return {
+            ok: true,
+            outcome: 'clarify',
+            transcript: transcription.transcript,
+            language: transcription.language,
+            message:
+              voiceIntent.kind === 'task_status'
+                ? 'I need to know which task you mean before I can check its status.'
+                : 'I need to know which task you mean before I can do that.',
+            questions: ['Which task do you mean?'],
+            draft: null,
+          }
+        }
       }
 
       if (voiceIntent.family !== 'creation') {

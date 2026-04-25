@@ -3,6 +3,76 @@ import { inferDueDateFromInput, tokenizeForCaptureMatching, type VisibleTaskSumm
 import { createIdeasService } from './ideas-service'
 import { createTasksService } from './tasks-service'
 
+type LocalDateParts = {
+  year: number
+  month: number
+  day: number
+}
+
+const VISIBLE_TASK_MATCH_STOPWORDS = new Set([
+  'about',
+  'active',
+  'activa',
+  'activo',
+  'around',
+  'cierra',
+  'cierre',
+  'close',
+  'cerrada',
+  'cerrado',
+  'closed',
+  'complete',
+  'completed',
+  'completar',
+  'completada',
+  'completado',
+  'completemos',
+  'con',
+  'del',
+  'done',
+  'estado',
+  'esta',
+  'este',
+  'finish',
+  'finished',
+  'for',
+  'from',
+  'mark',
+  'marca',
+  'marcar',
+  'into',
+  'las',
+  'los',
+  'open',
+  'onto',
+  'para',
+  'pendiente',
+  'pending',
+  'por',
+  'que',
+  'related',
+  'relacionada',
+  'relacionado',
+  'reopen',
+  'reopened',
+  'reabrir',
+  'show',
+  'status',
+  'todo',
+  'task',
+  'tasks',
+  'tarea',
+  'tareas',
+  'that',
+  'the',
+  'this',
+  'una',
+  'uno',
+  'unas',
+  'unos',
+  'with',
+])
+
 function normalizeTranscriptForMatching(value: string) {
   return value
     .toLowerCase()
@@ -10,10 +80,78 @@ function normalizeTranscriptForMatching(value: string) {
     .replace(/[\u0300-\u036f]/g, '')
 }
 
+function formatDateString(parts: LocalDateParts) {
+  return [parts.year, `${parts.month}`.padStart(2, '0'), `${parts.day}`.padStart(2, '0')].join('-')
+}
+
+function parseCurrentDateString(currentDate: string) {
+  const [year, month, day] = currentDate.split('-').map(Number)
+  const parsed = new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0))
+
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+
+  return {
+    year: parsed.getUTCFullYear(),
+    month: parsed.getUTCMonth() + 1,
+    day: parsed.getUTCDate(),
+  } satisfies LocalDateParts
+}
+
+function addUtcDays(parts: LocalDateParts, days: number) {
+  const next = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0, 0))
+  next.setUTCDate(next.getUTCDate() + days)
+
+  return {
+    year: next.getUTCFullYear(),
+    month: next.getUTCMonth() + 1,
+    day: next.getUTCDate(),
+  } satisfies LocalDateParts
+}
+
+function getUtcWeekday(parts: LocalDateParts) {
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0, 0)).getUTCDay()
+}
+
+function getNextOrSameUtcWeekday(parts: LocalDateParts, targetDay: number) {
+  const currentDay = getUtcWeekday(parts)
+  const delta = (targetDay - currentDay + 7) % 7
+  return addUtcDays(parts, delta)
+}
+
 function inferDueTimeFromTranscript(transcript: string) {
   const normalized = normalizeTranscriptForMatching(transcript)
 
+  const spanishHourWords: Record<string, number> = {
+    una: 1,
+    uno: 1,
+    dos: 2,
+    tres: 3,
+    cuatro: 4,
+    cinco: 5,
+    seis: 6,
+    siete: 7,
+    ocho: 8,
+    nueve: 9,
+    diez: 10,
+    once: 11,
+    doce: 12,
+  }
+
   const explicitTime = normalized.match(/\b(?:a las|at)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/)
+
+  if (!explicitTime) {
+    const spokenSpanishTime = normalized.match(/\b(?:a las)\s+(una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)\b/)
+
+    if (spokenSpanishTime) {
+      const hour = spanishHourWords[spokenSpanishTime[1]]
+
+      if (hour) {
+        return `${`${hour}`.padStart(2, '0')}:00`
+      }
+    }
+  }
 
   if (!explicitTime) {
     return null
@@ -52,6 +190,53 @@ function inferStatusCueFromTranscript(transcript: string) {
   return null
 }
 
+function inferWeekdayDueDateFromTranscript(transcript: string, currentDate: string | undefined) {
+  if (!currentDate) {
+    return null
+  }
+
+  const normalized = normalizeTranscriptForMatching(transcript)
+  const baseDate = parseCurrentDateString(currentDate)
+
+  if (!baseDate) {
+    return null
+  }
+
+  const weekdayMatchers: Array<{ day: number; pattern: RegExp }> = [
+    { day: 0, pattern: /\b(sunday|domingo)\b/ },
+    { day: 1, pattern: /\b(monday|lunes)\b/ },
+    { day: 2, pattern: /\b(tuesday|martes)\b/ },
+    { day: 3, pattern: /\b(wednesday|miercoles)\b/ },
+    { day: 4, pattern: /\b(thursday|jueves)\b/ },
+    { day: 5, pattern: /\b(friday|viernes)\b/ },
+    { day: 6, pattern: /\b(saturday|sabado)\b/ },
+  ]
+
+  const matchedWeekday = weekdayMatchers.find(({ pattern }) => pattern.test(normalized))
+
+  if (!matchedWeekday) {
+    return null
+  }
+
+  return formatDateString(getNextOrSameUtcWeekday(baseDate, matchedWeekday.day))
+}
+
+function filterVisibleTaskMatchTokens(tokens: string[]) {
+  return tokens.filter((token) => !VISIBLE_TASK_MATCH_STOPWORDS.has(token))
+}
+
+function hasStrongVisibleTaskTitleSignal(overlapCount: number, taskTokenCount: number) {
+  if (overlapCount === 0 || taskTokenCount === 0) {
+    return false
+  }
+
+  if (taskTokenCount === 1) {
+    return overlapCount === 1
+  }
+
+  return overlapCount >= 2
+}
+
 function scoreVisibleTaskMatch(
   task: VisibleTaskSummary,
   transcriptTokens: string[],
@@ -59,15 +244,19 @@ function scoreVisibleTaskMatch(
   currentDate: string | undefined,
   timezone: string | undefined,
 ) {
-  const taskTokens = tokenizeForCaptureMatching(task.title)
+  const taskTokens = filterVisibleTaskMatchTokens(tokenizeForCaptureMatching(task.title))
   const titleOverlap = taskTokens.filter((token) => transcriptTokens.includes(token)).length
-  const inferredDueDate = currentDate && timezone ? inferDueDateFromInput(transcript, currentDate, timezone) : null
+  const inferredDueDate =
+    (currentDate && timezone ? inferDueDateFromInput(transcript, currentDate, timezone) : null) ??
+    inferWeekdayDueDateFromTranscript(transcript, currentDate)
   const inferredDueTime = inferDueTimeFromTranscript(transcript)
   const inferredStatus = inferStatusCueFromTranscript(transcript)
   const dueDateMatches = !!(inferredDueDate && task.dueDate === inferredDueDate)
   const dueTimeMatches = !!(inferredDueTime && task.dueTime === inferredDueTime)
   const statusMatches = !!(inferredStatus && task.status === inferredStatus)
-  const hasMeaningfulCue = titleOverlap > 0 || dueDateMatches || dueTimeMatches || statusMatches
+  const strongTitleSignal = hasStrongVisibleTaskTitleSignal(titleOverlap, taskTokens.length)
+  const structuralCueCount = [dueDateMatches, dueTimeMatches, statusMatches].filter(Boolean).length
+  const hasMeaningfulCue = strongTitleSignal || structuralCueCount >= 2 || (titleOverlap >= 1 && structuralCueCount >= 1)
 
   if (!hasMeaningfulCue) {
     return null
@@ -183,7 +372,7 @@ export function createVoiceTaskResolver(database: Database) {
         (task) => task.status !== 'archived',
       )
 
-      const transcriptTokens = tokenizeForCaptureMatching(input.transcript ?? '')
+      const transcriptTokens = filterVisibleTaskMatchTokens(tokenizeForCaptureMatching(input.transcript ?? ''))
 
       if (visibleTaskWindow.length === 0 || transcriptTokens.length === 0) {
         return { kind: 'unresolved' }

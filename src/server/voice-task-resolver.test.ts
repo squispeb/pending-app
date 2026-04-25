@@ -456,4 +456,25 @@ describe('voice task resolver', () => {
 
     expect(result).toEqual({ kind: 'unresolved' })
   })
+
+  it('does not resolve a visible task window match from generic task-action wording alone', async () => {
+    const resolver = createVoiceTaskResolver(db)
+    const result = await resolver.resolveTaskTarget({
+      userId,
+      transcript: 'Quiero que completemos la tarea relacionada a las tobilleras para el buen treno de basquetbol.',
+      visibleTaskWindow: [
+        {
+          id: 'task-1',
+          title: 'Tarea pendiente para el día sábado a las seis de la tarde',
+          status: 'active',
+          dueDate: '2026-04-11',
+          dueTime: '18:00',
+          priority: 'medium',
+          completedAt: null,
+        },
+      ],
+    })
+
+    expect(result).toEqual({ kind: 'unresolved' })
+  })
 })
