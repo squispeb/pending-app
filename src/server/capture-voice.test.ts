@@ -596,7 +596,7 @@ describe('voice capture processor', () => {
             visibleEvents: [
               {
                 type: 'assistant_question' as const,
-                summary: 'I understood that as editing "Draft launch note" to set title to "Draft launch email", description, due date to 2026-04-09 and due time to 18:00. Confirm if you want me to apply those changes.',
+                summary: 'I understood that as editing "Draft launch note" to set title to "Draft launch email", description and due date to 2026-04-09 at 18:00. Confirm if you want me to apply those changes.',
               },
             ],
           }
@@ -635,7 +635,7 @@ describe('voice capture processor', () => {
       outcome: 'task_action_confirmation',
       transcript: 'Rename this task to Draft launch email, update the description to include the Q2 launch checklist, and move it to tomorrow',
       language: 'en',
-      message: 'I understood that as editing "Draft launch note" to set title to "Draft launch email", description, due date to 2026-04-09 and due time to 18:00. Confirm if you want me to apply those changes.',
+      message: 'I understood that as editing "Draft launch note" to set title to "Draft launch email", description and due date to 2026-04-09 at 18:00. Confirm if you want me to apply those changes.',
       action: 'edit_task',
       task: {
         id: 'task-123',
@@ -963,7 +963,7 @@ describe('voice capture processor', () => {
             visibleEvents: [
               {
                 type: 'assistant_question' as const,
-                summary: 'I understood that as editing "Run Quick Discovery" to set due date to 2026-05-02 and due time to 18:00. Confirm if you want me to apply those changes.',
+                summary: 'I understood that as editing "Run Quick Discovery" to set due date to 2026-05-02 at 18:00. Confirm if you want me to apply those changes.',
               },
             ],
           }
@@ -1008,7 +1008,7 @@ describe('voice capture processor', () => {
       outcome: 'task_action_confirmation',
       transcript: 'next Saturday at six p.m.',
       language: 'en',
-      message: 'I understood that as editing "Run Quick Discovery" to set due date to 2026-05-02 and due time to 18:00. Confirm if you want me to apply those changes.',
+      message: 'I understood that as editing "Run Quick Discovery" to set due date to 2026-05-02 at 18:00. Confirm if you want me to apply those changes.',
       action: 'edit_task',
       task: {
         id: 'task-quick-discovery',
