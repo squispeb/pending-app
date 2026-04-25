@@ -4,6 +4,7 @@ import {
   confirmCapturedIdeaInputSchema,
   confirmCapturedHabitInputSchema,
   confirmCapturedTaskInputSchema,
+  confirmVoiceTaskActionInputSchema,
   interpretCaptureInputSchema,
   parseProcessVoiceCaptureFormData,
 } from '../lib/capture'
@@ -43,8 +44,12 @@ export const processVoiceCapture = createServerFn({ method: 'POST' })
       taskResolver: {
         resolveTaskTarget: (input) => voiceTaskResolver.resolveTaskTarget({
           userId: user.id,
+          transcript: input.transcript,
+          currentDate: data.currentDate,
+          timezone: data.timezone,
           contextTaskId: input.contextTaskId,
           contextIdeaId: input.contextIdeaId,
+          visibleTaskWindow: input.visibleTaskWindow,
         }),
       },
     })
@@ -89,4 +94,11 @@ export const confirmCapturedIdea = createServerFn({ method: 'POST' })
         })
       },
     })
+  })
+
+export const confirmVoiceTaskAction = createServerFn({ method: 'POST' })
+  .inputValidator((input) => confirmVoiceTaskActionInputSchema.parse(input))
+  .handler(async ({ data }) => {
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    return captureService.confirmVoiceTaskAction(user.id, data)
   })

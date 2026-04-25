@@ -1,9 +1,12 @@
 import {
+  buildVoiceTaskActionAlreadyAppliedMessage,
+  buildVoiceTaskActionConfirmationMessage,
   buildVoiceClarificationMessage,
   buildVoiceClarificationQuestions,
   buildVoiceTaskStatusMessage,
   draftToHabitCreateInput,
   draftToTaskCreateInput,
+  type ConfirmVoiceTaskActionKind,
   evaluateVoiceCaptureConfidence,
   type ProcessVoiceCaptureInput,
   type ProcessVoiceCaptureResponse,
@@ -37,8 +40,18 @@ type VoiceCaptureService = {
 
 type VoiceTaskResolver = {
   resolveTaskTarget: (input: {
+    transcript: string
     contextTaskId?: string | null
     contextIdeaId?: string | null
+    visibleTaskWindow?: Array<{
+      id: string
+      title: string
+      status: 'active' | 'completed' | 'archived'
+      dueDate: string | null
+      dueTime: string | null
+      priority: 'low' | 'medium' | 'high'
+      completedAt: string | null
+    }> | null
   }) => Promise<
     | {
         kind: 'resolved'
@@ -50,7 +63,7 @@ type VoiceTaskResolver = {
           dueTime: string | null
           priority: 'low' | 'medium' | 'high'
           completedAt: string | null
-          source: 'context_task' | 'context_idea'
+          source: 'context_task' | 'context_idea' | 'visible_window'
         }
       }
     | {
@@ -63,7 +76,7 @@ type VoiceTaskResolver = {
           dueTime: string | null
           priority: 'low' | 'medium' | 'high'
           completedAt: string | null
-          source: 'context_task' | 'context_idea'
+          source: 'context_task' | 'context_idea' | 'visible_window'
         }>
       }
     | { kind: 'unresolved' }
@@ -82,6 +95,13 @@ export function createVoiceCaptureProcessor(
     classifier: dependencies.voiceIntentClassifier,
   })
 
+  function isTaskActionAlreadyApplied(
+    action: ConfirmVoiceTaskActionKind,
+    status: 'active' | 'completed' | 'archived',
+  ) {
+    return (action === 'complete_task' && status === 'completed') || (action === 'reopen_task' && status === 'active')
+  }
+
   return {
     async processVoiceCapture(data: ProcessVoiceCaptureInput): Promise<ProcessVoiceCaptureResponse> {
       const transcription = await dependencies.transcriptionBroker.transcribeAudioUpload({
@@ -98,8 +118,12 @@ export function createVoiceCaptureProcessor(
 
       if (voiceIntent.family === 'task_action' && dependencies.taskResolver) {
         const resolution = await dependencies.taskResolver.resolveTaskTarget({
+          transcript: transcription.transcript,
+          currentDate: data.currentDate,
+          timezone: data.timezone,
           contextTaskId: data.contextTaskId,
           contextIdeaId: data.contextIdeaId,
+          visibleTaskWindow: data.visibleTaskWindow,
         })
 
         if (resolution.kind === 'resolved') {
@@ -120,6 +144,38 @@ export function createVoiceCaptureProcessor(
                 },
                 transcription.language,
               ),
+              task: resolution.task,
+            }
+          }
+
+          if (voiceIntent.kind === 'complete_task' || voiceIntent.kind === 'reopen_task') {
+            if (isTaskActionAlreadyApplied(voiceIntent.kind, resolution.task.status)) {
+              return {
+                ok: true,
+                outcome: 'clarify',
+                transcript: transcription.transcript,
+                language: transcription.language,
+                message: buildVoiceTaskActionAlreadyAppliedMessage(
+                  resolution.task,
+                  voiceIntent.kind,
+                  transcription.language,
+                ),
+                questions: ['Do you want to do anything else with this task?'],
+                draft: null,
+              }
+            }
+
+            return {
+              ok: true,
+              outcome: 'task_action_confirmation',
+              transcript: transcription.transcript,
+              language: transcription.language,
+              message: buildVoiceTaskActionConfirmationMessage(
+                resolution.task,
+                voiceIntent.kind,
+                transcription.language,
+              ),
+              action: voiceIntent.kind,
               task: resolution.task,
             }
           }

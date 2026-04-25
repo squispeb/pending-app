@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { VoiceIntentClassifier } from './voice-intent-router'
 import { createVoiceCaptureProcessor } from './voice-capture-processor'
 
 const sampleUpload = {
@@ -15,6 +16,16 @@ function createTestVoiceCaptureProcessor(
   return createVoiceCaptureProcessor({
     ...dependencies,
     voiceIntentClassifier: null,
+  })
+}
+
+function createProcessorWithIntentClassifier(
+  dependencies: Parameters<typeof createVoiceCaptureProcessor>[0],
+  voiceIntentClassifier: VoiceIntentClassifier,
+) {
+  return createVoiceCaptureProcessor({
+    ...dependencies,
+    voiceIntentClassifier,
   })
 }
 
@@ -382,6 +393,9 @@ describe('voice capture processor', () => {
         async confirmCapturedHabit() {
           throw new Error('Should not be called')
         },
+        async confirmVoiceTaskAction() {
+          throw new Error('Should not be called')
+        },
       },
     })
 
@@ -400,7 +414,7 @@ describe('voice capture processor', () => {
   })
 
   it('returns a task status response for a resolved task status request', async () => {
-    const processor = createTestVoiceCaptureProcessor({
+    const processor = createProcessorWithIntentClassifier({
       transcriptionBroker: {
         async transcribeAudioUpload() {
           return {
@@ -461,6 +475,361 @@ describe('voice capture processor', () => {
         completedAt: '2026-04-09T15:00:00.000Z',
         source: 'context_task',
       },
+    })
+  })
+
+  it('returns a task action confirmation for resolved completion requests', async () => {
+    const processor = createTestVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Mark this task as done',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+        async confirmVoiceTaskAction() {
+          throw new Error('Should not be called')
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'resolved' as const,
+            task: {
+              id: 'task-123',
+              title: 'Call the bank',
+              status: 'active' as const,
+              dueDate: '2026-04-09',
+              dueTime: null,
+              priority: 'medium' as const,
+              completedAt: null,
+              source: 'context_task' as const,
+            },
+          }
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture({
+      ...sampleUpload,
+      contextTaskId: 'task-123',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'task_action_confirmation',
+      transcript: 'Mark this task as done',
+      language: 'en',
+      message: 'I understood that as completing the task "Call the bank". Confirm if you want me to mark it as completed.',
+      action: 'complete_task',
+      task: {
+        id: 'task-123',
+        title: 'Call the bank',
+        status: 'active',
+        dueDate: '2026-04-09',
+        dueTime: null,
+        priority: 'medium',
+        completedAt: null,
+        source: 'context_task',
+      },
+    })
+  })
+
+  it('uses visible task window timing cues to prepare a completion confirmation', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Quiero que cierres la tarea pendiente que estaba para el día sábado a las seis de la tarde.',
+            language: 'es' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget(input) {
+          expect(input.currentDate).toBe('2026-04-08')
+          expect(input.timezone).toBe('America/Lima')
+          expect(input.visibleTaskWindow).toEqual([
+            {
+              id: 'task-1',
+              title: 'Call the bank',
+              status: 'active',
+              dueDate: '2026-04-11',
+              dueTime: '18:00',
+              priority: 'medium',
+              completedAt: null,
+            },
+          ])
+
+          return {
+            kind: 'resolved' as const,
+            task: {
+              id: 'task-1',
+              title: 'Call the bank',
+              status: 'active' as const,
+              dueDate: '2026-04-11',
+              dueTime: '18:00',
+              priority: 'medium' as const,
+              completedAt: null,
+              source: 'visible_window' as const,
+            },
+          }
+        },
+      },
+    }, {
+      async classify() {
+        return {
+          family: 'task_action',
+          kind: 'complete_task',
+        }
+      },
+    })
+
+    const result = await processor.processVoiceCapture({
+      ...sampleUpload,
+      visibleTaskWindow: [
+        {
+          id: 'task-1',
+          title: 'Call the bank',
+          status: 'active',
+          dueDate: '2026-04-11',
+          dueTime: '18:00',
+          priority: 'medium',
+          completedAt: null,
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'task_action_confirmation',
+      transcript: 'Quiero que cierres la tarea pendiente que estaba para el día sábado a las seis de la tarde.',
+      language: 'es',
+      message: 'Entendí eso como completar la tarea "Call the bank". Confirma si quieres que la marque como completada.',
+      action: 'complete_task',
+      task: {
+        id: 'task-1',
+        title: 'Call the bank',
+        status: 'active',
+        dueDate: '2026-04-11',
+        dueTime: '18:00',
+        priority: 'medium',
+        completedAt: null,
+        source: 'visible_window',
+      },
+    })
+  })
+
+  it('returns a task action confirmation for resolved reopen requests', async () => {
+    const processor = createTestVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Reopen this task',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+        async confirmVoiceTaskAction() {
+          throw new Error('Should not be called')
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'resolved' as const,
+            task: {
+              id: 'task-123',
+              title: 'Call the bank',
+              status: 'completed' as const,
+              dueDate: '2026-04-09',
+              dueTime: null,
+              priority: 'medium' as const,
+              completedAt: '2026-04-09T15:00:00.000Z',
+              source: 'context_task' as const,
+            },
+          }
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture({
+      ...sampleUpload,
+      contextTaskId: 'task-123',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'task_action_confirmation',
+      transcript: 'Reopen this task',
+      language: 'en',
+      message: 'I understood that as reopening the task "Call the bank". Confirm if you want me to move it back to active.',
+      action: 'reopen_task',
+      task: {
+        id: 'task-123',
+        title: 'Call the bank',
+        status: 'completed',
+        dueDate: '2026-04-09',
+        dueTime: null,
+        priority: 'medium',
+        completedAt: '2026-04-09T15:00:00.000Z',
+        source: 'context_task',
+      },
+    })
+  })
+
+  it('clarifies when a completion request targets an already completed task', async () => {
+    const processor = createTestVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Mark this task as done',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+        async confirmVoiceTaskAction() {
+          throw new Error('Should not be called')
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'resolved' as const,
+            task: {
+              id: 'task-123',
+              title: 'Call the bank',
+              status: 'completed' as const,
+              dueDate: null,
+              dueTime: null,
+              priority: 'medium' as const,
+              completedAt: '2026-04-09T15:00:00.000Z',
+              source: 'context_task' as const,
+            },
+          }
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture({
+      ...sampleUpload,
+      contextTaskId: 'task-123',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Mark this task as done',
+      language: 'en',
+      message: 'The task "Call the bank" is already completed.',
+      questions: ['Do you want to do anything else with this task?'],
+      draft: null,
+    })
+  })
+
+  it('clarifies when a reopen request targets an already active task', async () => {
+    const processor = createTestVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Reopen this task',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+        async confirmVoiceTaskAction() {
+          throw new Error('Should not be called')
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'resolved' as const,
+            task: {
+              id: 'task-123',
+              title: 'Call the bank',
+              status: 'active' as const,
+              dueDate: null,
+              dueTime: null,
+              priority: 'medium' as const,
+              completedAt: null,
+              source: 'context_task' as const,
+            },
+          }
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture({
+      ...sampleUpload,
+      contextTaskId: 'task-123',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Reopen this task',
+      language: 'en',
+      message: 'The task "Call the bank" is already active.',
+      questions: ['Do you want to do anything else with this task?'],
+      draft: null,
     })
   })
 
@@ -679,12 +1048,21 @@ describe('voice capture processor', () => {
 
     expect(result).toEqual({
       ok: true,
-      outcome: 'clarify',
+      outcome: 'task_action_confirmation',
       transcript: 'Mark this task as done',
       language: 'en',
-      message: 'I understood that as a task action for "Call the bank", but voice task actions are not available yet.',
-      questions: ['Do you want to use this task as the target once voice task actions are enabled?'],
-      draft: null,
+      message: 'I understood that as completing the task "Call the bank". Confirm if you want me to mark it as completed.',
+      action: 'complete_task',
+      task: {
+        id: 'task-123',
+        title: 'Call the bank',
+        status: 'active',
+        dueDate: null,
+        dueTime: null,
+        priority: 'medium',
+        completedAt: null,
+        source: 'context_task',
+      },
     })
     expect(interpretTypedTaskInput).not.toHaveBeenCalled()
   })
@@ -755,6 +1133,99 @@ describe('voice capture processor', () => {
       message: 'I need to confirm which task you mean before I can do that.',
       questions: ['Did you mean "Draft launch email"?', 'Did you mean "Review launch checklist"?'],
       draft: null,
+    })
+  })
+
+  it('uses the visible task window when no explicit context is provided', async () => {
+    const processor = createVoiceCaptureProcessor({
+      voiceIntentClassifier: {
+        async classify() {
+          return { family: 'task_action' as const, kind: 'complete_task' as const }
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget(input) {
+          expect(input.visibleTaskWindow).toEqual([
+            {
+              id: 'task-1',
+              title: 'Review launch checklist',
+              status: 'active',
+              dueDate: null,
+              dueTime: null,
+              priority: 'medium',
+              completedAt: null,
+            },
+          ])
+
+          return {
+            kind: 'resolved' as const,
+            task: {
+              id: 'task-1',
+              title: 'Review launch checklist',
+              status: 'active' as const,
+              dueDate: null,
+              dueTime: null,
+              priority: 'medium' as const,
+              completedAt: null,
+              source: 'visible_window' as const,
+            },
+          }
+        },
+      },
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'Mark review launch checklist as done',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture({
+      ...sampleUpload,
+      visibleTaskWindow: [
+        {
+          id: 'task-1',
+          title: 'Review launch checklist',
+          status: 'active',
+          dueDate: null,
+          dueTime: null,
+          priority: 'medium',
+          completedAt: null,
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'task_action_confirmation',
+      transcript: 'Mark review launch checklist as done',
+      language: 'en',
+      message: 'I understood that as completing the task "Review launch checklist". Confirm if you want me to mark it as completed.',
+      action: 'complete_task',
+      task: {
+        id: 'task-1',
+        title: 'Review launch checklist',
+        status: 'active',
+        dueDate: null,
+        dueTime: null,
+        priority: 'medium',
+        completedAt: null,
+        source: 'visible_window',
+      },
     })
   })
 

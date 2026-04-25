@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CalendarDays, ChevronDown, ExternalLink, X } from 'lucide-react'
 import {
@@ -36,6 +36,7 @@ import {
   updateTask,
 } from '../server/tasks'
 import { useCaptureContext } from '../contexts/CaptureContext'
+import type { VisibleTaskSummaryItem } from '../contexts/CaptureContext'
 
 const tasksQueryOptions = () =>
   queryOptions({
@@ -79,7 +80,7 @@ const STEP_LINKED_TASK_MARKER = 'Accepted breakdown step #'
 function TasksPage() {
   const queryClient = useQueryClient()
   const { data: tasks } = useSuspenseQuery(tasksQueryOptions())
-  const { openCapture } = useCaptureContext()
+  const { openCapture, registerVisibleTaskWindow, clearVisibleTaskWindow } = useCaptureContext()
   const [filter, setFilter] = useState<TaskFilter>('active')
   const [sort, setSort] = useState<TaskSort>('due-asc')
   const [editingTask, setEditingTask] = useState<Task | null>(null)
@@ -130,6 +131,39 @@ function TasksPage() {
   const groupedTasks = groupActiveTasks(tasks)
   const filteredTasks = sortTasks(applyTaskFilter(tasks, filter), sort)
   const summary = getTaskSummary(tasks)
+
+  // Build a visible task window from the current filtered surface for surface-level voice context.
+  // Per-task voice actions still pass contextTaskId as stronger explicit context.
+  const visibleTaskWindowKey = filteredTasks
+    .map((t) => [
+      t.id,
+      t.title,
+      isTaskArchived(t) ? 'archived' : isTaskCompleted(t) ? 'completed' : 'active',
+      t.dueDate ?? '',
+      t.dueTime ?? '',
+      t.priority,
+      t.completedAt?.toISOString() ?? '',
+    ].join('|'))
+    .join('||')
+
+  const visibleTaskWindow: VisibleTaskSummaryItem[] = useMemo(
+    () =>
+      filteredTasks.map((t) => ({
+        id: t.id,
+        title: t.title,
+        status: (isTaskArchived(t) ? 'archived' : isTaskCompleted(t) ? 'completed' : 'active') as VisibleTaskSummaryItem['status'],
+        dueDate: t.dueDate ?? null,
+        dueTime: t.dueTime ?? null,
+        priority: t.priority as VisibleTaskSummaryItem['priority'],
+        completedAt: t.completedAt?.toISOString() ?? null,
+      })),
+    [visibleTaskWindowKey],
+  )
+
+  useEffect(() => {
+    registerVisibleTaskWindow(visibleTaskWindow)
+    return () => clearVisibleTaskWindow()
+  }, [visibleTaskWindow, registerVisibleTaskWindow, clearVisibleTaskWindow])
 
   const invalidateTasks = async () => {
     await queryClient.invalidateQueries({ queryKey: ['tasks'] })
@@ -489,7 +523,7 @@ function TasksPage() {
                       key={task.id}
                       task={task}
                       onEdit={() => beginEdit(task)}
-                      onVoiceAction={() => openCapture({ contextTaskId: task.id })}
+                      onVoiceAction={() => openCapture({ contextTaskId: task.id, visibleTaskWindow })}
                       onToggleComplete={() => handleToggleComplete(task)}
                       onArchive={() => archiveTaskMutation.mutate(task.id)}
                       isMutating={activeTaskId === task.id}

@@ -6,7 +6,7 @@ import {
 } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { CaptureContext } from '../contexts/CaptureContext'
-import type { CaptureOpenOptions } from '../contexts/CaptureContext'
+import type { CaptureOpenOptions, VisibleTaskSummaryItem } from '../contexts/CaptureContext'
 import { resolveCaptureOpenTargets } from '../contexts/CaptureContext'
 import {
   habitFormSchema,
@@ -20,13 +20,21 @@ import {
   getTodayDateString,
   type TaskFormValues,
 } from '../lib/tasks'
-import type { CandidateType, ProcessVoiceCaptureAutoSaved, TypedTaskDraft } from '../lib/capture'
+import type {
+  CandidateType,
+  ConfirmVoiceTaskActionKind,
+  ProcessVoiceCaptureAutoSaved,
+  ProcessVoiceCaptureTaskActionConfirmation,
+  ProcessVoiceCaptureTaskStatus,
+  TypedTaskDraft,
+} from '../lib/capture'
 import { shouldAutoCreateIdeaCapture } from '../lib/capture-flow'
 import { getIdeaThreadTarget, getRouteIntent, routeContext } from '../lib/capture-routing'
 import {
   confirmCapturedIdea as confirmCapturedIdeaFn,
   confirmCapturedHabit as confirmCapturedHabitFn,
   confirmCapturedTask as confirmCapturedTaskFn,
+  confirmVoiceTaskAction as confirmVoiceTaskActionFn,
   interpretCaptureInput,
   processVoiceCapture,
 } from '../server/capture'
@@ -37,7 +45,17 @@ import { ideaFormSchema, toIdeaFormValues, type IdeaFormValues } from '../lib/id
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-type CaptureMode = 'closed' | 'recording' | 'transcribing' | 'interpreting' | 'input' | 'review' | 'clarify' | 'success'
+type CaptureMode =
+  | 'closed'
+  | 'recording'
+  | 'transcribing'
+  | 'interpreting'
+  | 'input'
+  | 'review'
+  | 'clarify'
+  | 'task_action_confirmation'
+  | 'task_status'
+  | 'success'
 
 const EMPTY_TASK_FORM = toTaskFormValues(null)
 const EMPTY_HABIT_FORM = toHabitFormValues(null)
@@ -52,6 +70,190 @@ const WEEKDAYS: Array<{ value: HabitWeekday; label: string }> = [
   { value: 'sat', label: 'Sat' },
   { value: 'sun', label: 'Sun' },
 ]
+
+// ---------------------------------------------------------------------------
+// SelectedTaskSummaryCard — compact task preview used in voice panels
+// ---------------------------------------------------------------------------
+type SelectedTaskSummaryCardProps = {
+  title: string
+  status: string
+  dueDate?: string | null
+  dueTime?: string | null
+  priority?: string | null
+  source?: string | null
+}
+
+const PRIORITY_LABELS: Record<string, string> = {
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
+}
+
+const PRIORITY_COLORS: Record<string, string> = {
+  high: 'text-red-400',
+  medium: 'text-amber-400',
+  low: 'text-[var(--ink-soft)]',
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  context_task: 'From context',
+  context_idea: 'From idea context',
+  visible_window: 'From screen',
+}
+
+export function SelectedTaskSummaryCard({
+  title,
+  status,
+  dueDate,
+  dueTime,
+  priority,
+  source,
+}: SelectedTaskSummaryCardProps) {
+  const isCompleted = status === 'completed'
+  const dueLine = dueDate ? (dueTime ? `${dueDate} at ${dueTime}` : dueDate) : null
+  const sourceLabel = source ? SOURCE_LABELS[source] : null
+
+  return (
+    <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+        Task
+      </span>
+      <p className="m-0 text-sm font-semibold leading-5 text-[var(--ink-strong)]">{title}</p>
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+        {/* Status badge */}
+        <span
+          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${
+            isCompleted
+              ? 'bg-green-500/15 text-green-400'
+              : 'bg-[var(--brand)]/10 text-[var(--brand)]'
+          }`}
+        >
+          {isCompleted ? 'Completed' : 'Active'}
+        </span>
+
+        {/* Priority */}
+        {priority ? (
+          <span className={`text-xs font-medium ${PRIORITY_COLORS[priority] ?? 'text-[var(--ink-soft)]'}`}>
+            {PRIORITY_LABELS[priority] ?? priority} priority
+          </span>
+        ) : null}
+
+        {/* Due timing */}
+        {dueLine ? (
+          <span className="text-xs text-[var(--ink-soft)]">Due {dueLine}</span>
+        ) : null}
+
+        {/* Resolution source — only when informative and not obvious */}
+        {sourceLabel && source !== 'context_task' ? (
+          <span className="text-xs text-[var(--ink-soft)]">{sourceLabel}</span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+type VoiceTaskStatusPanelProps = {
+  transcript: string
+  message: string
+  task?: SelectedTaskSummaryCardProps | null
+  onDone: () => void
+}
+
+export function VoiceTaskStatusPanel({ transcript, message, task, onDone }: VoiceTaskStatusPanelProps) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
+        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+          Transcript
+        </span>
+        <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{transcript}</p>
+      </div>
+
+      {task ? <SelectedTaskSummaryCard {...task} /> : null}
+
+      <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-4">
+        <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+          Status
+        </span>
+        <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{message}</p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={onDone}
+          className="primary-pill cursor-pointer border-0 text-sm font-semibold"
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  )
+}
+
+type VoiceTaskActionConfirmationPanelProps = {
+  transcript: string
+  message: string
+  actionLabel: string
+  confirmLabel: string
+  isConfirming: boolean
+  error: string | null
+  task?: SelectedTaskSummaryCardProps | null
+  onConfirm: (event: React.FormEvent) => void
+  onCancel: () => void
+}
+
+export function VoiceTaskActionConfirmationPanel({
+  transcript,
+  message,
+  actionLabel,
+  confirmLabel,
+  isConfirming,
+  error,
+  task,
+  onConfirm,
+  onCancel,
+}: VoiceTaskActionConfirmationPanelProps) {
+  return (
+    <form className="space-y-4" onSubmit={onConfirm}>
+      <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
+        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+          Transcript
+        </span>
+        <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{transcript}</p>
+      </div>
+
+      {task ? <SelectedTaskSummaryCard {...task} /> : null}
+
+      <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-4">
+        <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+          Pending action
+        </span>
+        <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">{actionLabel}</p>
+        <p className="m-0 mt-2 text-sm leading-6 text-[var(--ink-soft)]">{message}</p>
+      </div>
+
+      {error ? <p className="m-0 text-sm font-medium text-red-500">{error}</p> : null}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="submit"
+          disabled={isConfirming}
+          className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {confirmLabel}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  )
+}
 
 function draftToTaskForm(draft: TypedTaskDraft): TaskFormValues {
   return {
@@ -99,6 +301,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
 
   // Auto-save success result
   const [captureAutoSaved, setCaptureAutoSaved] = useState<ProcessVoiceCaptureAutoSaved | null>(null)
+  const [captureTaskStatus, setCaptureTaskStatus] = useState<ProcessVoiceCaptureTaskStatus | null>(null)
+  const [captureTaskActionConfirmation, setCaptureTaskActionConfirmation] =
+    useState<ProcessVoiceCaptureTaskActionConfirmation | null>(null)
 
   // Track which mode to return to when pressing Back from review
   const [captureReviewBackMode, setCaptureReviewBackMode] = useState<CaptureMode>('input')
@@ -121,6 +326,8 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   const [captureThreadIdeaId, setCaptureThreadIdeaId] = useState<string | null>(null)
   const [captureContextIdeaId, setCaptureContextIdeaId] = useState<string | null>(null)
   const [captureContextTaskId, setCaptureContextTaskId] = useState<string | null>(null)
+  const [captureVisibleTaskWindow, setCaptureVisibleTaskWindow] = useState<VisibleTaskSummaryItem[] | null>(null)
+  const [registeredVisibleTaskWindow, setRegisteredVisibleTaskWindow] = useState<VisibleTaskSummaryItem[] | null>(null)
   const [isOpeningIdea, setIsOpeningIdea] = useState(false)
   const [threadReplySucceeded, setThreadReplySucceeded] = useState(false)
 
@@ -295,6 +502,29 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     },
   })
 
+  const confirmVoiceTaskActionMutation = useMutation({
+    mutationFn: async () => {
+      if (!captureTaskActionConfirmation) {
+        throw new Error('Task action confirmation is missing.')
+      }
+
+      return confirmVoiceTaskActionFn({
+        data: {
+          taskId: captureTaskActionConfirmation.task.id,
+          action: captureTaskActionConfirmation.action,
+        },
+      })
+    },
+    onSuccess: async () => {
+      resetCapture()
+      await queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+    onError: (error) => {
+      setCaptureError(error instanceof Error ? error.message : 'Failed to update task status.')
+    },
+  })
+
   const submitThreadTurnMutation = useMutation({
     mutationFn: async (message: string) => {
       if (!captureThreadIdeaId) {
@@ -380,6 +610,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
       if (captureContextIdeaId) {
         formData.set('contextIdeaId', captureContextIdeaId)
       }
+      if (captureVisibleTaskWindow && captureVisibleTaskWindow.length > 0 && !captureContextTaskId) {
+        formData.set('visibleTaskWindow', JSON.stringify(captureVisibleTaskWindow))
+      }
       return processVoiceCapture({ data: formData })
     },
     onSuccess: (result) => {
@@ -402,6 +635,18 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
 
       if (result.outcome === 'clarify') {
         applyClarifyState(result.message, result.questions, result.transcript, result.draft)
+        setTranscribeError(null)
+        return
+      }
+
+      if (result.outcome === 'task_status') {
+        applyTaskStatusState(result)
+        setTranscribeError(null)
+        return
+      }
+
+      if (result.outcome === 'task_action_confirmation') {
+        applyTaskActionConfirmationState(result)
         setTranscribeError(null)
         return
       }
@@ -496,6 +741,8 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureRawInput('')
     setCaptureDraft(null)
     setCaptureAutoSaved(null)
+    setCaptureTaskStatus(null)
+    setCaptureTaskActionConfirmation(null)
     setCaptureReviewBackMode('input')
     setTaskForm(EMPTY_TASK_FORM)
     setTaskFieldErrors({})
@@ -512,6 +759,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureThreadIdeaId(null)
     setCaptureContextIdeaId(null)
     setCaptureContextTaskId(null)
+    setCaptureVisibleTaskWindow(null)
     setIsOpeningIdea(false)
     setTranscribeError(null)
     setThreadReplySucceeded(false)
@@ -528,9 +776,12 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
 
   function openCapture(options?: CaptureOpenOptions) {
     const { captureThreadIdeaId: nextThreadIdeaId, captureContextIdeaId: nextContextIdeaId } = resolveCaptureOpenTargets(currentIdeaThreadTarget, options)
+    const hasVisibleTaskWindow = options ? Object.prototype.hasOwnProperty.call(options, 'visibleTaskWindow') : false
+    const visibleTaskWindow = hasVisibleTaskWindow ? options?.visibleTaskWindow ?? null : registeredVisibleTaskWindow
     setCaptureThreadIdeaId(nextThreadIdeaId)
     setCaptureContextIdeaId(nextContextIdeaId)
     setCaptureContextTaskId(options?.contextTaskId ?? null)
+    setCaptureVisibleTaskWindow(visibleTaskWindow)
     const resolved: CandidateType = ctx.defaultType === 'auto' ? 'task' : ctx.defaultType
     setCaptureType(resolved)
     setCaptureMode('recording')
@@ -541,15 +792,26 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
 
   function openCaptureWithText(text: string, options?: CaptureOpenOptions) {
     const { captureThreadIdeaId: nextThreadIdeaId, captureContextIdeaId: nextContextIdeaId } = resolveCaptureOpenTargets(currentIdeaThreadTarget, options)
+    const hasVisibleTaskWindow = options ? Object.prototype.hasOwnProperty.call(options, 'visibleTaskWindow') : false
+    const visibleTaskWindow = hasVisibleTaskWindow ? options?.visibleTaskWindow ?? null : registeredVisibleTaskWindow
     setCaptureThreadIdeaId(nextThreadIdeaId)
     setCaptureContextIdeaId(nextContextIdeaId)
     setCaptureContextTaskId(options?.contextTaskId ?? null)
+    setCaptureVisibleTaskWindow(visibleTaskWindow)
     const resolved: CandidateType = ctx.defaultType === 'auto' ? 'task' : ctx.defaultType
     setCaptureType(resolved)
     setCaptureRawInput(text)
     setCaptureMode('input')
     registerEscapeHandler()
   }
+
+  const registerVisibleTaskWindow = useCallback((visibleTaskWindow: VisibleTaskSummaryItem[] | null) => {
+    setRegisteredVisibleTaskWindow(visibleTaskWindow)
+  }, [])
+
+  const clearVisibleTaskWindow = useCallback(() => {
+    setRegisteredVisibleTaskWindow(null)
+  }, [])
 
   // ---------------------------------------------------------------------------
   // Task form handlers
@@ -633,6 +895,11 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   function handleConfirm(event: React.FormEvent) {
     event.preventDefault()
     setCaptureError(null)
+    if (captureMode === 'task_action_confirmation') {
+      confirmVoiceTaskActionMutation.mutate()
+      return
+    }
+
     if (captureType === 'idea') {
       confirmIdeaMutation.mutate()
     } else if (captureType === 'habit') {
@@ -658,7 +925,33 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureClarifyQuestions(questions)
     setCaptureClarifyReply('')
     setCaptureError(null)
+    setCaptureTaskStatus(null)
+    setCaptureTaskActionConfirmation(null)
     setCaptureMode('clarify')
+  }
+
+  function applyTaskStatusState(result: ProcessVoiceCaptureTaskStatus) {
+    setCaptureRawInput(result.transcript)
+    setCaptureDraft(null)
+    setCaptureNotes([])
+    setCaptureError(null)
+    setCaptureClarifyMessage(null)
+    setCaptureClarifyQuestions([])
+    setCaptureTaskActionConfirmation(null)
+    setCaptureTaskStatus(result)
+    setCaptureMode('task_status')
+  }
+
+  function applyTaskActionConfirmationState(result: ProcessVoiceCaptureTaskActionConfirmation) {
+    setCaptureRawInput(result.transcript)
+    setCaptureDraft(null)
+    setCaptureNotes([])
+    setCaptureError(null)
+    setCaptureClarifyMessage(null)
+    setCaptureClarifyQuestions([])
+    setCaptureTaskStatus(null)
+    setCaptureTaskActionConfirmation(result)
+    setCaptureMode('task_action_confirmation')
   }
 
   function handleClarifyReplySubmit(event: React.FormEvent) {
@@ -700,11 +993,17 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureError(null)
     setCaptureClarifyMessage(null)
     setCaptureClarifyQuestions([])
+    setCaptureTaskStatus(null)
+    setCaptureTaskActionConfirmation(null)
     setCaptureMode('review')
   }
 
   const isOpen = captureMode !== 'closed'
-  const isConfirming = confirmTaskMutation.isPending || confirmHabitMutation.isPending || confirmIdeaMutation.isPending
+  const isConfirming =
+    confirmTaskMutation.isPending ||
+    confirmHabitMutation.isPending ||
+    confirmIdeaMutation.isPending ||
+    confirmVoiceTaskActionMutation.isPending
   const isVoiceStep = captureMode === 'recording' || captureMode === 'transcribing' || captureMode === 'interpreting'
   const isThreadReplyCapture = captureThreadIdeaId !== null
   const isSubmittingThreadReply = submitThreadTurnMutation.isPending || voiceThreadReplyMutation.isPending
@@ -729,6 +1028,12 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
             : captureType === 'idea'
               ? 'Start idea thread'
             : 'Review task'
+          : captureMode === 'task_action_confirmation'
+            ? captureTaskActionConfirmation?.action === 'reopen_task'
+              ? 'Confirm task reopen'
+              : 'Confirm task completion'
+            : captureMode === 'task_status'
+              ? 'Task status'
           : captureMode === 'clarify'
             ? 'Need a bit more detail'
             : isThreadReplyCapture
@@ -740,11 +1045,18 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   // Confirm button label
   const confirmLabel = isConfirming
     ? 'Saving…'
+    : captureMode === 'task_action_confirmation'
+      ? captureTaskActionConfirmation?.action === 'reopen_task'
+        ? 'Reopen task'
+        : 'Complete task'
     : captureType === 'idea'
       ? 'Create thread'
       : captureType === 'habit'
       ? 'Create habit'
       : 'Create task'
+
+  const taskActionSummaryLabel = (action: ConfirmVoiceTaskActionKind) =>
+    action === 'reopen_task' ? 'Reopen this task' : 'Complete this task'
 
   // ---------------------------------------------------------------------------
   // Waveform bar renderer — live amplitude bars during recording
@@ -773,7 +1085,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   // Render
   // ---------------------------------------------------------------------------
   return (
-    <CaptureContext.Provider value={{ openCapture, openCaptureWithText }}>
+    <CaptureContext.Provider value={{ openCapture, openCaptureWithText, registerVisibleTaskWindow, clearVisibleTaskWindow }}>
       {/* Backdrop */}
       <div
         onClick={resetCapture}
@@ -1390,6 +1702,29 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                         </button>
                       </div>
                     </form>
+                  ) : null}
+
+                  {captureMode === 'task_status' && captureTaskStatus ? (
+                    <VoiceTaskStatusPanel
+                      transcript={captureTaskStatus.transcript}
+                      message={captureTaskStatus.message}
+                      task={captureTaskStatus.task}
+                      onDone={resetCapture}
+                    />
+                  ) : null}
+
+                  {captureMode === 'task_action_confirmation' && captureTaskActionConfirmation ? (
+                    <VoiceTaskActionConfirmationPanel
+                      transcript={captureTaskActionConfirmation.transcript}
+                      message={captureTaskActionConfirmation.message}
+                      actionLabel={taskActionSummaryLabel(captureTaskActionConfirmation.action)}
+                      confirmLabel={confirmLabel}
+                      isConfirming={isConfirming}
+                      error={captureError}
+                      task={captureTaskActionConfirmation.task}
+                      onConfirm={handleConfirm}
+                      onCancel={resetCapture}
+                    />
                   ) : null}
 
                   {captureMode === 'clarify' ? (

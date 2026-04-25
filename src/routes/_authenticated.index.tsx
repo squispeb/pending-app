@@ -18,6 +18,7 @@ import {
   snoozeReminder,
 } from '../server/reminders'
 import { useCaptureContext } from '../contexts/CaptureContext'
+import type { VisibleTaskSummaryItem } from '../contexts/CaptureContext'
 
 function formatTodayHeading(date: Date, timeZone: string) {
   return formatDisplayDate(date, timeZone)
@@ -52,7 +53,7 @@ export const Route = createFileRoute('/_authenticated/')({
 function DashboardPage() {
   const queryClient = useQueryClient()
   const { data } = useSuspenseQuery(dashboardQueryOptions())
-  const { openCapture, openCaptureWithText } = useCaptureContext()
+  const { openCapture, openCaptureWithText, registerVisibleTaskWindow, clearVisibleTaskWindow } = useCaptureContext()
   const timeZone = useClientTimeZone()
 
   const todayStr = data.today
@@ -281,6 +282,28 @@ function DashboardPage() {
 
   const hasFocusTasks = overdueTasks.length > 0 || dueTodayTasks.length > 0
 
+  // Visible task window for surface-level voice context (mic button).
+  // Row-level voice actions keep contextTaskId as stronger explicit context.
+  const dashboardVisibleTaskWindow = useMemo<VisibleTaskSummaryItem[]>(
+    () =>
+      [...overdueTasks, ...dueTodayTasks].map((t) => ({
+        id: t.id,
+        title: t.title,
+        status: (isTaskCompleted(t) ? 'completed' : 'active') as VisibleTaskSummaryItem['status'],
+        dueDate: t.dueDate ?? null,
+        dueTime: t.dueTime ?? null,
+        priority: t.priority as VisibleTaskSummaryItem['priority'],
+        completedAt: t.completedAt?.toISOString() ?? null,
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [overdueTasks.map((t) => t.id).join(','), dueTodayTasks.map((t) => t.id).join(',')],
+  )
+
+  useEffect(() => {
+    registerVisibleTaskWindow(dashboardVisibleTaskWindow)
+    return () => clearVisibleTaskWindow()
+  }, [dashboardVisibleTaskWindow, registerVisibleTaskWindow, clearVisibleTaskWindow])
+
   return (
     <main className="page-wrap px-4 pb-24 pt-10 sm:pt-14 lg:pb-10">
       <section className="hero-panel relative overflow-hidden rounded-[2rem] px-6 py-8 sm:px-10 sm:py-10">
@@ -331,7 +354,7 @@ function DashboardPage() {
           />
           <button
             type="button"
-            onClick={openCapture}
+            onClick={() => openCapture({ visibleTaskWindow: dashboardVisibleTaskWindow })}
             aria-label="Voice capture"
             suppressHydrationWarning
             className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-[linear-gradient(135deg,_#2563eb,_#10b981)] transition active:scale-95"

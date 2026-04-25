@@ -125,6 +125,36 @@ describe('voice task resolver', () => {
     })
   })
 
+  it('treats archived current task context as unresolved', async () => {
+    await db.run(sql`
+      INSERT INTO tasks (
+        id,
+        user_id,
+        title,
+        status,
+        archived_at,
+        created_at,
+        updated_at
+      ) VALUES (
+        'task-1',
+        ${userId},
+        'Archived task',
+        'archived',
+        (unixepoch() * 1000),
+        (unixepoch() * 1000),
+        (unixepoch() * 1000)
+      );
+    `)
+
+    const resolver = createVoiceTaskResolver(db)
+    const result = await resolver.resolveTaskTarget({
+      userId,
+      contextTaskId: 'task-1',
+    })
+
+    expect(result).toEqual({ kind: 'unresolved' })
+  })
+
   it('prefers contextTaskId over a linked context idea task', async () => {
     await db.run(sql`
       INSERT INTO ideas (id, user_id, title, created_at, updated_at)
@@ -264,5 +294,166 @@ describe('voice task resolver', () => {
         },
       ],
     })
+  })
+
+  it('resolves a unique visible task window match', async () => {
+    const resolver = createVoiceTaskResolver(db)
+    const result = await resolver.resolveTaskTarget({
+      userId,
+      transcript: 'Call the bank about the card',
+      visibleTaskWindow: [
+        {
+          id: 'task-1',
+          title: 'Call the bank',
+          status: 'active',
+          dueDate: null,
+          dueTime: null,
+          priority: 'medium',
+          completedAt: null,
+        },
+        {
+          id: 'task-2',
+          title: 'Review launch checklist',
+          status: 'active',
+          dueDate: null,
+          dueTime: null,
+          priority: 'medium',
+          completedAt: null,
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      kind: 'resolved',
+      task: {
+        id: 'task-1',
+        title: 'Call the bank',
+        status: 'active',
+        dueDate: null,
+        dueTime: null,
+        priority: 'medium',
+        completedAt: null,
+        source: 'visible_window',
+      },
+    })
+  })
+
+  it('resolves a visible task window match from due date, due time, and pending status cues', async () => {
+    const resolver = createVoiceTaskResolver(db)
+    const result = await resolver.resolveTaskTarget({
+      userId,
+      transcript: 'Quiero que cierres la tarea pendiente que estaba para el día sábado a las seis de la tarde.',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+      visibleTaskWindow: [
+        {
+          id: 'task-1',
+          title: 'Call the bank',
+          status: 'active',
+          dueDate: '2026-04-11',
+          dueTime: '18:00',
+          priority: 'medium',
+          completedAt: null,
+        },
+        {
+          id: 'task-2',
+          title: 'Review launch checklist',
+          status: 'completed',
+          dueDate: '2026-04-11',
+          dueTime: '18:00',
+          priority: 'medium',
+          completedAt: '2026-04-10T10:00:00.000Z',
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      kind: 'resolved',
+      task: {
+        id: 'task-1',
+        title: 'Call the bank',
+        status: 'active',
+        dueDate: '2026-04-11',
+        dueTime: '18:00',
+        priority: 'medium',
+        completedAt: null,
+        source: 'visible_window',
+      },
+    })
+  })
+
+  it('returns ambiguity when multiple visible tasks match', async () => {
+    const resolver = createVoiceTaskResolver(db)
+    const result = await resolver.resolveTaskTarget({
+      userId,
+      transcript: 'Review launch tasks',
+      visibleTaskWindow: [
+        {
+          id: 'task-1',
+          title: 'Review launch email',
+          status: 'active',
+          dueDate: null,
+          dueTime: null,
+          priority: 'medium',
+          completedAt: null,
+        },
+        {
+          id: 'task-2',
+          title: 'Review launch checklist',
+          status: 'active',
+          dueDate: null,
+          dueTime: null,
+          priority: 'medium',
+          completedAt: null,
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      kind: 'ambiguous',
+      candidates: [
+        {
+          id: 'task-1',
+          title: 'Review launch email',
+          status: 'active',
+          dueDate: null,
+          dueTime: null,
+          priority: 'medium',
+          completedAt: null,
+          source: 'visible_window',
+        },
+        {
+          id: 'task-2',
+          title: 'Review launch checklist',
+          status: 'active',
+          dueDate: null,
+          dueTime: null,
+          priority: 'medium',
+          completedAt: null,
+          source: 'visible_window',
+        },
+      ],
+    })
+  })
+
+  it('returns unresolved when no visible task matches', async () => {
+    const resolver = createVoiceTaskResolver(db)
+    const result = await resolver.resolveTaskTarget({
+      userId,
+      transcript: 'Book a dentist appointment',
+      visibleTaskWindow: [
+        {
+          id: 'task-1',
+          title: 'Call the bank',
+          status: 'active',
+          dueDate: null,
+          dueTime: null,
+          priority: 'medium',
+          completedAt: null,
+        },
+      ],
+    })
+
+    expect(result).toEqual({ kind: 'unresolved' })
   })
 })

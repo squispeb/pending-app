@@ -6,11 +6,13 @@ import {
   confirmCapturedIdeaInputSchema,
   confirmCapturedHabitInputSchema,
   confirmCapturedTaskInputSchema,
+  confirmVoiceTaskActionInputSchema,
   interpretCaptureInputSchema,
   mergeTypedTaskDrafts,
   type ConfirmCapturedIdeaInput,
   type ConfirmCapturedHabitInput,
   type ConfirmCapturedTaskInput,
+  type ConfirmVoiceTaskActionInput,
   type InterpretCaptureFailure,
   type InterpretCaptureInput,
   type InterpretCaptureSuccess,
@@ -271,6 +273,15 @@ export function createCaptureService(
         sourceType: parsed.sourceType,
         sourceInput: parsed.sourceInput ?? parsed.rawInput,
       })
+    },
+    async confirmVoiceTaskAction(userId: string, input: ConfirmVoiceTaskActionInput) {
+      const parsed = confirmVoiceTaskActionInputSchema.parse(input)
+
+      if (parsed.action === 'complete_task') {
+        return tasksService.completeTask(parsed.taskId, userId)
+      }
+
+      return tasksService.reopenTask(parsed.taskId, userId)
     },
   }
 }

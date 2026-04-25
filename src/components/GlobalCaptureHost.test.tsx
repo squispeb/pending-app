@@ -1,0 +1,240 @@
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  SelectedTaskSummaryCard,
+  VoiceTaskActionConfirmationPanel,
+  VoiceTaskStatusPanel,
+} from './GlobalCaptureHost'
+
+vi.mock('@tanstack/react-router', async () => {
+  const actual = await vi.importActual<typeof import('@tanstack/react-router')>('@tanstack/react-router')
+
+  return {
+    ...actual,
+    Link: ({ to, children, ...props }: any) => (
+      <a href={typeof to === 'string' ? to : String(to)} {...props}>
+        {children}
+      </a>
+    ),
+  }
+})
+
+// ---------------------------------------------------------------------------
+// SelectedTaskSummaryCard
+// ---------------------------------------------------------------------------
+describe('SelectedTaskSummaryCard', () => {
+  it('renders task title prominently', () => {
+    const markup = renderToStaticMarkup(
+      <SelectedTaskSummaryCard title="Call the bank" status="active" />,
+    )
+    expect(markup).toContain('Call the bank')
+  })
+
+  it('renders active status badge', () => {
+    const markup = renderToStaticMarkup(
+      <SelectedTaskSummaryCard title="Call the bank" status="active" />,
+    )
+    expect(markup).toContain('Active')
+  })
+
+  it('renders completed status badge', () => {
+    const markup = renderToStaticMarkup(
+      <SelectedTaskSummaryCard title="Call the bank" status="completed" />,
+    )
+    expect(markup).toContain('Completed')
+  })
+
+  it('renders due date without time', () => {
+    const markup = renderToStaticMarkup(
+      <SelectedTaskSummaryCard title="Pay rent" status="active" dueDate="2026-05-01" />,
+    )
+    expect(markup).toContain('Due 2026-05-01')
+  })
+
+  it('renders due date with time', () => {
+    const markup = renderToStaticMarkup(
+      <SelectedTaskSummaryCard
+        title="Pay rent"
+        status="active"
+        dueDate="2026-05-01"
+        dueTime="09:00"
+      />,
+    )
+    expect(markup).toContain('Due 2026-05-01 at 09:00')
+  })
+
+  it('renders priority label', () => {
+    const markup = renderToStaticMarkup(
+      <SelectedTaskSummaryCard title="Pay rent" status="active" priority="high" />,
+    )
+    expect(markup).toContain('High priority')
+  })
+
+  it('renders medium priority label', () => {
+    const markup = renderToStaticMarkup(
+      <SelectedTaskSummaryCard title="Pay rent" status="active" priority="medium" />,
+    )
+    expect(markup).toContain('Medium priority')
+  })
+
+  it('renders low priority label', () => {
+    const markup = renderToStaticMarkup(
+      <SelectedTaskSummaryCard title="Pay rent" status="active" priority="low" />,
+    )
+    expect(markup).toContain('Low priority')
+  })
+
+  it('renders source label for visible_window source', () => {
+    const markup = renderToStaticMarkup(
+      <SelectedTaskSummaryCard title="Pay rent" status="active" source="visible_window" />,
+    )
+    expect(markup).toContain('From screen')
+  })
+
+  it('does not render source label for context_task (obvious by context)', () => {
+    const markup = renderToStaticMarkup(
+      <SelectedTaskSummaryCard title="Pay rent" status="active" source="context_task" />,
+    )
+    expect(markup).not.toContain('From context')
+  })
+
+  it('omits optional fields when not provided', () => {
+    const markup = renderToStaticMarkup(
+      <SelectedTaskSummaryCard title="Pay rent" status="active" />,
+    )
+    expect(markup).not.toContain('Due')
+    expect(markup).not.toContain('priority')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// VoiceTaskStatusPanel
+// ---------------------------------------------------------------------------
+describe('GlobalCaptureHost voice panels', () => {
+  it('renders the task status panel with transcript and status message', () => {
+    const markup = renderToStaticMarkup(
+      <VoiceTaskStatusPanel
+        transcript="What is the status of this task?"
+        message='The task "Call the bank" is completed.'
+        onDone={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Transcript')
+    expect(markup).toContain('What is the status of this task?')
+    expect(markup).toContain('Status')
+    expect(markup).toContain('The task &quot;Call the bank&quot; is completed.')
+    expect(markup).toContain('Done')
+  })
+
+  it('renders the task status panel with a selected task summary card', () => {
+    const markup = renderToStaticMarkup(
+      <VoiceTaskStatusPanel
+        transcript="What is the status of my call task?"
+        message='The task "Call the bank" is active.'
+        task={{
+          title: 'Call the bank',
+          status: 'active',
+          dueDate: '2026-05-10',
+          dueTime: '10:00',
+          priority: 'high',
+          source: 'visible_window',
+        }}
+        onDone={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Call the bank')
+    expect(markup).toContain('Active')
+    expect(markup).toContain('Due 2026-05-10 at 10:00')
+    expect(markup).toContain('High priority')
+    expect(markup).toContain('From screen')
+    // Still has transcript and status message
+    expect(markup).toContain('What is the status of my call task?')
+    expect(markup).toContain('The task')
+  })
+
+  it('renders the task status panel without a task card when task is not provided', () => {
+    const markup = renderToStaticMarkup(
+      <VoiceTaskStatusPanel
+        transcript="What is the status of this task?"
+        message='The task "Call the bank" is completed.'
+        onDone={() => {}}
+      />,
+    )
+
+    // No task card section header
+    expect(markup).not.toContain('>Task<')
+  })
+
+  it('renders the task action confirmation panel with action summary and controls', () => {
+    const markup = renderToStaticMarkup(
+      <VoiceTaskActionConfirmationPanel
+        transcript="Mark this task as done"
+        message='I understood that as completing the task "Call the bank". Confirm if you want me to mark it as completed.'
+        actionLabel="Complete this task"
+        confirmLabel="Complete task"
+        isConfirming={false}
+        error={null}
+        onConfirm={(event) => event.preventDefault()}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Transcript')
+    expect(markup).toContain('Mark this task as done')
+    expect(markup).toContain('Pending action')
+    expect(markup).toContain('Complete this task')
+    expect(markup).toContain('Complete task')
+    expect(markup).toContain('Cancel')
+  })
+
+  it('renders the task action confirmation panel with a selected task summary card', () => {
+    const markup = renderToStaticMarkup(
+      <VoiceTaskActionConfirmationPanel
+        transcript="Complete my bank task"
+        message='I understood that as completing the task "Call the bank". Confirm if you want me to mark it as completed.'
+        actionLabel="Complete this task"
+        confirmLabel="Complete task"
+        isConfirming={false}
+        error={null}
+        task={{
+          title: 'Call the bank',
+          status: 'active',
+          dueDate: '2026-05-15',
+          dueTime: null,
+          priority: 'medium',
+          source: 'context_task',
+        }}
+        onConfirm={(event) => event.preventDefault()}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Call the bank')
+    expect(markup).toContain('Active')
+    expect(markup).toContain('Due 2026-05-15')
+    expect(markup).toContain('Medium priority')
+    // Transcript and action blocks preserved
+    expect(markup).toContain('Complete my bank task')
+    expect(markup).toContain('Complete this task')
+    expect(markup).toContain('Cancel')
+  })
+
+  it('renders voice action confirmation errors inline', () => {
+    const markup = renderToStaticMarkup(
+      <VoiceTaskActionConfirmationPanel
+        transcript="Reopen this task"
+        message='I understood that as reopening the task "Call the bank". Confirm if you want me to move it back to active.'
+        actionLabel="Reopen this task"
+        confirmLabel="Reopen task"
+        isConfirming={false}
+        error="Failed to update task status."
+        onConfirm={(event) => event.preventDefault()}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Failed to update task status.')
+  })
+})

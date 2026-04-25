@@ -25,6 +25,7 @@ export const voiceTaskActionKindSchema = z.enum([
   'edit_task',
   'unsupported_task_action',
 ])
+export const confirmVoiceTaskActionKindSchema = z.enum(['complete_task', 'reopen_task'])
 export const voiceCalendarActionKindSchema = z.enum([
   'create_calendar_event',
   'edit_calendar_event',
@@ -65,6 +66,18 @@ export const matchedCalendarContextSchema = z.object({
   summary: z.string().trim().min(1),
   reason: z.string().trim().min(1),
 })
+
+export const visibleTaskSummarySchema = z.object({
+  id: z.string().min(1),
+  title: z.string().trim().min(1),
+  status: taskStatusSchema,
+  dueDate: z.string().nullable(),
+  dueTime: z.string().nullable(),
+  priority: taskPrioritySchema,
+  completedAt: z.string().nullable(),
+})
+
+export const visibleTaskWindowSchema = z.array(visibleTaskSummarySchema)
 
 export const typedTaskDraftSchema = z
   .object({
@@ -190,12 +203,18 @@ export const confirmCapturedIdeaInputSchema = z.object({
   sourceInput: z.string().trim().max(4000).optional().or(z.literal('')).transform((value) => value || undefined),
 })
 
+export const confirmVoiceTaskActionInputSchema = z.object({
+  taskId: z.string().trim().min(1).max(120),
+  action: confirmVoiceTaskActionKindSchema,
+})
+
 export const processVoiceCaptureInputSchema = transcribeAudioUploadInputSchema.extend({
   currentDate: captureDateSchema,
   timezone: z.string().trim().min(1).max(120),
   routeIntent: captureRouteIntentSchema.optional(),
   contextTaskId: z.string().trim().min(1).max(120).optional(),
   contextIdeaId: z.string().trim().min(1).max(120).optional(),
+  visibleTaskWindow: visibleTaskWindowSchema.optional(),
 })
 
 export const processVoiceCaptureAutoSavedSchema = z.object({
@@ -235,22 +254,34 @@ export const processVoiceCaptureClarifySchema = z.object({
   draft: typedTaskDraftSchema.nullable(),
 })
 
+const resolvedVoiceTaskSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().trim().min(1),
+  status: taskStatusSchema,
+  dueDate: z.string().nullable(),
+  dueTime: z.string().nullable(),
+  priority: taskPrioritySchema,
+  completedAt: z.string().nullable(),
+  source: z.enum(['context_task', 'context_idea', 'visible_window']),
+})
+
 export const processVoiceCaptureTaskStatusSchema = z.object({
   ok: z.literal(true),
   outcome: z.literal('task_status'),
   transcript: z.string().trim().min(1),
   language: transcriptionDetectedLanguageSchema,
   message: z.string().trim().min(1),
-  task: z.object({
-    id: z.string().min(1),
-    title: z.string().trim().min(1),
-    status: taskStatusSchema,
-    dueDate: z.string().nullable(),
-    dueTime: z.string().nullable(),
-    priority: taskPrioritySchema,
-    completedAt: z.string().nullable(),
-    source: z.enum(['context_task', 'context_idea']),
-  }),
+  task: resolvedVoiceTaskSchema,
+})
+
+export const processVoiceCaptureTaskActionConfirmationSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('task_action_confirmation'),
+  transcript: z.string().trim().min(1),
+  language: transcriptionDetectedLanguageSchema,
+  message: z.string().trim().min(1),
+  action: confirmVoiceTaskActionKindSchema,
+  task: resolvedVoiceTaskSchema,
 })
 
 export const processVoiceCaptureFailureSchema = z.object({
@@ -264,6 +295,7 @@ export const processVoiceCaptureResponseSchema = z.union([
   processVoiceCaptureIdeaConfirmationSchema,
   processVoiceCaptureReviewSchema,
   processVoiceCaptureTaskStatusSchema,
+  processVoiceCaptureTaskActionConfirmationSchema,
   processVoiceCaptureClarifySchema,
   processVoiceCaptureFailureSchema,
 ])
@@ -272,9 +304,11 @@ export type CaptureLanguageHint = z.infer<typeof captureLanguageHintSchema>
 export type CaptureRouteIntent = z.infer<typeof captureRouteIntentSchema>
 export type VoiceIntentFamily = z.infer<typeof voiceIntentFamilySchema>
 export type VoiceTaskActionKind = z.infer<typeof voiceTaskActionKindSchema>
+export type ConfirmVoiceTaskActionKind = z.infer<typeof confirmVoiceTaskActionKindSchema>
 export type VoiceCalendarActionKind = z.infer<typeof voiceCalendarActionKindSchema>
 export type VoiceIntentClassification = z.infer<typeof voiceIntentClassificationSchema>
 export type CandidateType = z.infer<typeof candidateTypeSchema>
+export type VisibleTaskSummary = z.infer<typeof visibleTaskSummarySchema>
 export type InterpretCaptureInput = z.infer<typeof interpretCaptureInputSchema>
 export type TypedTaskDraft = z.infer<typeof typedTaskDraftSchema>
 export type TypedTaskDraftProviderOutput = z.infer<typeof typedTaskDraftProviderOutputSchema>
@@ -283,12 +317,14 @@ export type InterpretCaptureFailure = z.infer<typeof interpretCaptureFailureSche
 export type ConfirmCapturedTaskInput = z.infer<typeof confirmCapturedTaskInputSchema>
 export type ConfirmCapturedHabitInput = z.infer<typeof confirmCapturedHabitInputSchema>
 export type ConfirmCapturedIdeaInput = z.infer<typeof confirmCapturedIdeaInputSchema>
+export type ConfirmVoiceTaskActionInput = z.infer<typeof confirmVoiceTaskActionInputSchema>
 export type MatchedCalendarContext = z.infer<typeof matchedCalendarContextSchema>
 export type ProcessVoiceCaptureInput = z.infer<typeof processVoiceCaptureInputSchema>
 export type ProcessVoiceCaptureAutoSaved = z.infer<typeof processVoiceCaptureAutoSavedSchema>
 export type ProcessVoiceCaptureIdeaConfirmation = z.infer<typeof processVoiceCaptureIdeaConfirmationSchema>
 export type ProcessVoiceCaptureReview = z.infer<typeof processVoiceCaptureReviewSchema>
 export type ProcessVoiceCaptureTaskStatus = z.infer<typeof processVoiceCaptureTaskStatusSchema>
+export type ProcessVoiceCaptureTaskActionConfirmation = z.infer<typeof processVoiceCaptureTaskActionConfirmationSchema>
 export type ProcessVoiceCaptureClarify = z.infer<typeof processVoiceCaptureClarifySchema>
 export type ProcessVoiceCaptureFailure = z.infer<typeof processVoiceCaptureFailureSchema>
 export type ProcessVoiceCaptureResponse = z.infer<typeof processVoiceCaptureResponseSchema>
@@ -867,6 +903,38 @@ export function buildVoiceTaskStatusMessage(
     : `The task "${task.title}" is active.${priorityText}${dueText}`
 }
 
+export function buildVoiceTaskActionConfirmationMessage(
+  task: { title: string },
+  action: ConfirmVoiceTaskActionKind,
+  language: z.infer<typeof transcriptionDetectedLanguageSchema>,
+) {
+  if (language === 'es') {
+    return action === 'complete_task'
+      ? `Entendí eso como completar la tarea "${task.title}". Confirma si quieres que la marque como completada.`
+      : `Entendí eso como reabrir la tarea "${task.title}". Confirma si quieres que la vuelva a marcar como activa.`
+  }
+
+  return action === 'complete_task'
+    ? `I understood that as completing the task "${task.title}". Confirm if you want me to mark it as completed.`
+    : `I understood that as reopening the task "${task.title}". Confirm if you want me to move it back to active.`
+}
+
+export function buildVoiceTaskActionAlreadyAppliedMessage(
+  task: { title: string },
+  action: ConfirmVoiceTaskActionKind,
+  language: z.infer<typeof transcriptionDetectedLanguageSchema>,
+) {
+  if (language === 'es') {
+    return action === 'complete_task'
+      ? `La tarea "${task.title}" ya está completada.`
+      : `La tarea "${task.title}" ya está activa.`
+  }
+
+  return action === 'complete_task'
+    ? `The task "${task.title}" is already completed.`
+    : `The task "${task.title}" is already active.`
+}
+
 export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCaptureInput {
   if (!(input instanceof FormData)) {
     throw new Error('Expected FormData.')
@@ -880,6 +948,17 @@ export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCa
   const routeIntent = input.get('routeIntent')
   const contextTaskId = input.get('contextTaskId')
   const contextIdeaId = input.get('contextIdeaId')
+  const visibleTaskWindow = input.get('visibleTaskWindow')
+
+  let parsedVisibleTaskWindow: unknown = undefined
+
+  if (typeof visibleTaskWindow === 'string' && visibleTaskWindow) {
+    try {
+      parsedVisibleTaskWindow = JSON.parse(visibleTaskWindow)
+    } catch {
+      throw new Error('Invalid visibleTaskWindow JSON.')
+    }
+  }
 
   return processVoiceCaptureInputSchema.parse({
     audio,
@@ -890,5 +969,6 @@ export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCa
     routeIntent: typeof routeIntent === 'string' && routeIntent ? routeIntent : undefined,
     contextTaskId: typeof contextTaskId === 'string' && contextTaskId ? contextTaskId : undefined,
     contextIdeaId: typeof contextIdeaId === 'string' && contextIdeaId ? contextIdeaId : undefined,
+    visibleTaskWindow: parsedVisibleTaskWindow,
   })
 }
