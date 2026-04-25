@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildVoiceClarificationMessage,
   buildVoiceClarificationQuestions,
+  buildVoiceTaskStatusMessage,
   buildHeuristicTaskDraft,
   evaluateVoiceCaptureConfidence,
   inferCadenceFromInput,
@@ -294,5 +295,41 @@ describe('capture helpers', () => {
     expect(buildVoiceClarificationQuestions(ambiguousDraft, ambiguousDraft.rawInput)).toEqual([
       'Is this a one-time task or a habit you want to repeat?',
     ])
+  })
+
+  it('builds a detailed voice task status message', () => {
+    expect(
+      buildVoiceTaskStatusMessage(
+        {
+          title: 'Call the bank',
+          status: 'completed',
+          priority: 'medium',
+          dueDate: '2026-04-09',
+          dueTime: null,
+          completedAt: '2026-04-09T15:00:00.000Z',
+        },
+        'en',
+      ),
+    ).toBe(
+      'The task "Call the bank" is completed. Priority: medium. It was completed on 2026-04-09 at 15:00 UTC. It is due 2026-04-09.',
+    )
+  })
+
+  it('formats completed task timestamps without raw ISO strings in spanish', () => {
+    expect(
+      buildVoiceTaskStatusMessage(
+        {
+          title: 'Llamar al banco',
+          status: 'completed',
+          priority: 'high',
+          dueDate: '2026-04-09',
+          dueTime: null,
+          completedAt: '2026-04-09T15:00:00.000Z',
+        },
+        'es',
+      ),
+    ).toBe(
+      'La tarea "Llamar al banco" está completada. Prioridad: alta. Se completó el 2026-04-09 a las 15:00 UTC. Vence el 2026-04-09.',
+    )
   })
 })

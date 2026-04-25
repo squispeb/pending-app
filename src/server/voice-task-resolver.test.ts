@@ -115,6 +115,11 @@ describe('voice task resolver', () => {
       task: {
         id: 'task-1',
         title: 'Call the bank',
+        status: 'active',
+        dueDate: null,
+        dueTime: null,
+        priority: 'medium',
+        completedAt: null,
         source: 'context_task',
       },
     })
@@ -148,6 +153,11 @@ describe('voice task resolver', () => {
       task: {
         id: 'task-1',
         title: 'Call the bank',
+        status: 'active',
+        dueDate: null,
+        dueTime: null,
+        priority: 'medium',
+        completedAt: null,
         source: 'context_task',
       },
     })
@@ -178,6 +188,11 @@ describe('voice task resolver', () => {
       task: {
         id: 'task-1',
         title: 'Call the bank',
+        status: 'active',
+        dueDate: null,
+        dueTime: null,
+        priority: 'medium',
+        completedAt: null,
         source: 'context_idea',
       },
     })
@@ -230,11 +245,21 @@ describe('voice task resolver', () => {
         {
           id: 'task-1',
           title: 'Draft launch email',
+          status: 'active',
+          dueDate: null,
+          dueTime: null,
+          priority: 'medium',
+          completedAt: null,
           source: 'context_idea',
         },
         {
           id: 'task-2',
           title: 'Review launch checklist',
+          status: 'active',
+          dueDate: null,
+          dueTime: null,
+          priority: 'medium',
+          completedAt: null,
           source: 'context_idea',
         },
       ],

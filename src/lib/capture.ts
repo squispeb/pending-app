@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { taskCreateSchema, taskPrioritySchema } from './tasks'
+import { taskCreateSchema, taskPrioritySchema, taskStatusSchema, type TaskStatus } from './tasks'
 import { habitCadenceSchema, habitCreateSchema, habitWeekdaySchema, type HabitWeekday } from './habits'
 import { ideaSourceTypeSchema } from './ideas'
 import {
@@ -235,6 +235,24 @@ export const processVoiceCaptureClarifySchema = z.object({
   draft: typedTaskDraftSchema.nullable(),
 })
 
+export const processVoiceCaptureTaskStatusSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('task_status'),
+  transcript: z.string().trim().min(1),
+  language: transcriptionDetectedLanguageSchema,
+  message: z.string().trim().min(1),
+  task: z.object({
+    id: z.string().min(1),
+    title: z.string().trim().min(1),
+    status: taskStatusSchema,
+    dueDate: z.string().nullable(),
+    dueTime: z.string().nullable(),
+    priority: taskPrioritySchema,
+    completedAt: z.string().nullable(),
+    source: z.enum(['context_task', 'context_idea']),
+  }),
+})
+
 export const processVoiceCaptureFailureSchema = z.object({
   ok: z.literal(false),
   code: z.string().trim().min(1),
@@ -245,6 +263,7 @@ export const processVoiceCaptureResponseSchema = z.union([
   processVoiceCaptureAutoSavedSchema,
   processVoiceCaptureIdeaConfirmationSchema,
   processVoiceCaptureReviewSchema,
+  processVoiceCaptureTaskStatusSchema,
   processVoiceCaptureClarifySchema,
   processVoiceCaptureFailureSchema,
 ])
@@ -269,6 +288,7 @@ export type ProcessVoiceCaptureInput = z.infer<typeof processVoiceCaptureInputSc
 export type ProcessVoiceCaptureAutoSaved = z.infer<typeof processVoiceCaptureAutoSavedSchema>
 export type ProcessVoiceCaptureIdeaConfirmation = z.infer<typeof processVoiceCaptureIdeaConfirmationSchema>
 export type ProcessVoiceCaptureReview = z.infer<typeof processVoiceCaptureReviewSchema>
+export type ProcessVoiceCaptureTaskStatus = z.infer<typeof processVoiceCaptureTaskStatusSchema>
 export type ProcessVoiceCaptureClarify = z.infer<typeof processVoiceCaptureClarifySchema>
 export type ProcessVoiceCaptureFailure = z.infer<typeof processVoiceCaptureFailureSchema>
 export type ProcessVoiceCaptureResponse = z.infer<typeof processVoiceCaptureResponseSchema>
@@ -788,6 +808,63 @@ export function buildVoiceClarificationMessage(draft: TypedTaskDraft, transcript
   }
 
   return 'I need a little more detail before I can save this.'
+}
+
+function formatCompletedAt(value: string, language: z.infer<typeof transcriptionDetectedLanguageSchema>) {
+  const parsed = new Date(value)
+
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+
+  const datePart = parsed.toISOString().slice(0, 10)
+  const timePart = new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'UTC',
+  }).format(parsed)
+
+  return language === 'es' ? `${datePart} a las ${timePart} UTC` : `${datePart} at ${timePart} UTC`
+}
+
+export function buildVoiceTaskStatusMessage(
+  task: {
+    title: string
+    status: TaskStatus
+    priority?: 'low' | 'medium' | 'high' | null
+    dueDate: string | null
+    dueTime: string | null
+    completedAt: string | null
+  },
+  language: z.infer<typeof transcriptionDetectedLanguageSchema>,
+) {
+  const priorityText = task.priority
+    ? language === 'es'
+      ? ` Prioridad: ${task.priority === 'low' ? 'baja' : task.priority === 'medium' ? 'media' : 'alta'}.`
+      : ` Priority: ${task.priority}.`
+    : ''
+  const dueText = task.dueDate
+    ? language === 'es'
+      ? ` Vence el ${task.dueDate}${task.dueTime ? ` a las ${task.dueTime}` : ''}.`
+      : ` It is due ${task.dueDate}${task.dueTime ? ` at ${task.dueTime}` : ''}.`
+    : ''
+  const completedText =
+    task.status === 'completed' && task.completedAt
+      ? language === 'es'
+        ? ` Se completó el ${formatCompletedAt(task.completedAt, language)}.`
+        : ` It was completed on ${formatCompletedAt(task.completedAt, language)}.`
+      : ''
+
+  if (language === 'es') {
+    return task.status === 'completed'
+      ? `La tarea "${task.title}" está completada.${priorityText}${completedText}${dueText}`
+      : `La tarea "${task.title}" está activa.${priorityText}${dueText}`
+  }
+
+  return task.status === 'completed'
+    ? `The task "${task.title}" is completed.${priorityText}${completedText}${dueText}`
+    : `The task "${task.title}" is active.${priorityText}${dueText}`
 }
 
 export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCaptureInput {

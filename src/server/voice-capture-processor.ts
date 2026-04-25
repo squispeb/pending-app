@@ -1,6 +1,7 @@
 import {
   buildVoiceClarificationMessage,
   buildVoiceClarificationQuestions,
+  buildVoiceTaskStatusMessage,
   draftToHabitCreateInput,
   draftToTaskCreateInput,
   evaluateVoiceCaptureConfidence,
@@ -41,11 +42,29 @@ type VoiceTaskResolver = {
   }) => Promise<
     | {
         kind: 'resolved'
-        task: { id: string; title: string; source: 'context_task' | 'context_idea' }
+        task: {
+          id: string
+          title: string
+          status: 'active' | 'completed' | 'archived'
+          dueDate: string | null
+          dueTime: string | null
+          priority: 'low' | 'medium' | 'high'
+          completedAt: string | null
+          source: 'context_task' | 'context_idea'
+        }
       }
     | {
         kind: 'ambiguous'
-        candidates: Array<{ id: string; title: string; source: 'context_task' | 'context_idea' }>
+        candidates: Array<{
+          id: string
+          title: string
+          status: 'active' | 'completed' | 'archived'
+          dueDate: string | null
+          dueTime: string | null
+          priority: 'low' | 'medium' | 'high'
+          completedAt: string | null
+          source: 'context_task' | 'context_idea'
+        }>
       }
     | { kind: 'unresolved' }
   >
@@ -84,6 +103,27 @@ export function createVoiceCaptureProcessor(
         })
 
         if (resolution.kind === 'resolved') {
+          if (voiceIntent.kind === 'task_status') {
+            return {
+              ok: true,
+              outcome: 'task_status',
+              transcript: transcription.transcript,
+              language: transcription.language,
+              message: buildVoiceTaskStatusMessage(
+                {
+                  title: resolution.task.title,
+                  status: resolution.task.status,
+                  priority: resolution.task.priority,
+                  dueDate: resolution.task.dueDate,
+                  dueTime: resolution.task.dueTime,
+                  completedAt: resolution.task.completedAt,
+                },
+                transcription.language,
+              ),
+              task: resolution.task,
+            }
+          }
+
           return {
             ok: true,
             outcome: 'clarify',
@@ -96,12 +136,17 @@ export function createVoiceCaptureProcessor(
         }
 
         if (resolution.kind === 'ambiguous') {
+          const message =
+            voiceIntent.kind === 'task_status'
+              ? 'I need to confirm which task you mean before I can check its status.'
+              : 'I need to confirm which task you mean before I can do that.'
+
           return {
             ok: true,
             outcome: 'clarify',
             transcript: transcription.transcript,
             language: transcription.language,
-            message: 'I need to confirm which task you mean before I can do that.',
+            message,
             questions: resolution.candidates.slice(0, 3).map((candidate) => `Did you mean \"${candidate.title}\"?`),
             draft: null,
           }

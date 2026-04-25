@@ -399,6 +399,71 @@ describe('voice capture processor', () => {
     expect(interpretTypedTaskInput).not.toHaveBeenCalled()
   })
 
+  it('returns a task status response for a resolved task status request', async () => {
+    const processor = createTestVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'What is the status of this task?',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'resolved' as const,
+            task: {
+              id: 'task-123',
+              title: 'Call the bank',
+              status: 'completed' as const,
+              dueDate: '2026-04-09',
+              dueTime: null,
+              priority: 'medium' as const,
+              completedAt: '2026-04-09T15:00:00.000Z',
+              source: 'context_task' as const,
+            },
+          }
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture({
+      ...sampleUpload,
+      contextTaskId: 'task-123',
+    })
+
+      expect(result).toEqual({
+        ok: true,
+        outcome: 'task_status',
+        transcript: 'What is the status of this task?',
+        language: 'en',
+        message: 'The task "Call the bank" is completed. Priority: medium. It was completed on 2026-04-09 at 15:00 UTC. It is due 2026-04-09.',
+        task: {
+          id: 'task-123',
+          title: 'Call the bank',
+        status: 'completed',
+        dueDate: '2026-04-09',
+        dueTime: null,
+        priority: 'medium',
+        completedAt: '2026-04-09T15:00:00.000Z',
+        source: 'context_task',
+      },
+    })
+  })
+
   it('falls back to generic task-action clarification when resolver is unresolved', async () => {
     const interpretTypedTaskInput = vi.fn(async () => {
       throw new Error('Should not be called')
@@ -448,6 +513,122 @@ describe('voice capture processor', () => {
     expect(interpretTypedTaskInput).not.toHaveBeenCalled()
   })
 
+  it('clarifies unresolved task status requests instead of guessing', async () => {
+    const processor = createTestVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'What is the status of this task?',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'unresolved' as const,
+          }
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture({
+      ...sampleUpload,
+      contextIdeaId: 'idea-123',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'What is the status of this task?',
+      language: 'en',
+      message: 'I need to know which task you mean before I can check its status.',
+      questions: ['Which task do you mean?'],
+      draft: null,
+    })
+  })
+
+  it('clarifies ambiguous task status resolution with candidate questions', async () => {
+    const processor = createTestVoiceCaptureProcessor({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          return {
+            ok: true as const,
+            transcript: 'What is the status of this task?',
+            language: 'en' as const,
+          }
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      taskResolver: {
+        async resolveTaskTarget() {
+          return {
+            kind: 'ambiguous' as const,
+            candidates: [
+              {
+                id: 'task-1',
+                title: 'Draft launch email',
+                status: 'active' as const,
+                dueDate: null,
+                dueTime: null,
+                priority: 'medium' as const,
+                completedAt: null,
+                source: 'context_idea' as const,
+              },
+              {
+                id: 'task-2',
+                title: 'Review launch checklist',
+                status: 'active' as const,
+                dueDate: null,
+                dueTime: null,
+                priority: 'medium' as const,
+                completedAt: null,
+                source: 'context_idea' as const,
+              },
+            ],
+          }
+        },
+      },
+    })
+
+    const result = await processor.processVoiceCapture({
+      ...sampleUpload,
+      contextIdeaId: 'idea-123',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'What is the status of this task?',
+      language: 'en',
+      message: 'I need to confirm which task you mean before I can check its status.',
+      questions: ['Did you mean "Draft launch email"?', 'Did you mean "Review launch checklist"?'],
+      draft: null,
+    })
+  })
+
   it('uses current task context first for task-action clarification', async () => {
     const interpretTypedTaskInput = vi.fn(async () => {
       throw new Error('Should not be called')
@@ -479,6 +660,11 @@ describe('voice capture processor', () => {
             task: {
               id: 'task-123',
               title: 'Call the bank',
+              status: 'active' as const,
+              dueDate: null,
+              dueTime: null,
+              priority: 'medium' as const,
+              completedAt: null,
               source: 'context_task' as const,
             },
           }
@@ -533,11 +719,21 @@ describe('voice capture processor', () => {
               {
                 id: 'task-1',
                 title: 'Draft launch email',
+                status: 'active' as const,
+                dueDate: null,
+                dueTime: null,
+                priority: 'medium' as const,
+                completedAt: null,
                 source: 'context_idea' as const,
               },
               {
                 id: 'task-2',
                 title: 'Review launch checklist',
+                status: 'active' as const,
+                dueDate: null,
+                dueTime: null,
+                priority: 'medium' as const,
+                completedAt: null,
                 source: 'context_idea' as const,
               },
             ],

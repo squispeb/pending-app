@@ -498,11 +498,14 @@ export function buildVoiceActionClarification(intent: VoiceIntentClassification)
     return {
       message:
         intent.kind === 'task_status'
-          ? 'I understood that as a task status request, but voice task actions are not available yet.'
+          ? 'I need to know which task you mean before I can check its status.'
           : intent.kind === 'unsupported_task_action'
             ? 'I understood that as a task action, but that task command is not supported yet.'
             : 'I understood that as a task action, but voice task actions are not available yet.',
-      questions: ['Do you want to create a new task instead?'],
+      questions:
+        intent.kind === 'task_status'
+          ? ['Which task do you mean?']
+          : ['Do you want to create a new task instead?'],
     }
   }
 

@@ -54,6 +54,18 @@ describe('voice intent router', () => {
     })
   })
 
+  it('builds targeted task status clarification copy', () => {
+    expect(
+      buildVoiceActionClarification({
+        family: 'task_action',
+        kind: 'task_status',
+      }),
+    ).toEqual({
+      message: 'I need to know which task you mean before I can check its status.',
+      questions: ['Which task do you mean?'],
+    })
+  })
+
   it('classifies unsupported task commands as task actions instead of creation', () => {
     const router = createVoiceIntentRouter({ classifier: null })
 

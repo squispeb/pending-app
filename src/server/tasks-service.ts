@@ -90,6 +90,11 @@ export function createTasksService(database: Database) {
         orderBy: [desc(taskExecutionArtifacts.createdAt)],
       })
     },
+    async getTaskStatusDetails(taskId: string, userId: string) {
+      return database.query.tasks.findFirst({
+        where: and(eq(tasks.id, taskId), eq(tasks.userId, userId), isNull(tasks.archivedAt)),
+      })
+    },
     async createTaskExecutionArtifact(
       input: {
         taskId: string
