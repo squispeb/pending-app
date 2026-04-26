@@ -130,21 +130,23 @@ export function createCalendarService(
     return connections.filter((connection) => connection.isSelected)
   }
 
-  async function ensureCalendarSelection(userId: string, googleAccountId: string, calendarId: string, now: Date) {
-    const connections = await listConnectionsForAccount(userId, googleAccountId)
-    const connection = connections.find((item) => item.calendarId === calendarId) ?? null
-
-    if (!connection || connection.isSelected) {
-      return
-    }
-
-    await database
+  function buildEnsureCalendarSelectionStatement(
+    userId: string,
+    googleAccountId: string,
+    calendarId: string,
+    now: Date,
+  ) {
+    return database
       .update(calendarConnections)
       .set({
         isSelected: true,
         updatedAt: now,
       })
-      .where(eq(calendarConnections.id, connection.id))
+      .where(and(
+        eq(calendarConnections.userId, userId),
+        eq(calendarConnections.googleAccountId, googleAccountId),
+        eq(calendarConnections.calendarId, calendarId),
+      ))
   }
 
   async function resolveTargetCalendarId(userId: string, googleAccountId: string, calendarId: string) {
@@ -230,17 +232,16 @@ export function createCalendarService(
       lastError: string | null
     },
     now: Date,
+    existingId?: string | null,
   ) {
-    const existing = await findSyncState(userId, scopeKey)
-
-    if (existing) {
+    if (existingId) {
       await database
         .update(syncStates)
         .set({
           ...values,
           updatedAt: now,
         })
-        .where(eq(syncStates.id, existing.id))
+        .where(eq(syncStates.id, existingId))
 
       return
     }
@@ -254,6 +255,79 @@ export function createCalendarService(
       createdAt: now,
       updatedAt: now,
     })
+  }
+
+  function buildCalendarEventSnapshotValues(
+    userId: string,
+    calendarId: string,
+    event: GoogleCalendarEventInstance,
+    now: Date,
+  ) {
+    return {
+      id: crypto.randomUUID(),
+      userId,
+      calendarId,
+      googleEventId: event.googleEventId,
+      googleRecurringEventId: event.googleRecurringEventId,
+      status: event.status,
+      summary: event.summary,
+      description: event.description,
+      location: event.location,
+      startsAt: event.startsAt!,
+      endsAt: event.endsAt!,
+      allDay: event.allDay,
+      eventTimezone: event.eventTimezone,
+      htmlLink: event.htmlLink,
+      organizerEmail: event.organizerEmail,
+      attendeeCount: event.attendeeCount,
+      syncedAt: now,
+      updatedAtRemote: event.updatedAtRemote,
+      createdAt: now,
+      updatedAt: now,
+    }
+  }
+
+  function buildFreshSyncStateValues(
+    userId: string,
+    calendarId: string,
+    now: Date,
+    existingState?: SyncState | null,
+  ) {
+    return {
+      userId,
+      provider: GOOGLE_CALENDAR_PROVIDER,
+      scopeKey: calendarId,
+      lastSyncedAt: now,
+      nextSyncToken: existingState?.nextSyncToken ?? null,
+      syncWindowStart: existingState?.syncWindowStart ?? null,
+      syncWindowEnd: existingState?.syncWindowEnd ?? null,
+      lastStatus: 'success',
+      lastError: null,
+      updatedAt: now,
+    }
+  }
+
+  function buildFreshSyncStateStatement(
+    userId: string,
+    calendarId: string,
+    now: Date,
+    existingState?: SyncState | null,
+  ) {
+    const values = buildFreshSyncStateValues(userId, calendarId, now, existingState)
+
+    if (existingState) {
+      return database.update(syncStates).set(values).where(eq(syncStates.id, existingState.id))
+    }
+
+    return database.insert(syncStates).values({
+      id: crypto.randomUUID(),
+      createdAt: now,
+      ...values,
+    })
+  }
+
+  async function persistMutatedCalendarProjection(operations: Parameters<Database['batch']>[0]) {
+    await database.batch(operations)
   }
 
   async function replaceCalendarEvents(
@@ -304,7 +378,11 @@ export function createCalendarService(
       .where(and(eq(calendarEvents.userId, userId), eq(calendarEvents.calendarId, calendarId)))
   }
 
-  async function deleteCalendarEventSnapshot(userId: string, calendarId: string, googleEventId: string) {
+  async function deleteCalendarEventSnapshot(
+    userId: string,
+    calendarId: string,
+    googleEventId: string,
+  ) {
     await database
       .delete(calendarEvents)
       .where(
@@ -314,6 +392,27 @@ export function createCalendarService(
           eq(calendarEvents.googleEventId, googleEventId),
         ),
       )
+  }
+
+  function buildDeleteCalendarEventSnapshotStatement(userId: string, calendarId: string, googleEventId: string) {
+    return database
+      .delete(calendarEvents)
+      .where(
+        and(
+          eq(calendarEvents.userId, userId),
+          eq(calendarEvents.calendarId, calendarId),
+          eq(calendarEvents.googleEventId, googleEventId),
+        ),
+      )
+  }
+
+  function buildInsertCalendarEventSnapshotStatement(
+    userId: string,
+    calendarId: string,
+    event: GoogleCalendarEventInstance,
+    now: Date,
+  ) {
+    return database.insert(calendarEvents).values(buildCalendarEventSnapshotValues(userId, calendarId, event, now))
   }
 
   async function upsertCalendarEventSnapshot(
@@ -328,28 +427,7 @@ export function createCalendarService(
       return
     }
 
-    await database.insert(calendarEvents).values({
-      id: crypto.randomUUID(),
-      userId,
-      calendarId,
-      googleEventId: event.googleEventId,
-      googleRecurringEventId: event.googleRecurringEventId,
-      status: event.status,
-      summary: event.summary,
-      description: event.description,
-      location: event.location,
-      startsAt: event.startsAt,
-      endsAt: event.endsAt,
-      allDay: event.allDay,
-      eventTimezone: event.eventTimezone,
-      htmlLink: event.htmlLink,
-      organizerEmail: event.organizerEmail,
-      attendeeCount: event.attendeeCount,
-      syncedAt: now,
-      updatedAtRemote: event.updatedAtRemote,
-      createdAt: now,
-      updatedAt: now,
-    })
+    await database.insert(calendarEvents).values(buildCalendarEventSnapshotValues(userId, calendarId, event, now))
   }
 
   async function applyIncrementalCalendarChanges(
@@ -849,8 +927,20 @@ export function createCalendarService(
 
     const accessToken = await getFreshAccessToken(account.id)
     const createdEvent = await googleApi.createCalendarEvent(accessToken, resolvedCalendarId, event)
-    await ensureCalendarSelection(userId, account.id, resolvedCalendarId, now)
-    await upsertCalendarEventSnapshot(userId, resolvedCalendarId, createdEvent, now)
+    const existingState = await findSyncState(userId, resolvedCalendarId)
+
+    const operations: Parameters<Database['batch']>[0] = [
+      buildEnsureCalendarSelectionStatement(userId, account.id, resolvedCalendarId, now),
+      buildDeleteCalendarEventSnapshotStatement(userId, resolvedCalendarId, createdEvent.googleEventId),
+    ]
+
+    if (createdEvent.status !== 'cancelled' && createdEvent.startsAt && createdEvent.endsAt) {
+      operations.push(buildInsertCalendarEventSnapshotStatement(userId, resolvedCalendarId, createdEvent, now))
+    }
+
+    operations.push(buildFreshSyncStateStatement(userId, resolvedCalendarId, now, existingState))
+
+    await persistMutatedCalendarProjection(operations)
 
     return { ok: true as const, event: createdEvent }
   }
@@ -874,7 +964,19 @@ export function createCalendarService(
 
     const accessToken = await getFreshAccessToken(account.id)
     const updatedEvent = await googleApi.updateCalendarEvent(accessToken, resolvedCalendarId, googleEventId, event)
-    await upsertCalendarEventSnapshot(userId, resolvedCalendarId, updatedEvent, now)
+    const existingState = await findSyncState(userId, resolvedCalendarId)
+
+    const operations: Parameters<Database['batch']>[0] = [
+      buildDeleteCalendarEventSnapshotStatement(userId, resolvedCalendarId, updatedEvent.googleEventId),
+    ]
+
+    if (updatedEvent.status !== 'cancelled' && updatedEvent.startsAt && updatedEvent.endsAt) {
+      operations.push(buildInsertCalendarEventSnapshotStatement(userId, resolvedCalendarId, updatedEvent, now))
+    }
+
+    operations.push(buildFreshSyncStateStatement(userId, resolvedCalendarId, now, existingState))
+
+    await persistMutatedCalendarProjection(operations)
 
     return { ok: true as const, event: updatedEvent }
   }
@@ -897,7 +999,14 @@ export function createCalendarService(
 
     const accessToken = await getFreshAccessToken(account.id)
     await googleApi.deleteCalendarEvent(accessToken, resolvedCalendarId, googleEventId)
-    await deleteCalendarEventSnapshot(userId, resolvedCalendarId, googleEventId)
+    const existingState = await findSyncState(userId, resolvedCalendarId)
+
+    const operations: Parameters<Database['batch']>[0] = [
+      buildDeleteCalendarEventSnapshotStatement(userId, resolvedCalendarId, googleEventId),
+      buildFreshSyncStateStatement(userId, resolvedCalendarId, now, existingState),
+    ]
+
+    await persistMutatedCalendarProjection(operations)
 
     return { ok: true as const, deleted: true as const, deletedAt: now }
   }

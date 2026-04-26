@@ -1,7 +1,7 @@
 import { createClient } from '@libsql/client'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { drizzle } from 'drizzle-orm/libsql'
-import { sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import * as schema from '../db/schema'
 import { createCalendarService } from './calendar-service'
 import { GoogleApiError, type GoogleIntegrationApi } from './google-client'
@@ -131,6 +131,16 @@ function makeConfirmedEvent(summary: string, startsAt: string, endsAt: string, g
     attendeeCount: 1,
     updatedAtRemote: new Date('2026-04-06T10:00:00.000Z'),
   }
+}
+
+async function findSyncState(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  userId: string,
+  scopeKey: string,
+) {
+  return db.query.syncStates.findFirst({
+    where: and(eq(schema.syncStates.userId, userId), eq(schema.syncStates.scopeKey, scopeKey)),
+  })
 }
 
 function makeGoogleApi(controls: GoogleApiControls, userId: string): GoogleIntegrationApi {
@@ -734,5 +744,137 @@ describe('calendar service', () => {
     const deletedDay = await service.getCalendarEventsForDay(userId, '2026-04-10')
     expect(controls.deletedEventIds).toEqual(['created-primary'])
     expect(deletedDay.events).toHaveLength(0)
+  })
+
+  it('marks the touched calendar sync state fresh after a confirmed create', async () => {
+    await service.completeGoogleConnect(userId, 'code', 'state')
+
+    const staleAt = new Date('2026-04-01T08:00:00.000Z')
+    const mutationNow = new Date('2026-04-10T09:00:00.000Z')
+
+    await db
+      .update(schema.syncStates)
+      .set({
+        lastSyncedAt: staleAt,
+        lastStatus: 'success',
+        lastError: null,
+        updatedAt: staleAt,
+      })
+      .where(eq(schema.syncStates.userId, userId))
+
+    await service.createCalendarEvent(
+      userId,
+      'primary',
+      {
+        summary: 'Fresh sync marker test',
+        start: { dateTime: '2026-04-10T14:00:00.000Z', timeZone: 'UTC' },
+        end: { dateTime: '2026-04-10T15:00:00.000Z', timeZone: 'UTC' },
+      },
+      mutationNow,
+    )
+
+    const primaryState = await findSyncState(db, userId, 'primary')
+    const view = await service.getCalendarViewData(userId, mutationNow)
+
+    expect(primaryState?.lastSyncedAt?.toISOString()).toBe(mutationNow.toISOString())
+    expect(primaryState?.lastStatus).toBe('success')
+    expect(primaryState?.lastError).toBeNull()
+    expect(view.syncStatus?.lastSyncedAt?.toISOString()).toBe(mutationNow.toISOString())
+    expect(view.syncStatus?.isStale).toBe(false)
+  })
+
+  it('refreshes the touched calendar sync state after update and delete', async () => {
+    await service.completeGoogleConnect(userId, 'code', 'state')
+
+    await service.createCalendarEvent(userId, 'primary', {
+      summary: 'Writable event for sync refresh',
+      start: { dateTime: '2026-04-10T14:00:00.000Z', timeZone: 'UTC' },
+      end: { dateTime: '2026-04-10T15:00:00.000Z', timeZone: 'UTC' },
+    })
+
+    const staleAt = new Date('2026-04-01T08:00:00.000Z')
+    const updateNow = new Date('2026-04-10T16:00:00.000Z')
+
+    await db
+      .update(schema.syncStates)
+      .set({
+        lastSyncedAt: staleAt,
+        lastStatus: 'error',
+        lastError: 'stale before update',
+        updatedAt: staleAt,
+      })
+      .where(eq(schema.syncStates.scopeKey, 'primary'))
+
+    await service.updateCalendarEvent(
+      userId,
+      'primary',
+      'created-primary',
+      {
+        summary: 'Updated sync freshness event',
+        start: { dateTime: '2026-04-10T15:00:00.000Z', timeZone: 'UTC' },
+        end: { dateTime: '2026-04-10T16:00:00.000Z', timeZone: 'UTC' },
+      },
+      updateNow,
+    )
+
+    let primaryState = await findSyncState(db, userId, 'primary')
+    expect(primaryState?.lastSyncedAt?.toISOString()).toBe(updateNow.toISOString())
+    expect(primaryState?.lastStatus).toBe('success')
+    expect(primaryState?.lastError).toBeNull()
+
+    const deleteNow = new Date('2026-04-10T17:00:00.000Z')
+
+    await db
+      .update(schema.syncStates)
+      .set({
+        lastSyncedAt: staleAt,
+        lastStatus: 'error',
+        lastError: 'stale before delete',
+        updatedAt: staleAt,
+      })
+      .where(eq(schema.syncStates.scopeKey, 'primary'))
+
+    await service.deleteCalendarEvent(userId, 'primary', 'created-primary', deleteNow)
+
+    primaryState = await findSyncState(db, userId, 'primary')
+    const deletedDay = await service.getCalendarEventsForDay(userId, '2026-04-10')
+
+    expect(primaryState?.lastSyncedAt?.toISOString()).toBe(deleteNow.toISOString())
+    expect(primaryState?.lastStatus).toBe('success')
+    expect(primaryState?.lastError).toBeNull()
+    expect(deletedDay.events).toHaveLength(0)
+  })
+
+  it('rolls back local projection writes when snapshot persistence fails', async () => {
+    await service.completeGoogleConnect(userId, 'code', 'state')
+
+    await service.updateCalendarSelections(userId, {
+      calendarIds: ['primary'],
+    })
+
+    await db.run(sql`
+      CREATE TRIGGER fail_calendar_event_insert
+      BEFORE INSERT ON calendar_events
+      BEGIN
+        SELECT RAISE(ABORT, 'snapshot insert failed');
+      END;
+    `)
+
+    await expect(
+      service.createCalendarEvent(userId, 'team', {
+        summary: 'Rollback test',
+        start: { dateTime: '2026-04-10T14:00:00.000Z', timeZone: 'UTC' },
+        end: { dateTime: '2026-04-10T15:00:00.000Z', timeZone: 'UTC' },
+      }),
+    ).rejects.toThrow('snapshot insert failed')
+
+    const view = await service.getCalendarViewData(userId, new Date('2026-04-10T09:00:00.000Z'))
+    const day = await service.getCalendarEventsForDay(userId, '2026-04-10')
+    const teamState = await findSyncState(db, userId, 'team')
+
+    expect(controls.createdEventSummary).toBe('Rollback test')
+    expect(view.selectedCalendars.map((calendar) => calendar.calendarId)).toEqual(['primary'])
+    expect(day.events).toHaveLength(0)
+    expect(teamState?.lastSyncedAt).not.toEqual(new Date('2026-04-10T14:00:00.000Z'))
   })
 })
