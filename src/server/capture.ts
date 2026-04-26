@@ -19,6 +19,7 @@ import { markServerFnRawResponse } from './ideas'
 import { createIdeasService } from './ideas-service'
 import { createTranscriptionBroker } from './transcription'
 import { createVoiceTaskResolver } from './voice-task-resolver'
+import { createVoiceCalendarResolver } from './voice-calendar-resolver'
 
 const captureService = createCaptureService(db)
 const assistantSessionService = createAssistantSessionService(db)
@@ -26,6 +27,7 @@ const assistantThreadService = createAssistantThreadService(db)
 const ideasService = createIdeasService(db)
 const transcriptionBroker = createTranscriptionBroker()
 const voiceTaskResolver = createVoiceTaskResolver(db)
+const voiceCalendarResolver = createVoiceCalendarResolver(db)
 
 function addDaysToIsoDate(value: string, days: number) {
   const [year, month, day] = value.split('-').map(Number)
@@ -70,6 +72,12 @@ export const processVoiceCapture = createServerFn({ method: 'POST' })
           visibleTaskWindow: input.visibleTaskWindow,
         }),
       },
+      calendarResolver: {
+        resolveCalendarTarget: (input) => voiceCalendarResolver.resolveCalendarTarget({
+          userId: user.id,
+          transcript: input.transcript,
+        }),
+      },
     })
     return voiceCaptureProcessor.processVoiceCapture(data)
   })
@@ -101,6 +109,12 @@ export const processVoiceCaptureTranscript = createServerFn({ method: 'POST' })
           contextTaskId: input.contextTaskId,
           contextIdeaId: input.contextIdeaId,
           visibleTaskWindow: input.visibleTaskWindow,
+        }),
+      },
+      calendarResolver: {
+        resolveCalendarTarget: (input) => voiceCalendarResolver.resolveCalendarTarget({
+          userId: user.id,
+          transcript: input.transcript,
         }),
       },
     })

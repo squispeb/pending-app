@@ -466,6 +466,61 @@ describe('calendar service', () => {
     ])
   })
 
+  it('refreshes Google access in the background when loading calendar settings', async () => {
+    await service.completeGoogleConnect(userId, 'code', 'state')
+
+    await db
+      .update(schema.googleAccounts)
+      .set({
+        accessToken: null,
+        tokenExpiryAt: new Date(Date.now() - 60_000),
+      })
+      .where(sql`${schema.googleAccounts.userId} = ${userId}`)
+
+    const settings = await service.getSettingsData(userId)
+    const [account] = await db.select().from(schema.googleAccounts).where(sql`${schema.googleAccounts.userId} = ${userId}`)
+
+    expect(settings.account?.status).toBe('connected')
+    expect(account?.accessToken).toBe('refreshed-access-token')
+    expect(account?.disconnectedAt).toBeNull()
+  })
+
+  it('refreshes Google access in the background when loading calendar view data', async () => {
+    await service.completeGoogleConnect(userId, 'code', 'state')
+
+    await db
+      .update(schema.googleAccounts)
+      .set({
+        accessToken: null,
+        tokenExpiryAt: new Date(Date.now() - 60_000),
+      })
+      .where(sql`${schema.googleAccounts.userId} = ${userId}`)
+
+    const view = await service.getCalendarViewData(userId, new Date('2026-04-09T09:00:00.000Z'))
+    const [account] = await db.select().from(schema.googleAccounts).where(sql`${schema.googleAccounts.userId} = ${userId}`)
+
+    expect(view.account?.status).toBe('connected')
+    expect(account?.accessToken).toBe('refreshed-access-token')
+  })
+
+  it('refreshes Google access in the background when loading events for a day', async () => {
+    await service.completeGoogleConnect(userId, 'code', 'state')
+
+    await db
+      .update(schema.googleAccounts)
+      .set({
+        accessToken: null,
+        tokenExpiryAt: new Date(Date.now() - 60_000),
+      })
+      .where(sql`${schema.googleAccounts.userId} = ${userId}`)
+
+    const day = await service.getCalendarEventsForDay(userId, '2026-04-07')
+    const [account] = await db.select().from(schema.googleAccounts).where(sql`${schema.googleAccounts.userId} = ${userId}`)
+
+    expect(day.events.map((event) => event.summary)).toEqual(['Primary kickoff'])
+    expect(account?.accessToken).toBe('refreshed-access-token')
+  })
+
   it('preserves saved selections and auto-selects newly discovered visible calendars', async () => {
     await service.completeGoogleConnect(userId, 'code', 'state')
 
@@ -579,6 +634,48 @@ describe('calendar service', () => {
     expect(day.events.map((event) => event.summary)).toEqual(['Writable boundary test'])
   })
 
+  it('resolves the primary alias to the actual primary calendar id before writing', async () => {
+    await service.completeGoogleConnect(userId, 'code', 'state')
+
+    const result = await service.createCalendarEvent(userId, 'primary', {
+      summary: 'Primary alias write test',
+      start: { dateTime: '2026-04-10T14:00:00.000Z', timeZone: 'UTC' },
+      end: { dateTime: '2026-04-10T15:00:00.000Z', timeZone: 'UTC' },
+    })
+
+    const day = await service.getCalendarEventsForDay(userId, '2026-04-10')
+
+    expect(result.ok).toBe(true)
+    expect(day.events.map((event) => [event.calendarName, event.summary])).toEqual([
+      ['Primary', 'Primary alias write test'],
+    ])
+  })
+
+  it('selects an explicitly targeted writable calendar before snapshotting the created event', async () => {
+    await service.completeGoogleConnect(userId, 'code', 'state')
+
+    await service.updateCalendarSelections(userId, {
+      calendarIds: ['primary'],
+    })
+
+    const before = await service.getCalendarViewData(userId, new Date('2026-04-10T09:00:00.000Z'))
+    expect(before.selectedCalendars.map((calendar) => calendar.calendarId)).toEqual(['primary'])
+
+    await service.createCalendarEvent(userId, 'team', {
+      summary: 'Alternate writable visibility test',
+      start: { dateTime: '2026-04-10T14:00:00.000Z', timeZone: 'UTC' },
+      end: { dateTime: '2026-04-10T15:00:00.000Z', timeZone: 'UTC' },
+    })
+
+    const after = await service.getCalendarViewData(userId, new Date('2026-04-10T09:00:00.000Z'))
+    const day = await service.getCalendarEventsForDay(userId, '2026-04-10')
+
+    expect(after.selectedCalendars.map((calendar) => calendar.calendarId)).toEqual(['primary', 'team'])
+    expect(day.events.map((event) => [event.calendarName, event.summary])).toEqual([
+      ['Team', 'Alternate writable visibility test'],
+    ])
+  })
+
   it('rejects writes to known read-only calendars', async () => {
     await service.completeGoogleConnect(userId, 'code', 'state')
 
@@ -591,6 +688,26 @@ describe('calendar service', () => {
     ).rejects.toThrow('This Google calendar is read-only. Choose a writable calendar to continue.')
 
     expect(controls.createdEventSummary).toBe('')
+  })
+
+  it('refreshes calendar connections in the background before writing to a newly discovered writable calendar', async () => {
+    await service.completeGoogleConnect(userId, 'code', 'state')
+
+    const result = await service.createCalendarEvent(userId, 'new-visible', {
+      summary: 'Background refresh write test',
+      start: { dateTime: '2026-04-10T14:00:00.000Z', timeZone: 'UTC' },
+      end: { dateTime: '2026-04-10T15:00:00.000Z', timeZone: 'UTC' },
+    })
+
+    const settings = await service.getSettingsData(userId)
+    const day = await service.getCalendarEventsForDay(userId, '2026-04-10')
+
+    expect(result.ok).toBe(true)
+    expect(controls.createdEventSummary).toBe('Background refresh write test')
+    expect(settings.calendars.map((calendar) => calendar.calendarId)).toContain('new-visible')
+    expect(day.events.map((event) => [event.calendarName, event.summary])).toEqual([
+      ['Side Projects', 'Background refresh write test'],
+    ])
   })
 
   it('updates and deletes writable events in local snapshots immediately', async () => {

@@ -25,6 +25,7 @@ import type {
   CandidateType,
   ConfirmVoiceTaskActionKind,
   ProcessVoiceCaptureAutoSaved,
+  ProcessVoiceCaptureCalendarEvent,
   ProcessVoiceCaptureCalendarEventConfirmation,
   ProcessVoiceCaptureClarify,
   ProcessVoiceCaptureTaskActionConfirmation,
@@ -289,6 +290,178 @@ export function VoiceTaskClarifyPanel({
   )
 }
 
+type CalendarEventSummaryCardProps = {
+  event: ProcessVoiceCaptureCalendarEvent
+  eyebrow?: string
+}
+
+function formatCalendarEventWhen(event: ProcessVoiceCaptureCalendarEvent) {
+  const startLabel = formatDisplayDate(event.startDate)
+  const startText = event.allDay || !event.startTime
+    ? `${startLabel} all day`
+    : `${startLabel} at ${formatDisplayTime(event.startTime)}`
+
+  if (!event.endDate) {
+    return startText
+  }
+
+  if (event.endDate === event.startDate) {
+    return event.endTime ? `${startText} until ${formatDisplayTime(event.endTime)}` : startText
+  }
+
+  const endLabel = formatDisplayDate(event.endDate)
+  return `${startText} through ${endLabel}${event.endTime ? ` at ${formatDisplayTime(event.endTime)}` : ''}`
+}
+
+export function CalendarEventSummaryCard({ event, eyebrow = 'Calendar event' }: CalendarEventSummaryCardProps) {
+  return (
+    <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+        {eyebrow}
+      </span>
+      {event.title ? (
+        <p className="m-0 text-sm font-semibold leading-5 text-[var(--ink-strong)]">{event.title}</p>
+      ) : null}
+      <dl className="m-0 mt-2 space-y-2">
+        <div className="space-y-1">
+          <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">When</dt>
+          <dd className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{formatCalendarEventWhen(event)}</dd>
+        </div>
+        {event.location ? (
+          <div className="space-y-1">
+            <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">Location</dt>
+            <dd className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{event.location}</dd>
+          </div>
+        ) : null}
+        <div className="space-y-1">
+          <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">Calendar</dt>
+          <dd className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{event.targetCalendarName ?? 'Primary calendar'}</dd>
+        </div>
+      </dl>
+    </div>
+  )
+}
+
+type VoiceCalendarClarifyPanelProps = {
+  transcript: string
+  message: string
+  questions: string[]
+  reply: string
+  isSubmitting: boolean
+  isRecording: boolean
+  error: string | null
+  streamingAssistantText?: string
+  calendarEvent?: ProcessVoiceCaptureCalendarEvent | null
+  onReplyChange: (value: string) => void
+  onSubmit: (event: React.FormEvent) => void
+  onStartVoiceReply: () => void
+  onEditFromScratch: () => void
+  onCancel: () => void
+}
+
+export function VoiceCalendarClarifyPanel({
+  transcript,
+  message,
+  questions,
+  reply,
+  isSubmitting,
+  isRecording,
+  error,
+  streamingAssistantText,
+  calendarEvent,
+  onReplyChange,
+  onSubmit,
+  onStartVoiceReply,
+  onEditFromScratch,
+  onCancel,
+}: VoiceCalendarClarifyPanelProps) {
+  return (
+    <div className="space-y-4">
+      {calendarEvent ? <CalendarEventSummaryCard event={calendarEvent} eyebrow="Event so far" /> : null}
+
+      <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
+        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+          Transcript
+        </span>
+        <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{transcript}</p>
+      </div>
+
+      <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3">
+        <p className="m-0 text-sm font-medium text-amber-200">{message}</p>
+        {streamingAssistantText ? (
+          <p className="m-0 mt-3 whitespace-pre-wrap text-sm leading-6 text-amber-100">{streamingAssistantText}</p>
+        ) : null}
+        {questions.length > 0 ? (
+          <ul className="m-0 mt-3 space-y-1 pl-4">
+            {questions.map((question, index) => (
+              <li key={index} className="text-sm leading-6 text-amber-100">
+                {question}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+
+      <form onSubmit={onSubmit} className="space-y-3">
+        <label className="block">
+          <span className="mb-2 block text-sm font-semibold text-[var(--ink-strong)]">Your reply</span>
+          <textarea
+            autoFocus
+            value={reply}
+            onChange={(e) => onReplyChange(e.target.value)}
+            rows={3}
+            placeholder="Answer the questions above…"
+            className="w-full rounded-2xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--ink-strong)] outline-none transition focus:border-[var(--brand)]"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                onSubmit(e as unknown as React.FormEvent)
+              }
+            }}
+          />
+        </label>
+
+        {error ? <p className="m-0 text-sm font-medium text-red-500">{error}</p> : null}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            disabled={isSubmitting || !reply.trim()}
+            className="primary-pill inline-flex cursor-pointer items-center gap-1.5 border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <SendHorizonal size={14} />
+            {isSubmitting ? 'Interpreting…' : 'Send reply'}
+          </button>
+          <button
+            type="button"
+            onClick={onStartVoiceReply}
+            disabled={isSubmitting || isRecording}
+            className="secondary-pill inline-flex cursor-pointer items-center gap-1.5 border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Mic size={14} />
+            {isRecording ? 'Listening…' : 'Reply with voice'}
+          </button>
+          <button
+            type="button"
+            onClick={onEditFromScratch}
+            className="inline-flex cursor-pointer items-center gap-1 text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+          >
+            <RotateCcw size={13} />
+            Edit from scratch
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 type VoiceTaskStatusPanelProps = {
   transcript: string
   message: string
@@ -499,6 +672,8 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
   const [captureStreamingAssistantText, setCaptureStreamingAssistantText] = useState('')
   const [captureClarifyTaskActionContext, setCaptureClarifyTaskActionContext] =
     useState<ProcessVoiceCaptureClarify['taskActionContext'] | null>(null)
+  const [captureClarifyCalendarEvent, setCaptureClarifyCalendarEvent] =
+    useState<ProcessVoiceCaptureCalendarEvent | null>(null)
   const [captureTaskEditSessionId, setCaptureTaskEditSessionId] = useState<string | null>(null)
   const [captureCalendarEventSessionId, setCaptureCalendarEventSessionId] = useState<string | null>(null)
   const [captureShowAdvanced, setCaptureShowAdvanced] = useState(false)
@@ -592,6 +767,16 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     }
 
     applyDraftForReview(result.draft, result.transcript, 'recording')
+  }
+
+  function buildClarifyFollowUpTranscript(reply: string) {
+    const normalizedReply = reply.trim()
+
+    if (captureTaskEditSessionId || captureCalendarEventSessionId) {
+      return normalizedReply
+    }
+
+    return `${captureRawInput}\n\n${normalizedReply}`
   }
 
   async function submitAssistantSessionFollowUpAndStream(input: {
@@ -1062,10 +1247,15 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
       }
 
       if (captureCalendarEventSessionId) {
-        return submitAssistantSessionFollowUpAndStream({
-          transcript,
-          source: 'text',
-          transcriptLanguage: 'unknown',
+        return processVoiceCaptureTranscript({
+          data: {
+            transcript,
+            language: 'unknown',
+            currentDate: getTodayDateString(),
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            routeIntent,
+            calendarEventSessionId: captureCalendarEventSessionId,
+          },
         })
       }
 
@@ -1208,12 +1398,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                 return
               }
 
-              if (captureCalendarEventSessionId) {
+              if (captureClarifyTaskActionContext || captureClarifyCalendarEvent || captureCalendarEventSessionId) {
                 setCaptureMode('clarify')
-                voiceTaskEditFollowUpMutation.mutate({
-                  transcript: transcription.transcript,
-                  transcriptLanguage: transcription.language,
-                })
+                voiceTranscriptFollowUpMutation.mutate(buildClarifyFollowUpTranscript(transcription.transcript))
                 return
               }
 
@@ -1299,6 +1486,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureClarifyQuestions([])
     setCaptureClarifyReply('')
     setCaptureClarifyTaskActionContext(null)
+    setCaptureClarifyCalendarEvent(null)
     setCaptureTaskEditSessionId(null)
     setCaptureCalendarEventSessionId(null)
     setCaptureStreamingAssistantText('')
@@ -1476,6 +1664,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureStreamingAssistantText('')
     taskEditStreamSessionRef.current = createAssistantSessionStreamState()
     setCaptureClarifyTaskActionContext(result.taskActionContext ?? null)
+    setCaptureClarifyCalendarEvent(result.calendarEvent ?? null)
     setCaptureTaskEditSessionId(result.taskEditSession?.sessionId ?? null)
     setCaptureCalendarEventSessionId(result.calendarEventSession?.sessionId ?? null)
     if (result.taskActionContext?.task.id) {
@@ -1498,6 +1687,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureStreamingAssistantText('')
     taskEditStreamSessionRef.current = createAssistantSessionStreamState()
     setCaptureClarifyTaskActionContext(null)
+    setCaptureClarifyCalendarEvent(null)
     setCaptureCalendarEventSessionId(null)
     setCaptureTaskActionConfirmation(null)
     setCaptureCalendarEventConfirmation(null)
@@ -1515,6 +1705,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureStreamingAssistantText('')
     taskEditStreamSessionRef.current = createAssistantSessionStreamState()
     setCaptureClarifyTaskActionContext(null)
+    setCaptureClarifyCalendarEvent(null)
     setCaptureTaskEditSessionId(result.taskEditSession?.sessionId ?? null)
     setCaptureCalendarEventSessionId(result.calendarEventSession?.sessionId ?? null)
     setCaptureTaskStatus(null)
@@ -1534,6 +1725,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureStreamingAssistantText('')
     taskEditStreamSessionRef.current = createAssistantSessionStreamState()
     setCaptureClarifyTaskActionContext(null)
+    setCaptureClarifyCalendarEvent(null)
     setCaptureTaskEditSessionId(null)
     setCaptureCalendarEventSessionId(result.calendarEventSession.sessionId)
     setCaptureTaskStatus(null)
@@ -1548,14 +1740,12 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     if (!reply) return
     setCaptureError(null)
 
-    if (captureClarifyTaskActionContext || captureCalendarEventSessionId) {
-      const combined = `${captureRawInput}\n\n${reply}`
-      voiceTranscriptFollowUpMutation.mutate((captureTaskEditSessionId || captureCalendarEventSessionId) ? reply : combined)
+    if (captureClarifyTaskActionContext || captureClarifyCalendarEvent || captureCalendarEventSessionId) {
+      voiceTranscriptFollowUpMutation.mutate(buildClarifyFollowUpTranscript(reply))
       return
     }
 
-    const combined = `${captureRawInput}\n\n${reply}`
-    interpretMutation.mutate(combined)
+    interpretMutation.mutate(buildClarifyFollowUpTranscript(reply))
   }
 
   function applyDraftForReview(draft: TypedTaskDraft, rawInput: string, backTo: CaptureMode = 'input') {
@@ -1589,6 +1779,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
     setCaptureClarifyQuestions([])
     setCaptureStreamingAssistantText('')
     taskEditStreamSessionRef.current = createAssistantSessionStreamState()
+    setCaptureClarifyCalendarEvent(null)
     setCaptureTaskStatus(null)
     setCaptureTaskActionConfirmation(null)
     setCaptureCalendarEventConfirmation(null)
@@ -1640,6 +1831,8 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                 : captureMode === 'clarify'
                   ? captureClarifyTaskActionContext?.action === 'edit_task'
                     ? 'Edit task'
+                    : captureClarifyCalendarEvent || captureCalendarEventSessionId
+                      ? 'Create calendar event'
                     : 'Need a bit more detail'
                   : isThreadReplyCapture
                     ? 'Reply to idea'
@@ -2348,41 +2541,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                   {captureMode === 'calendar_event_confirmation' && captureCalendarEventConfirmation ? (
                     <form className="space-y-4" onSubmit={handleConfirm}>
                       <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">Create this calendar event</p>
-
-                      <dl className="m-0 space-y-3 rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
-                        {captureCalendarEventConfirmation.calendarEvent.title ? (
-                          <div className="space-y-1">
-                            <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">Title</dt>
-                            <dd className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureCalendarEventConfirmation.calendarEvent.title}</dd>
-                          </div>
-                        ) : null}
-                        <div className="space-y-1">
-                          <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">When</dt>
-                          <dd className="m-0 text-sm leading-6 text-[var(--ink-strong)]">
-                            {captureCalendarEventConfirmation.calendarEvent.startDate}
-                            {captureCalendarEventConfirmation.calendarEvent.allDay || !captureCalendarEventConfirmation.calendarEvent.startTime
-                              ? ' all day'
-                              : ` at ${formatDisplayTime(captureCalendarEventConfirmation.calendarEvent.startTime)}`}
-                            {captureCalendarEventConfirmation.calendarEvent.endDate
-                              ? captureCalendarEventConfirmation.calendarEvent.endDate === captureCalendarEventConfirmation.calendarEvent.startDate
-                                ? captureCalendarEventConfirmation.calendarEvent.endTime
-                                  ? ` until ${formatDisplayTime(captureCalendarEventConfirmation.calendarEvent.endTime)}`
-                                  : ''
-                                : ` through ${captureCalendarEventConfirmation.calendarEvent.endDate}${captureCalendarEventConfirmation.calendarEvent.endTime ? ` at ${formatDisplayTime(captureCalendarEventConfirmation.calendarEvent.endTime)}` : ''}`
-                              : ''}
-                          </dd>
-                        </div>
-                        {captureCalendarEventConfirmation.calendarEvent.location ? (
-                          <div className="space-y-1">
-                            <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">Location</dt>
-                            <dd className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureCalendarEventConfirmation.calendarEvent.location}</dd>
-                          </div>
-                        ) : null}
-                        <div className="space-y-1">
-                          <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">Calendar</dt>
-                          <dd className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{captureCalendarEventConfirmation.calendarEvent.targetCalendarName ?? 'Primary calendar'}</dd>
-                        </div>
-                      </dl>
+                      <CalendarEventSummaryCard event={captureCalendarEventConfirmation.calendarEvent} eyebrow="Event details" />
 
                       {captureError ? <p className="m-0 text-sm font-medium text-red-500">{captureError}</p> : null}
 
@@ -2407,7 +2566,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
 
                   {captureMode === 'clarify' ? (
                     <>
-                      {captureClarifyTaskActionContext || captureCalendarEventSessionId ? (
+                      {captureClarifyTaskActionContext ? (
                         <VoiceTaskClarifyPanel
                           transcript={captureRawInput}
                           message={captureClarifyMessage ?? ''}
@@ -2429,6 +2588,35 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                           onEditFromScratch={() => {
                             setCaptureClarifyReply('')
                             setCaptureClarifyTaskActionContext(null)
+                            setCaptureClarifyCalendarEvent(null)
+                            setCaptureTaskEditSessionId(null)
+                            setCaptureCalendarEventSessionId(null)
+                            setCaptureMode('input')
+                          }}
+                          onCancel={resetCapture}
+                        />
+                      ) : captureClarifyCalendarEvent || captureCalendarEventSessionId ? (
+                        <VoiceCalendarClarifyPanel
+                          transcript={captureRawInput}
+                          message={captureClarifyMessage ?? ''}
+                          questions={captureClarifyQuestions}
+                          reply={captureClarifyReply}
+                          isSubmitting={interpretMutation.isPending || isSubmittingTaskEditFollowUp}
+                          isRecording={isRecording}
+                          error={captureError ?? transcribeError}
+                          streamingAssistantText={captureStreamingAssistantText}
+                          calendarEvent={captureClarifyCalendarEvent}
+                          onReplyChange={setCaptureClarifyReply}
+                          onSubmit={handleClarifyReplySubmit}
+                          onStartVoiceReply={() => {
+                            setTranscribeError(null)
+                            setCaptureMode('recording')
+                            void startRecording(null, { asFollowUp: true })
+                          }}
+                          onEditFromScratch={() => {
+                            setCaptureClarifyReply('')
+                            setCaptureClarifyTaskActionContext(null)
+                            setCaptureClarifyCalendarEvent(null)
                             setCaptureTaskEditSessionId(null)
                             setCaptureCalendarEventSessionId(null)
                             setCaptureMode('input')
@@ -2521,6 +2709,7 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                                   setCaptureClarifyReply('')
                                   setCaptureRawInput(captureRawInput)
                                   setCaptureTaskEditSessionId(null)
+                                  setCaptureClarifyCalendarEvent(null)
                                   setCaptureCalendarEventSessionId(null)
                                   setCaptureMode('input')
                                 }}

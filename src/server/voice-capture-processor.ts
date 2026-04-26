@@ -58,6 +58,11 @@ type AssistantSessionService = {
       targetCalendarId?: string | null
       targetCalendarName?: string | null
     }
+    writableCalendars?: Array<{
+      calendarId: string
+      calendarName: string
+      primaryFlag: boolean
+    }>
     routeIntent?: ProcessVoiceCaptureTextInput['routeIntent']
     requestedFields?: Array<'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location'>
     activeField?: 'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location' | null
@@ -166,9 +171,128 @@ type AssistantSessionService = {
     message: string
     source: 'text' | 'voice'
     transcriptLanguage?: 'es' | 'en' | 'unknown' | null
+    context?: {
+      writableCalendars?: Array<{
+        calendarId: string
+        calendarName: string
+        primaryFlag: boolean
+      }>
+      target?: {
+        kind: 'calendar_event'
+        id?: string
+        label: string
+      } | null
+    }
+    workflow?: {
+      kind: 'calendar_event'
+      operation: 'create'
+      draft?: {
+        targetCalendarId?: string | null
+        targetCalendarName?: string | null
+      }
+      changes?: {
+        targetCalendarId?: string | null
+        targetCalendarName?: string | null
+      }
+    }
   }) => Promise<{
     turnId?: string
   } | unknown>
+}
+
+type VoiceCalendarResolver = {
+  resolveCalendarTarget: (input: { transcript: string }) => Promise<
+    | {
+        kind: 'default_primary' | 'resolved_primary'
+        writableCalendars: Array<{
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+        }>
+      }
+    | {
+        kind: 'resolved_alternate'
+        target: {
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+          isSelected: boolean
+        }
+        writableCalendars: Array<{
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+        }>
+      }
+    | {
+        kind: 'ambiguous'
+        attemptedName: string | null
+        candidates: Array<{
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+          isSelected: boolean
+        }>
+        writableCalendars: Array<{
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+        }>
+      }
+    | {
+        kind: 'unavailable'
+        attemptedName: string
+        writableCalendars: Array<{
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+        }>
+      }
+    | {
+        kind: 'read_only'
+        attemptedName: string
+        calendar: {
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+        }
+        writableCalendars: Array<{
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+        }>
+      }
+  >
+}
+
+function buildCalendarTargetClarification(
+  resolution:
+    | Awaited<ReturnType<VoiceCalendarResolver['resolveCalendarTarget']>>,
+) {
+  if (resolution.kind === 'ambiguous') {
+    return {
+      message: 'I found more than one matching writable calendar, so I need to know which one you mean.',
+      questions: resolution.candidates.slice(0, 3).map((candidate) => `Did you mean the ${candidate.calendarName} calendar?`),
+    }
+  }
+
+  if (resolution.kind === 'read_only') {
+    const writableNames = resolution.writableCalendars.slice(0, 3).map((calendar) => calendar.calendarName)
+    return {
+      message: `The ${resolution.calendar.calendarName} calendar is read-only, so I can't create events there.`,
+      questions: writableNames.length > 0
+        ? [`Which writable calendar should I use instead? Available options: ${writableNames.join(', ')}.`]
+        : ['Which writable calendar should I use instead?'],
+    }
+  }
+
+  const writableNames = resolution.writableCalendars.slice(0, 3).map((calendar) => calendar.calendarName)
+  return {
+    message: `I couldn't find a writable calendar named ${JSON.stringify(resolution.attemptedName)}.`,
+    questions: writableNames.length > 0
+      ? [`Which calendar should I use instead? Available writable calendars: ${writableNames.join(', ')}.`]
+      : ['Which calendar should I use instead?'],
+  }
 }
 
 type ResolvedTask = {
@@ -318,6 +442,7 @@ export function createVoiceCaptureProcessor(
     assistantSessionService?: AssistantSessionService
     voiceIntentClassifier?: VoiceIntentClassifier | null
     taskResolver?: VoiceTaskResolver
+    calendarResolver?: VoiceCalendarResolver
   },
 ) {
   const voiceIntentRouter = createVoiceIntentRouter({
@@ -648,12 +773,49 @@ export function createVoiceCaptureProcessor(
         }
       }
 
+      const calendarResolution = dependencies.calendarResolver
+        ? await dependencies.calendarResolver.resolveCalendarTarget({ transcript: data.transcript })
+        : { kind: 'default_primary' as const, writableCalendars: [] }
+
+      if (
+        calendarResolution.kind === 'ambiguous'
+        || calendarResolution.kind === 'unavailable'
+        || calendarResolution.kind === 'read_only'
+      ) {
+        const clarification = buildCalendarTargetClarification(calendarResolution)
+
+        return {
+          ok: true,
+          outcome: 'clarify',
+          transcript: data.transcript,
+          language: data.language,
+          message: clarification.message,
+          questions: clarification.questions,
+          draft: null,
+          calendarEvent: {
+            targetCalendarId: null,
+            targetCalendarName: calendarResolution.attemptedName,
+          },
+        }
+      }
+
       const requestedFields = mapCalendarCreateRequestedFields(data.transcript)
+      const targetDraft =
+        calendarResolution.kind === 'resolved_alternate'
+          ? {
+              targetCalendarId: calendarResolution.target.calendarId,
+              targetCalendarName: calendarResolution.target.calendarName,
+            }
+          : {
+              targetCalendarId: null,
+              targetCalendarName: null,
+            }
       const session = await dependencies.assistantSessionService.resolveCalendarEventCreateSession({
         sessionId: data.calendarEventSessionId ?? undefined,
         currentDate: data.currentDate,
         timezone: data.timezone,
-        draft: {},
+        draft: targetDraft,
+        writableCalendars: calendarResolution.writableCalendars,
         routeIntent: data.routeIntent,
         requestedFields,
         activeField: requestedFields[0] ?? null,
@@ -664,6 +826,14 @@ export function createVoiceCaptureProcessor(
         message: data.transcript,
         source: 'voice',
         transcriptLanguage: data.language,
+        context: {
+          writableCalendars: calendarResolution.writableCalendars,
+          target: {
+            kind: 'calendar_event',
+            ...(targetDraft.targetCalendarId ? { id: targetDraft.targetCalendarId } : {}),
+            label: targetDraft.targetCalendarName ?? targetDraft.title ?? 'Calendar event',
+          },
+        },
       })
 
       const settledSession = await waitForAssistantSessionTurnSettlement({

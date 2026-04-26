@@ -49,6 +49,12 @@ const calendarEventCreateDraftSchema = z.object({
   targetCalendarName: z.string().min(1).nullable().optional(),
 })
 
+const assistantWritableCalendarSchema = z.object({
+  calendarId: z.string().min(1),
+  calendarName: z.string().min(1),
+  primaryFlag: z.boolean(),
+})
+
 const calendarEventCreateWorkflowSchema = z.object({
   kind: z.literal('calendar_event'),
   operation: z.literal('create'),
@@ -133,6 +139,7 @@ const assistantSessionViewSchema = z.object({
       id: z.string().min(1).optional(),
       label: z.string().min(1),
     }).nullable().optional(),
+    writableCalendars: z.array(assistantWritableCalendarSchema).max(25).optional(),
     notes: z.array(z.string().min(1)).max(10).optional(),
   }).nullable(),
   workflow: z.discriminatedUnion('kind', [assistantTaskEditWorkflowSchema, calendarEventCreateWorkflowSchema]).nullable(),
@@ -830,20 +837,25 @@ export async function resolveAssistantCalendarEventCreateSession(
   input: {
     sessionId?: string
     authHeaders: HeadersInit
-        currentDate: string
-        timezone: string
-        draft: {
-          title?: string | null
-          description?: string | null
-          startDate?: string | null
-          startTime?: string | null
-          endDate?: string | null
-          endTime?: string | null
-          location?: string | null
-          allDay?: boolean | null
-          targetCalendarId?: string | null
-          targetCalendarName?: string | null
-        }
+    currentDate: string
+    timezone: string
+    draft: {
+      title?: string | null
+      description?: string | null
+      startDate?: string | null
+      startTime?: string | null
+      endDate?: string | null
+      endTime?: string | null
+      location?: string | null
+      allDay?: boolean | null
+      targetCalendarId?: string | null
+      targetCalendarName?: string | null
+    }
+    writableCalendars?: Array<{
+      calendarId: string
+      calendarName: string
+      primaryFlag: boolean
+    }>
     routeIntent?: 'tasks' | 'habits' | 'ideas' | 'auto'
     requestedFields?: Array<'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location'>
     activeField?: 'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location' | null
@@ -867,6 +879,7 @@ export async function resolveAssistantCalendarEventCreateSession(
       channel: 'mixed',
       context: {
         ...(input.routeIntent ? { routeIntent: input.routeIntent } : {}),
+        ...(input.writableCalendars?.length ? { writableCalendars: input.writableCalendars } : {}),
         target: {
           kind: 'calendar_event',
           ...(input.draft.targetCalendarId ? { id: input.draft.targetCalendarId } : {}),
@@ -921,6 +934,46 @@ export async function submitAssistantSessionTurn(
     message: string
     source: 'text' | 'voice'
     transcriptLanguage?: 'es' | 'en' | 'unknown' | null
+    context?: {
+      writableCalendars?: Array<{
+        calendarId: string
+        calendarName: string
+        primaryFlag: boolean
+      }>
+      target?: {
+        kind: 'calendar_event'
+        id?: string
+        label: string
+      } | null
+    }
+    workflow?: {
+      kind: 'calendar_event'
+      operation: 'create'
+      phase?: 'collecting' | 'ready_to_confirm' | 'completed' | 'blocked'
+      currentDate?: string
+      timezone?: string
+      draft?: {
+        targetCalendarId?: string | null
+        targetCalendarName?: string | null
+      }
+      requestedFields?: Array<'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location'>
+      missingFields?: Array<'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location'>
+      activeField?: 'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location' | null
+      fieldAttempts?: {
+        title: number
+        description: number
+        startDate: number
+        startTime: number
+        endDate: number
+        endTime: number
+        location: number
+      }
+      changes?: {
+        targetCalendarId?: string | null
+        targetCalendarName?: string | null
+      }
+      result?: null
+    }
   },
   options?: { fetchImpl?: typeof fetch; baseUrl?: string },
 ) {
@@ -940,6 +993,8 @@ export async function submitAssistantSessionTurn(
       message: input.message,
       source: input.source,
       ...(input.transcriptLanguage !== undefined ? { transcriptLanguage: input.transcriptLanguage } : {}),
+      ...(input.context ? { context: input.context } : {}),
+      ...(input.workflow ? { workflow: input.workflow } : {}),
     }),
   })
 

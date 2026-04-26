@@ -1980,6 +1980,425 @@ describe('voice capture processor', () => {
     expect(interpretTypedTaskInput).not.toHaveBeenCalled()
   })
 
+  it('boots calendar create sessions with a validated writable alternate calendar target', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          throw new Error('Should not be called')
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      assistantSessionService: {
+        async resolveCalendarEventCreateSession(input) {
+          expect(input.draft).toEqual({
+            targetCalendarId: 'side-projects',
+            targetCalendarName: 'Side Projects',
+          })
+          expect(input.writableCalendars).toEqual([
+            {
+              calendarId: 'primary',
+              calendarName: 'Primary',
+              primaryFlag: true,
+            },
+            {
+              calendarId: 'side-projects',
+              calendarName: 'Side Projects',
+              primaryFlag: false,
+            },
+          ])
+          return {
+            sessionId: 'session-calendar-1',
+          }
+        },
+        async submitSessionTurn(input) {
+          expect(input.context).toEqual({
+            target: {
+              kind: 'calendar_event',
+              id: 'side-projects',
+              label: 'Side Projects',
+            },
+            writableCalendars: [
+              {
+                calendarId: 'primary',
+                calendarName: 'Primary',
+                primaryFlag: true,
+              },
+              {
+                calendarId: 'side-projects',
+                calendarName: 'Side Projects',
+                primaryFlag: false,
+              },
+            ],
+          })
+          expect(input.workflow).toBeUndefined()
+          return {
+            turnId: 'turn-calendar-1',
+          }
+        },
+        async getSession() {
+          return {
+            sessionId: 'session-calendar-1',
+            activeTurn: null,
+            lastTurn: {
+              turnId: 'turn-calendar-1',
+              state: 'completed' as const,
+            },
+            workflow: {
+              kind: 'calendar_event' as const,
+              operation: 'create' as const,
+              phase: 'ready_to_confirm' as const,
+              draft: {
+                title: 'Team sync',
+                startDate: '2026-04-09',
+                targetCalendarId: 'side-projects',
+                targetCalendarName: 'Side Projects',
+              },
+              changes: {
+                title: 'Team sync',
+                startDate: '2026-04-09',
+                targetCalendarId: 'side-projects',
+                targetCalendarName: 'Side Projects',
+              },
+              result: null,
+            },
+            visibleEvents: [
+              {
+                type: 'assistant_question' as const,
+                summary: 'I understood that as creating a calendar event with title "Team sync", date 2026-04-09 all day, calendar Side Projects. Confirm if you want me to apply those changes.',
+              },
+            ],
+          }
+        },
+      },
+      calendarResolver: {
+        async resolveCalendarTarget() {
+          return {
+            kind: 'resolved_alternate' as const,
+            target: {
+              calendarId: 'side-projects',
+              calendarName: 'Side Projects',
+              primaryFlag: false,
+              isSelected: false,
+            },
+            writableCalendars: [
+              {
+                calendarId: 'primary',
+                calendarName: 'Primary',
+                primaryFlag: true,
+              },
+              {
+                calendarId: 'side-projects',
+                calendarName: 'Side Projects',
+                primaryFlag: false,
+              },
+            ],
+          }
+        },
+      },
+    }, {
+      async classify() {
+        return {
+          family: 'calendar_action',
+          kind: 'create_calendar_event',
+        }
+      },
+    })
+
+    const result = await processor.processVoiceTranscript({
+      transcript: 'Schedule team sync tomorrow on the Side Projects calendar',
+      language: 'en',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'calendar_event_confirmation',
+      transcript: 'Schedule team sync tomorrow on the Side Projects calendar',
+      language: 'en',
+      message: 'I understood that as creating a calendar event with title "Team sync", date 2026-04-09 all day, calendar Side Projects. Confirm if you want me to apply those changes.',
+      calendarEvent: {
+        title: 'Team sync',
+        startDate: '2026-04-09',
+        targetCalendarId: 'side-projects',
+        targetCalendarName: 'Side Projects',
+        allDay: true,
+      },
+      calendarEventSession: {
+        sessionId: 'session-calendar-1',
+      },
+    })
+  })
+
+  it('clarifies when an explicitly named alternate calendar is unavailable', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          throw new Error('Should not be called')
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      assistantSessionService: {
+        async resolveCalendarEventCreateSession() {
+          throw new Error('Should not be called')
+        },
+        async submitSessionTurn() {
+          throw new Error('Should not be called')
+        },
+        async getSession() {
+          throw new Error('Should not be called')
+        },
+      },
+      calendarResolver: {
+        async resolveCalendarTarget() {
+          return {
+            kind: 'unavailable' as const,
+            attemptedName: 'marketing',
+            writableCalendars: [
+              {
+                calendarId: 'primary',
+                calendarName: 'Primary',
+                primaryFlag: true,
+              },
+            ],
+          }
+        },
+      },
+    }, {
+      async classify() {
+        return {
+          family: 'calendar_action',
+          kind: 'create_calendar_event',
+        }
+      },
+    })
+
+    const result = await processor.processVoiceTranscript({
+      transcript: 'Schedule team sync tomorrow on the Marketing calendar',
+      language: 'en',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Schedule team sync tomorrow on the Marketing calendar',
+      language: 'en',
+      message: 'I couldn\'t find a writable calendar named "marketing".',
+      questions: ['Which calendar should I use instead? Available writable calendars: Primary.'],
+      draft: null,
+      calendarEvent: {
+        targetCalendarId: null,
+        targetCalendarName: 'marketing',
+      },
+    })
+  })
+
+  it('clarifies when an explicitly named alternate calendar is ambiguous', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          throw new Error('Should not be called')
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      assistantSessionService: {
+        async resolveCalendarEventCreateSession() {
+          throw new Error('Should not be called')
+        },
+        async submitSessionTurn() {
+          throw new Error('Should not be called')
+        },
+        async getSession() {
+          throw new Error('Should not be called')
+        },
+      },
+      calendarResolver: {
+        async resolveCalendarTarget() {
+          return {
+            kind: 'ambiguous' as const,
+            attemptedName: 'team',
+            candidates: [
+              {
+                calendarId: 'team-a',
+                calendarName: 'Team',
+                primaryFlag: false,
+                isSelected: true,
+              },
+              {
+                calendarId: 'team-b',
+                calendarName: 'Team',
+                primaryFlag: false,
+                isSelected: false,
+              },
+            ],
+            writableCalendars: [
+              {
+                calendarId: 'primary',
+                calendarName: 'Primary',
+                primaryFlag: true,
+              },
+              {
+                calendarId: 'team-a',
+                calendarName: 'Team',
+                primaryFlag: false,
+              },
+              {
+                calendarId: 'team-b',
+                calendarName: 'Team',
+                primaryFlag: false,
+              },
+            ],
+          }
+        },
+      },
+    }, {
+      async classify() {
+        return {
+          family: 'calendar_action',
+          kind: 'create_calendar_event',
+        }
+      },
+    })
+
+    const result = await processor.processVoiceTranscript({
+      transcript: 'Schedule team sync tomorrow on the Team calendar',
+      language: 'en',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Schedule team sync tomorrow on the Team calendar',
+      language: 'en',
+      message: 'I found more than one matching writable calendar, so I need to know which one you mean.',
+      questions: ['Did you mean the Team calendar?', 'Did you mean the Team calendar?'],
+      draft: null,
+      calendarEvent: {
+        targetCalendarId: null,
+        targetCalendarName: 'team',
+      },
+    })
+  })
+
+  it('clarifies when an explicitly named alternate calendar is read-only', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          throw new Error('Should not be called')
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      assistantSessionService: {
+        async resolveCalendarEventCreateSession() {
+          throw new Error('Should not be called')
+        },
+        async submitSessionTurn() {
+          throw new Error('Should not be called')
+        },
+        async getSession() {
+          throw new Error('Should not be called')
+        },
+      },
+      calendarResolver: {
+        async resolveCalendarTarget() {
+          return {
+            kind: 'read_only' as const,
+            attemptedName: 'Finance',
+            calendar: {
+              calendarId: 'finance',
+              calendarName: 'Finance',
+              primaryFlag: false,
+            },
+            writableCalendars: [
+              {
+                calendarId: 'primary',
+                calendarName: 'Primary',
+                primaryFlag: true,
+              },
+              {
+                calendarId: 'side-projects',
+                calendarName: 'Side Projects',
+                primaryFlag: false,
+              },
+            ],
+          }
+        },
+      },
+    }, {
+      async classify() {
+        return {
+          family: 'calendar_action',
+          kind: 'create_calendar_event',
+        }
+      },
+    })
+
+    const result = await processor.processVoiceTranscript({
+      transcript: 'Schedule team sync tomorrow on the Finance calendar',
+      language: 'en',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Schedule team sync tomorrow on the Finance calendar',
+      language: 'en',
+      message: "The Finance calendar is read-only, so I can't create events there.",
+      questions: ['Which writable calendar should I use instead? Available options: Primary, Side Projects.'],
+      draft: null,
+      calendarEvent: {
+        targetCalendarId: null,
+        targetCalendarName: 'Finance',
+      },
+    })
+  })
+
   it('routes unsupported planner commands into clarification instead of task creation', async () => {
     const interpretTypedTaskInput = vi.fn(async () => {
       throw new Error('Should not be called')

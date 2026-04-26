@@ -114,7 +114,16 @@ describe('assistant service client', () => {
       queuedTurns: [],
       lastTurn: null,
       visibleEvents: [],
-      context: { target: { kind: 'calendar_event', label: 'Team sync' } },
+      context: {
+        target: { kind: 'calendar_event', label: 'Team sync' },
+        writableCalendars: [
+          {
+            calendarId: 'primary',
+            calendarName: 'Primary',
+            primaryFlag: true,
+          },
+        ],
+      },
       workflow: {
         kind: 'calendar_event',
         operation: 'create',
@@ -138,6 +147,13 @@ describe('assistant service client', () => {
         currentDate: '2026-04-25',
         timezone: 'America/Lima',
         draft: { title: 'Team sync' },
+        writableCalendars: [
+          {
+            calendarId: 'primary',
+            calendarName: 'Primary',
+            primaryFlag: true,
+          },
+        ],
       },
       { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' },
     )
@@ -149,8 +165,174 @@ describe('assistant service client', () => {
     expect(init?.method).toBe('POST')
     expect(JSON.parse(String(init?.body))).toMatchObject({
       channel: 'mixed',
-      context: { target: { kind: 'calendar_event', label: 'Team sync' } },
+      context: {
+        target: { kind: 'calendar_event', label: 'Team sync' },
+        writableCalendars: [
+          {
+            calendarId: 'primary',
+            calendarName: 'Primary',
+            primaryFlag: true,
+          },
+        ],
+      },
       workflow: { kind: 'calendar_event', operation: 'create', currentDate: '2026-04-25', timezone: 'America/Lima' },
+    })
+  })
+
+  it('submits calendar session turn patches with validated target context', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      outcome: 'accepted',
+      turnId: 'turn-1',
+      state: 'processing',
+      queueDepth: 0,
+      session: {
+        sessionId: 'session-123',
+        userId: 'local-user',
+        channel: 'mixed',
+        status: 'processing',
+        activeTurn: {
+          turnId: 'turn-1',
+          source: 'voice',
+          userMessage: 'use the Side Projects calendar',
+          transcriptLanguage: 'en',
+          state: 'processing',
+          createdAt: '2026-04-25T10:00:00.000Z',
+          completedAt: null,
+        },
+        queuedTurns: [],
+        lastTurn: {
+          turnId: 'turn-1',
+          source: 'voice',
+          userMessage: 'use the Side Projects calendar',
+          transcriptLanguage: 'en',
+          state: 'processing',
+          createdAt: '2026-04-25T10:00:00.000Z',
+          completedAt: null,
+        },
+        visibleEvents: [],
+        context: {
+          target: {
+            kind: 'calendar_event',
+            id: 'side-projects',
+            label: 'Side Projects',
+          },
+          writableCalendars: [
+            {
+              calendarId: 'primary',
+              calendarName: 'Primary',
+              primaryFlag: true,
+            },
+            {
+              calendarId: 'side-projects',
+              calendarName: 'Side Projects',
+              primaryFlag: false,
+            },
+          ],
+        },
+        workflow: {
+          kind: 'calendar_event',
+          operation: 'create',
+          phase: 'collecting',
+          currentDate: '2026-04-25',
+          timezone: 'America/Lima',
+          draft: {
+            targetCalendarId: 'side-projects',
+            targetCalendarName: 'Side Projects',
+          },
+          requestedFields: [],
+          missingFields: [],
+          activeField: null,
+          fieldAttempts: { title: 0, description: 0, startDate: 0, startTime: 0, endDate: 0, endTime: 0, location: 0 },
+          changes: {
+            targetCalendarId: 'side-projects',
+            targetCalendarName: 'Side Projects',
+          },
+          result: null,
+        },
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+
+    const { submitAssistantSessionTurn } = await import('./assistant-service-client')
+    const result = await submitAssistantSessionTurn({
+      sessionId: 'session-123',
+      authHeaders: { authorization: 'Bearer test-session-token' },
+      message: 'use the Side Projects calendar',
+      source: 'voice',
+      transcriptLanguage: 'en',
+      context: {
+        target: {
+          kind: 'calendar_event',
+          id: 'side-projects',
+          label: 'Side Projects',
+        },
+        writableCalendars: [
+          {
+            calendarId: 'primary',
+            calendarName: 'Primary',
+            primaryFlag: true,
+          },
+          {
+            calendarId: 'side-projects',
+            calendarName: 'Side Projects',
+            primaryFlag: false,
+          },
+        ],
+      },
+      workflow: {
+        kind: 'calendar_event',
+        operation: 'create',
+        draft: {
+          targetCalendarId: 'side-projects',
+          targetCalendarName: 'Side Projects',
+        },
+        changes: {
+          targetCalendarId: 'side-projects',
+          targetCalendarName: 'Side Projects',
+        },
+      },
+    }, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      baseUrl: 'https://assistant.example',
+    })
+
+    expect(result.turnId).toBe('turn-1')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/sessions/session-123/turns')
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      message: 'use the Side Projects calendar',
+      context: {
+        target: {
+          kind: 'calendar_event',
+          id: 'side-projects',
+          label: 'Side Projects',
+        },
+        writableCalendars: [
+          {
+            calendarId: 'primary',
+            calendarName: 'Primary',
+            primaryFlag: true,
+          },
+          {
+            calendarId: 'side-projects',
+            calendarName: 'Side Projects',
+            primaryFlag: false,
+          },
+        ],
+      },
+      workflow: {
+        kind: 'calendar_event',
+        operation: 'create',
+        draft: {
+          targetCalendarId: 'side-projects',
+          targetCalendarName: 'Side Projects',
+        },
+        changes: {
+          targetCalendarId: 'side-projects',
+          targetCalendarName: 'Side Projects',
+        },
+      },
     })
   })
 

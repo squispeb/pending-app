@@ -69,6 +69,11 @@ export function createAssistantSessionService(database: Database) {
           targetCalendarId?: string | null
           targetCalendarName?: string | null
         }
+        writableCalendars?: Array<{
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+        }>
         routeIntent?: 'tasks' | 'habits' | 'ideas' | 'auto'
         requestedFields?: Array<'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location'>
         activeField?: 'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location' | null
@@ -135,6 +140,46 @@ export function createAssistantSessionService(database: Database) {
         message: string
         source: 'text' | 'voice'
         transcriptLanguage?: 'es' | 'en' | 'unknown' | null
+        context?: {
+          writableCalendars?: Array<{
+            calendarId: string
+            calendarName: string
+            primaryFlag: boolean
+          }>
+          target?: {
+            kind: 'calendar_event'
+            id?: string
+            label: string
+          } | null
+        }
+        workflow?: {
+          kind: 'calendar_event'
+          operation: 'create'
+          phase?: 'collecting' | 'ready_to_confirm' | 'completed' | 'blocked'
+          currentDate?: string
+          timezone?: string
+          draft?: {
+            targetCalendarId?: string | null
+            targetCalendarName?: string | null
+          }
+          requestedFields?: Array<'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location'>
+          missingFields?: Array<'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location'>
+          activeField?: 'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location' | null
+          fieldAttempts?: {
+            title: number
+            description: number
+            startDate: number
+            startTime: number
+            endDate: number
+            endTime: number
+            location: number
+          }
+          changes?: {
+            targetCalendarId?: string | null
+            targetCalendarName?: string | null
+          }
+          result?: null
+        }
       },
       options?: SessionOptions,
     ) {

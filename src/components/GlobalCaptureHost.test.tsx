@@ -1,7 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  CalendarEventSummaryCard,
   SelectedTaskSummaryCard,
+  VoiceCalendarClarifyPanel,
   VoiceTaskActionConfirmationPanel,
   VoiceTaskClarifyPanel,
   VoiceTaskStatusPanel,
@@ -375,5 +377,58 @@ describe('GlobalCaptureHost voice panels', () => {
     expect(markup).toContain('Reply with voice')
     expect(markup).toContain('Describe the task change you want…')
     expect(markup).not.toContain('Assistant tip')
+  })
+
+  it('renders a structured calendar event summary', () => {
+    const markup = renderToStaticMarkup(
+      <CalendarEventSummaryCard
+        event={{
+          title: 'Team sync',
+          startDate: '2026-05-03',
+          startTime: '09:30',
+          endDate: '2026-05-03',
+          endTime: '10:00',
+          location: 'Room A',
+          targetCalendarName: 'Work',
+        }}
+      />,
+    )
+
+    expect(markup).toContain('Team sync')
+    expect(markup).toContain('May 3, 2026 at 9:30 AM until 10:00 AM')
+    expect(markup).toContain('Room A')
+    expect(markup).toContain('Work')
+  })
+
+  it('renders the calendar clarify panel with event context and voice reply affordance', () => {
+    const markup = renderToStaticMarkup(
+      <VoiceCalendarClarifyPanel
+        transcript="Agrega una reunion en el calendario personal"
+        message={`I couldn't find a writable calendar named "personal".`}
+        questions={['Which calendar should I use instead? Available writable calendars: Work, Family.']}
+        reply=""
+        isSubmitting={false}
+        isRecording={false}
+        error={null}
+        streamingAssistantText="Checking calendars..."
+        calendarEvent={{
+          startDate: '2026-05-03',
+          allDay: true,
+          targetCalendarName: 'personal',
+        }}
+        onReplyChange={() => {}}
+        onSubmit={(event) => event.preventDefault()}
+        onStartVoiceReply={() => {}}
+        onEditFromScratch={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Event so far')
+    expect(markup).toContain('May 3, 2026 all day')
+    expect(markup).toContain('personal')
+    expect(markup).toContain('Checking calendars...')
+    expect(markup).toContain('Reply with voice')
+    expect(markup).toContain('Which calendar should I use instead? Available writable calendars: Work, Family.')
   })
 })
