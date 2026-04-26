@@ -11,6 +11,7 @@ import { GoogleApiError, googleIntegrationApi } from './google-client'
 import { getGoogleConfigStatus } from './google-auth'
 import {
   GOOGLE_CALENDAR_PROVIDER,
+  type GoogleCalendarEventInput,
   getGoogleSyncWindow,
   type GoogleCalendarSelectionInput,
 } from '../lib/google'
@@ -82,6 +83,21 @@ export function createCalendarService(
   async function listSelectedConnections(userId: string, googleAccountId: string) {
     const connections = await listConnectionsForAccount(userId, googleAccountId)
     return connections.filter((connection) => connection.isSelected)
+  }
+
+  async function requireWritableConnection(userId: string, googleAccountId: string, calendarId: string) {
+    const connections = await listConnectionsForAccount(userId, googleAccountId)
+    const connection = connections.find((item) => item.calendarId === calendarId) ?? null
+
+    if (!connection) {
+      throw new Error('Refresh Google calendars before writing to this calendar.')
+    }
+
+    if (!connection.canWrite) {
+      throw new Error('This Google calendar is read-only. Choose a writable calendar to continue.')
+    }
+
+    return connection
   }
 
   function getSyncSummary(states: Array<SyncState>, options?: { disconnected: boolean }) {
@@ -489,6 +505,7 @@ export function createCalendarService(
           .set({
             calendarName: calendar.calendarName,
             primaryFlag: calendar.primaryFlag,
+            canWrite: calendar.canWrite,
             isSelected,
             updatedAt: now,
           })
@@ -504,6 +521,7 @@ export function createCalendarService(
         calendarId: calendar.calendarId,
         calendarName: calendar.calendarName,
         primaryFlag: calendar.primaryFlag,
+        canWrite: calendar.canWrite,
         isSelected,
         createdAt: now,
         updatedAt: now,
@@ -709,11 +727,78 @@ export function createCalendarService(
     }
   }
 
+  async function createCalendarEvent(
+    userId: string,
+    calendarId: string,
+    event: GoogleCalendarEventInput,
+    now = new Date(),
+  ) {
+    const { account } = await getAccountAndConnections(userId)
+
+    if (!account || account.disconnectedAt) {
+      throw new Error('Reconnect Google Calendar before creating events.')
+    }
+
+    await requireWritableConnection(userId, account.id, calendarId)
+
+    const accessToken = await getFreshAccessToken(account.id)
+    const createdEvent = await googleApi.createCalendarEvent(accessToken, calendarId, event)
+    await upsertCalendarEventSnapshot(userId, calendarId, createdEvent, now)
+
+    return { ok: true as const, event: createdEvent }
+  }
+
+  async function updateCalendarEvent(
+    userId: string,
+    calendarId: string,
+    googleEventId: string,
+    event: GoogleCalendarEventInput,
+    now = new Date(),
+  ) {
+    const { account } = await getAccountAndConnections(userId)
+
+    if (!account || account.disconnectedAt) {
+      throw new Error('Reconnect Google Calendar before updating events.')
+    }
+
+    await requireWritableConnection(userId, account.id, calendarId)
+
+    const accessToken = await getFreshAccessToken(account.id)
+    const updatedEvent = await googleApi.updateCalendarEvent(accessToken, calendarId, googleEventId, event)
+    await upsertCalendarEventSnapshot(userId, calendarId, updatedEvent, now)
+
+    return { ok: true as const, event: updatedEvent }
+  }
+
+  async function deleteCalendarEvent(
+    userId: string,
+    calendarId: string,
+    googleEventId: string,
+    now = new Date(),
+  ) {
+    const { account } = await getAccountAndConnections(userId)
+
+    if (!account || account.disconnectedAt) {
+      throw new Error('Reconnect Google Calendar before deleting events.')
+    }
+
+    await requireWritableConnection(userId, account.id, calendarId)
+
+    const accessToken = await getFreshAccessToken(account.id)
+    await googleApi.deleteCalendarEvent(accessToken, calendarId, googleEventId)
+    await deleteCalendarEventSnapshot(userId, calendarId, googleEventId)
+
+    return { ok: true as const, deleted: true as const, deletedAt: now }
+  }
+
   return {
     getSettingsData,
     getCalendarViewData,
     getCalendarEventsForDay,
     syncSelectedCalendarEvents,
+    createCalendarEvent,
+    updateCalendarEvent,
+    deleteCalendarEvent,
     startGoogleConnect,
     async completeGoogleConnect(userId: string, code: string, state: string) {
       const payload = googleApi.verifyState(state)

@@ -1,0 +1,1 @@
+ALTER TABLE `calendar_connections` ADD `can_write` integer DEFAULT false NOT NULL;

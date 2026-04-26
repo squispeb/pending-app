@@ -1,6 +1,7 @@
 import type { Database } from '../db/client'
 import {
   getAssistantSession,
+  resolveAssistantCalendarEventCreateSession,
   resolveAssistantTaskEditSession,
   streamAssistantSession,
   submitAssistantSessionTurn,
@@ -18,6 +19,8 @@ export function createAssistantSessionService(database: Database) {
     async resolveTaskEditSession(
       input: {
         sessionId?: string
+        currentDate: string
+        timezone: string
         task: {
           taskId: string
           title: string
@@ -39,6 +42,46 @@ export function createAssistantSessionService(database: Database) {
       })
 
       return resolveAssistantTaskEditSession(
+        {
+          ...input,
+          authHeaders,
+        },
+        {
+          fetchImpl: options?.fetchImpl,
+          baseUrl: options?.assistantServiceBaseUrl,
+        },
+      )
+    },
+    async resolveCalendarEventCreateSession(
+      input: {
+        sessionId?: string
+        currentDate: string
+        timezone: string
+        draft: {
+          title?: string | null
+          description?: string | null
+          startDate?: string | null
+          startTime?: string | null
+          endDate?: string | null
+          endTime?: string | null
+          location?: string | null
+          allDay?: boolean | null
+          targetCalendarId?: string | null
+          targetCalendarName?: string | null
+        }
+        routeIntent?: 'tasks' | 'habits' | 'ideas' | 'auto'
+        requestedFields?: Array<'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location'>
+        activeField?: 'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location' | null
+      },
+      options?: SessionOptions,
+    ) {
+      const { authHeaders } = await resolveAuthenticatedPlannerUser(database, {
+        requestHeaders: options?.requestHeaders,
+        fetchImpl: options?.fetchImpl,
+        baseUrl: options?.assistantServiceBaseUrl,
+      })
+
+      return resolveAssistantCalendarEventCreateSession(
         {
           ...input,
           authHeaders,

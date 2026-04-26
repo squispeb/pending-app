@@ -104,6 +104,56 @@ describe('assistant service client', () => {
     expect(init?.body).toBe(JSON.stringify({ ideaId: 'idea-123' }))
   })
 
+  it('resolves a calendar event creation session contract', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      sessionId: 'session-123',
+      userId: 'local-user',
+      channel: 'mixed',
+      status: 'idle',
+      activeTurn: null,
+      queuedTurns: [],
+      lastTurn: null,
+      visibleEvents: [],
+      context: { target: { kind: 'calendar_event', label: 'Team sync' } },
+      workflow: {
+        kind: 'calendar_event',
+        operation: 'create',
+        phase: 'collecting',
+        currentDate: '2026-04-25',
+        timezone: 'America/Lima',
+        draft: { title: 'Team sync' },
+        requestedFields: [],
+        missingFields: [],
+        activeField: null,
+        fieldAttempts: { title: 0, description: 0, startDate: 0, startTime: 0, endDate: 0, endTime: 0, location: 0 },
+        changes: {},
+        result: null,
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+
+    const { resolveAssistantCalendarEventCreateSession } = await import('./assistant-service-client')
+    const result = await resolveAssistantCalendarEventCreateSession(
+      {
+        authHeaders: { authorization: 'Bearer test-session-token' },
+        currentDate: '2026-04-25',
+        timezone: 'America/Lima',
+        draft: { title: 'Team sync' },
+      },
+      { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' },
+    )
+
+    expect(result.workflow?.kind).toBe('calendar_event')
+    expect(result.workflow && 'operation' in result.workflow ? result.workflow.operation : null).toBe('create')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/sessions/resolve')
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      channel: 'mixed',
+      context: { target: { kind: 'calendar_event', label: 'Team sync' } },
+      workflow: { kind: 'calendar_event', operation: 'create', currentDate: '2026-04-25', timezone: 'America/Lima' },
+    })
+  })
+
   it('surfaces assistant-service errors', async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({ message: 'Unauthorized thread access' }), {

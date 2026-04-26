@@ -1,7 +1,11 @@
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 import { db } from '../db/client'
-import { googleCallbackInputSchema, googleCalendarSelectionSchema } from '../lib/google'
+import {
+  googleCallbackInputSchema,
+  googleCalendarEventInputSchema,
+  googleCalendarSelectionSchema,
+} from '../lib/google'
 import { resolveAuthenticatedPlannerUser } from './authenticated-user'
 import { createCalendarService } from './calendar-service'
 
@@ -45,6 +49,37 @@ export const syncGoogleCalendar = createServerFn({ method: 'POST' }).handler(asy
   const { user } = await resolveAuthenticatedPlannerUser(db)
   return calendarService.syncSelectedCalendarEvents(user.id)
 })
+
+export const createGoogleCalendarEvent = createServerFn({ method: 'POST' })
+  .inputValidator((input) => z.object({ calendarId: z.string().min(1), event: googleCalendarEventInputSchema }).parse(input))
+  .handler(async ({ data }) => {
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    return calendarService.createCalendarEvent(user.id, data.calendarId, data.event)
+  })
+
+export const updateGoogleCalendarEvent = createServerFn({ method: 'POST' })
+  .inputValidator((input) =>
+    z
+      .object({
+        calendarId: z.string().min(1),
+        googleEventId: z.string().min(1),
+        event: googleCalendarEventInputSchema,
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    return calendarService.updateCalendarEvent(user.id, data.calendarId, data.googleEventId, data.event)
+  })
+
+export const deleteGoogleCalendarEvent = createServerFn({ method: 'POST' })
+  .inputValidator((input) =>
+    z.object({ calendarId: z.string().min(1), googleEventId: z.string().min(1) }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await resolveAuthenticatedPlannerUser(db)
+    return calendarService.deleteCalendarEvent(user.id, data.calendarId, data.googleEventId)
+  })
 
 export const saveGoogleCalendarSelections = createServerFn({ method: 'POST' })
   .inputValidator((input) => googleCalendarSelectionSchema.parse(input))

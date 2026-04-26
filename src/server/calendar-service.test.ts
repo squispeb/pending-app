@@ -52,6 +52,7 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
       calendar_name text NOT NULL,
       is_selected integer DEFAULT false NOT NULL,
       primary_flag integer DEFAULT false NOT NULL,
+      can_write integer DEFAULT false NOT NULL,
       created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
       updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade,
@@ -108,6 +109,28 @@ type GoogleApiControls = {
   calendarListVersion: number
   eventVersion: number
   expireSyncTokenOnNextRequest: boolean
+  createdEventSummary: string
+  updatedEventSummary: string
+  deletedEventIds: Array<string>
+}
+
+function makeConfirmedEvent(summary: string, startsAt: string, endsAt: string, googleEventId: string) {
+  return {
+    googleEventId,
+    googleRecurringEventId: null,
+    status: 'confirmed',
+    summary,
+    description: null,
+    location: 'Room A',
+    startsAt: new Date(startsAt),
+    endsAt: new Date(endsAt),
+    allDay: false,
+    eventTimezone: 'UTC',
+    htmlLink: `https://calendar.google.com/event?eid=${googleEventId}`,
+    organizerEmail: 'owner@example.com',
+    attendeeCount: 1,
+    updatedAtRemote: new Date('2026-04-06T10:00:00.000Z'),
+  }
 }
 
 function makeGoogleApi(controls: GoogleApiControls, userId: string): GoogleIntegrationApi {
@@ -126,7 +149,8 @@ function makeGoogleApi(controls: GoogleApiControls, userId: string): GoogleInteg
       return {
         accessToken: 'access-token',
         refreshToken: 'refresh-token',
-        scope: 'openid email https://www.googleapis.com/auth/calendar.readonly',
+        scope:
+          'openid email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events',
         tokenExpiryAt: new Date(Date.now() + 60 * 60_000),
       }
     },
@@ -134,7 +158,8 @@ function makeGoogleApi(controls: GoogleApiControls, userId: string): GoogleInteg
       return {
         accessToken: 'refreshed-access-token',
         refreshToken: 'refresh-token',
-        scope: 'openid email https://www.googleapis.com/auth/calendar.readonly',
+        scope:
+          'openid email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events',
         tokenExpiryAt: new Date(Date.now() + 60 * 60_000),
       }
     },
@@ -153,18 +178,21 @@ function makeGoogleApi(controls: GoogleApiControls, userId: string): GoogleInteg
             calendarName: 'Primary',
             primaryFlag: true,
             visible: true,
+            canWrite: true,
           },
           {
             calendarId: 'team',
             calendarName: 'Team',
             primaryFlag: false,
             visible: true,
+            canWrite: true,
           },
           {
             calendarId: 'hidden',
             calendarName: 'Hidden',
             primaryFlag: false,
             visible: false,
+            canWrite: false,
           },
         ]
       }
@@ -175,18 +203,21 @@ function makeGoogleApi(controls: GoogleApiControls, userId: string): GoogleInteg
           calendarName: 'Primary',
           primaryFlag: true,
           visible: true,
+          canWrite: true,
         },
         {
           calendarId: 'team',
           calendarName: 'Team',
           primaryFlag: false,
           visible: true,
+          canWrite: false,
         },
         {
           calendarId: 'new-visible',
           calendarName: 'Side Projects',
           primaryFlag: false,
           visible: true,
+          canWrite: true,
         },
       ]
     },
@@ -328,6 +359,47 @@ function makeGoogleApi(controls: GoogleApiControls, userId: string): GoogleInteg
         nextSyncToken: 'team-sync-v2',
       }
     },
+    async createCalendarEvent(_accessToken, calendarId, event) {
+      controls.createdEventSummary = event.summary ?? ''
+      return {
+        googleEventId: `created-${calendarId}`,
+        googleRecurringEventId: null,
+        status: 'confirmed',
+        summary: event.summary ?? null,
+        description: event.description ?? null,
+        location: event.location ?? null,
+        startsAt: event.start.dateTime ? new Date(event.start.dateTime) : new Date(`${event.start.date}T12:00:00.000Z`),
+        endsAt: event.end.dateTime ? new Date(event.end.dateTime) : new Date(`${event.end.date}T13:00:00.000Z`),
+        allDay: !!event.start.date,
+        eventTimezone: event.start.timeZone ?? event.end.timeZone ?? 'UTC',
+        htmlLink: null,
+        organizerEmail: 'owner@example.com',
+        attendeeCount: event.attendees?.length ?? null,
+        updatedAtRemote: new Date('2026-04-10T10:00:00.000Z'),
+      }
+    },
+    async updateCalendarEvent(_accessToken, calendarId, googleEventId, event) {
+      controls.updatedEventSummary = event.summary ?? ''
+      return {
+        googleEventId,
+        googleRecurringEventId: null,
+        status: 'confirmed',
+        summary: event.summary ?? null,
+        description: event.description ?? null,
+        location: event.location ?? null,
+        startsAt: event.start.dateTime ? new Date(event.start.dateTime) : new Date(`${event.start.date}T12:00:00.000Z`),
+        endsAt: event.end.dateTime ? new Date(event.end.dateTime) : new Date(`${event.end.date}T13:00:00.000Z`),
+        allDay: !!event.start.date,
+        eventTimezone: event.start.timeZone ?? event.end.timeZone ?? 'UTC',
+        htmlLink: `https://calendar.google.com/event?eid=${googleEventId}`,
+        organizerEmail: 'owner@example.com',
+        attendeeCount: event.attendees?.length ?? null,
+        updatedAtRemote: new Date('2026-04-10T11:00:00.000Z'),
+      }
+    },
+    async deleteCalendarEvent(_accessToken, _calendarId, googleEventId) {
+      controls.deletedEventIds.push(googleEventId)
+    },
   }
 }
 
@@ -353,6 +425,9 @@ describe('calendar service', () => {
       calendarListVersion: 1,
       eventVersion: 1,
       expireSyncTokenOnNextRequest: false,
+      createdEventSummary: '',
+      updatedEventSummary: '',
+      deletedEventIds: [],
     }
     service = createCalendarService(db, makeGoogleApi(controls, userId))
   })
@@ -384,6 +459,11 @@ describe('calendar service', () => {
       ['team', true],
       ['hidden', false],
     ])
+    expect(settings.calendars.map((item) => [item.calendarId, item.canWrite])).toEqual([
+      ['primary', true],
+      ['team', true],
+      ['hidden', false],
+    ])
   })
 
   it('preserves saved selections and auto-selects newly discovered visible calendars', async () => {
@@ -397,6 +477,12 @@ describe('calendar service', () => {
 
     expect(refreshed.ok).toBe(true)
     expect(refreshed.calendars.map((item) => [item.calendarId, item.isSelected])).toEqual([
+      ['primary', true],
+      ['new-visible', true],
+      ['hidden', false],
+      ['team', false],
+    ])
+    expect(refreshed.calendars.map((item) => [item.calendarId, item.canWrite])).toEqual([
       ['primary', true],
       ['new-visible', true],
       ['hidden', false],
@@ -473,5 +559,63 @@ describe('calendar service', () => {
     expect(result.recoveredExpiredToken).toBe(true)
     expect(updatedDay.events.map((event) => event.summary)).toEqual(['Updated planning review'])
     expect(removedDay.events).toHaveLength(0)
+  })
+
+  it('writes created events into the local snapshot immediately', async () => {
+    await service.completeGoogleConnect(userId, 'code', 'state')
+
+    const result = await service.createCalendarEvent(userId, 'primary', {
+      summary: 'Writable boundary test',
+      description: 'Created via Google API',
+      location: 'Room C',
+      start: { dateTime: '2026-04-10T14:00:00.000Z', timeZone: 'UTC' },
+      end: { dateTime: '2026-04-10T15:00:00.000Z', timeZone: 'UTC' },
+    })
+
+    const day = await service.getCalendarEventsForDay(userId, '2026-04-10')
+
+    expect(result.ok).toBe(true)
+    expect(controls.createdEventSummary).toBe('Writable boundary test')
+    expect(day.events.map((event) => event.summary)).toEqual(['Writable boundary test'])
+  })
+
+  it('rejects writes to known read-only calendars', async () => {
+    await service.completeGoogleConnect(userId, 'code', 'state')
+
+    await expect(
+      service.createCalendarEvent(userId, 'hidden', {
+        summary: 'Read only test',
+        start: { dateTime: '2026-04-10T14:00:00.000Z', timeZone: 'UTC' },
+        end: { dateTime: '2026-04-10T15:00:00.000Z', timeZone: 'UTC' },
+      }),
+    ).rejects.toThrow('This Google calendar is read-only. Choose a writable calendar to continue.')
+
+    expect(controls.createdEventSummary).toBe('')
+  })
+
+  it('updates and deletes writable events in local snapshots immediately', async () => {
+    await service.completeGoogleConnect(userId, 'code', 'state')
+
+    await service.createCalendarEvent(userId, 'primary', {
+      summary: 'Original writable event',
+      start: { dateTime: '2026-04-10T14:00:00.000Z', timeZone: 'UTC' },
+      end: { dateTime: '2026-04-10T15:00:00.000Z', timeZone: 'UTC' },
+    })
+
+    await service.updateCalendarEvent(userId, 'primary', 'created-primary', {
+      summary: 'Updated writable event',
+      start: { dateTime: '2026-04-10T15:00:00.000Z', timeZone: 'UTC' },
+      end: { dateTime: '2026-04-10T16:00:00.000Z', timeZone: 'UTC' },
+    })
+
+    const updatedDay = await service.getCalendarEventsForDay(userId, '2026-04-10')
+    expect(controls.updatedEventSummary).toBe('Updated writable event')
+    expect(updatedDay.events.map((event) => event.summary)).toEqual(['Updated writable event'])
+
+    await service.deleteCalendarEvent(userId, 'primary', 'created-primary')
+
+    const deletedDay = await service.getCalendarEventsForDay(userId, '2026-04-10')
+    expect(controls.deletedEventIds).toEqual(['created-primary'])
+    expect(deletedDay.events).toHaveLength(0)
   })
 })

@@ -36,9 +36,58 @@ const taskEditChangesSchema = z.object({
   dueTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
 })
 
+const calendarEventCreateDraftSchema = z.object({
+  title: z.string().min(1).nullable().optional(),
+  description: z.string().min(1).nullable().optional(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  startTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+  location: z.string().min(1).nullable().optional(),
+  allDay: z.boolean().nullable().optional(),
+  targetCalendarId: z.string().min(1).nullable().optional(),
+  targetCalendarName: z.string().min(1).nullable().optional(),
+})
+
+const calendarEventCreateWorkflowSchema = z.object({
+  kind: z.literal('calendar_event'),
+  operation: z.literal('create'),
+  phase: z.enum(['collecting', 'ready_to_confirm', 'completed', 'blocked']),
+  currentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  timezone: z.string().min(1),
+  draft: calendarEventCreateDraftSchema,
+  requestedFields: z.array(z.enum(['title', 'description', 'startDate', 'startTime', 'endDate', 'endTime', 'location'])),
+  missingFields: z.array(z.enum(['title', 'description', 'startDate', 'startTime', 'endDate', 'endTime', 'location'])),
+  activeField: z.enum(['title', 'description', 'startDate', 'startTime', 'endDate', 'endTime', 'location']).nullable(),
+  fieldAttempts: z.object({
+    title: z.number().int().nonnegative(),
+    description: z.number().int().nonnegative(),
+    startDate: z.number().int().nonnegative(),
+    startTime: z.number().int().nonnegative(),
+    endDate: z.number().int().nonnegative(),
+    endTime: z.number().int().nonnegative(),
+    location: z.number().int().nonnegative(),
+  }),
+  changes: calendarEventCreateDraftSchema,
+  result: z.object({
+    outcome: z.enum(['confirmed', 'cancelled']),
+    completedAt: z.string().min(1),
+    applyPayload: z.object({
+      action: z.literal('create_calendar_event'),
+      operation: z.literal('create'),
+      draft: calendarEventCreateDraftSchema,
+    }).nullable(),
+  }).nullable(),
+})
+
+export type AssistantSessionView = z.infer<typeof assistantSessionViewSchema>
+export type SubmitAssistantSessionTurnResponse = z.infer<typeof submitAssistantSessionTurnResponseSchema>
+
 const assistantTaskEditWorkflowSchema = z.object({
   kind: z.literal('task_edit'),
   phase: z.enum(['collecting', 'ready_to_confirm', 'completed', 'blocked']),
+  currentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  timezone: z.string().min(1),
   task: z.object({
     taskId: z.string().min(1),
     title: z.string().min(1),
@@ -86,7 +135,7 @@ const assistantSessionViewSchema = z.object({
     }).nullable().optional(),
     notes: z.array(z.string().min(1)).max(10).optional(),
   }).nullable(),
-  workflow: z.discriminatedUnion('kind', [assistantTaskEditWorkflowSchema]).nullable(),
+  workflow: z.discriminatedUnion('kind', [assistantTaskEditWorkflowSchema, calendarEventCreateWorkflowSchema]).nullable(),
 })
 
 const submitAssistantSessionTurnResponseSchema = z.object({
@@ -713,6 +762,8 @@ export async function resolveAssistantTaskEditSession(
   input: {
     sessionId?: string
     authHeaders: HeadersInit
+    currentDate: string
+    timezone: string
     task: {
       taskId: string
       title: string
@@ -753,6 +804,8 @@ export async function resolveAssistantTaskEditSession(
       workflow: {
         kind: 'task_edit',
         phase: 'collecting',
+        currentDate: input.currentDate,
+        timezone: input.timezone,
         task: input.task,
         requestedFields: input.requestedFields ?? [],
         missingFields: input.requestedFields ?? [],
@@ -763,6 +816,74 @@ export async function resolveAssistantTaskEditSession(
           dueDate: 0,
           dueTime: 0,
         },
+        changes: {},
+        result: null,
+      },
+    }),
+  })
+
+  const payload = await parseAssistantResponse(response)
+  return assistantSessionViewSchema.parse(payload)
+}
+
+export async function resolveAssistantCalendarEventCreateSession(
+  input: {
+    sessionId?: string
+    authHeaders: HeadersInit
+        currentDate: string
+        timezone: string
+        draft: {
+          title?: string | null
+          description?: string | null
+          startDate?: string | null
+          startTime?: string | null
+          endDate?: string | null
+          endTime?: string | null
+          location?: string | null
+          allDay?: boolean | null
+          targetCalendarId?: string | null
+          targetCalendarName?: string | null
+        }
+    routeIntent?: 'tasks' | 'habits' | 'ideas' | 'auto'
+    requestedFields?: Array<'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location'>
+    activeField?: 'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location' | null
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+
+  if (!baseUrl) {
+    throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  }
+
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/sessions/resolve`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      channel: 'mixed',
+      context: {
+        ...(input.routeIntent ? { routeIntent: input.routeIntent } : {}),
+        target: {
+          kind: 'calendar_event',
+          ...(input.draft.targetCalendarId ? { id: input.draft.targetCalendarId } : {}),
+          label: input.draft.targetCalendarName ?? input.draft.title ?? 'Calendar event',
+        },
+      },
+      workflow: {
+        kind: 'calendar_event',
+        operation: 'create',
+        phase: 'collecting',
+        currentDate: input.currentDate,
+        timezone: input.timezone,
+        draft: input.draft,
+        requestedFields: input.requestedFields ?? [],
+        missingFields: input.requestedFields ?? [],
+        activeField: input.activeField ?? null,
+        fieldAttempts: { title: 0, description: 0, startDate: 0, startTime: 0, endDate: 0, endTime: 0, location: 0 },
         changes: {},
         result: null,
       },
@@ -825,9 +946,6 @@ export async function submitAssistantSessionTurn(
   const payload = await parseAssistantResponse(response)
   return submitAssistantSessionTurnResponseSchema.parse(payload)
 }
-
-export type AssistantSessionView = z.infer<typeof assistantSessionViewSchema>
-export type SubmitAssistantSessionTurnResponse = z.infer<typeof submitAssistantSessionTurnResponseSchema>
 
 export async function approveIdeaThreadProposal(
   input: {
@@ -1037,6 +1155,4 @@ export async function rejectIdeaThreadStructuredAction(
 
   return rejectStructuredActionResponseSchema.parse(payload)
 }
-
 export type GetIdeaThreadResponse = z.infer<typeof getIdeaThreadResponseSchema>
-export type AssistantSessionView = z.infer<typeof assistantSessionViewSchema>

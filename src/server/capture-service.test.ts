@@ -74,6 +74,7 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
       calendar_name text NOT NULL,
       is_selected integer DEFAULT false NOT NULL,
       primary_flag integer DEFAULT false NOT NULL,
+      can_write integer DEFAULT false NOT NULL,
       created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
       updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
@@ -155,6 +156,7 @@ async function seedSelectedCalendar(db: ReturnType<typeof drizzle<typeof schema>
       calendar_name,
       is_selected,
       primary_flag,
+      can_write,
       created_at,
       updated_at
     ) VALUES (
@@ -163,6 +165,7 @@ async function seedSelectedCalendar(db: ReturnType<typeof drizzle<typeof schema>
       'google-1',
       'calendar-1',
       'Primary',
+      1,
       1,
       1,
       (unixepoch() * 1000),

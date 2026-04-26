@@ -42,8 +42,30 @@ type VoiceCaptureService = {
 }
 
 type AssistantSessionService = {
+  resolveCalendarEventCreateSession: (input: {
+    sessionId?: string
+    currentDate: string
+    timezone: string
+    draft: {
+      title?: string | null
+      description?: string | null
+      startDate?: string | null
+      startTime?: string | null
+      endDate?: string | null
+      endTime?: string | null
+      location?: string | null
+      allDay?: boolean | null
+      targetCalendarId?: string | null
+      targetCalendarName?: string | null
+    }
+    routeIntent?: ProcessVoiceCaptureTextInput['routeIntent']
+    requestedFields?: Array<'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location'>
+    activeField?: 'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location' | null
+  }) => Promise<{ sessionId: string }>
   resolveTaskEditSession: (input: {
     sessionId?: string
+    currentDate: string
+    timezone: string
     task: {
       taskId: string
       title: string
@@ -60,30 +82,80 @@ type AssistantSessionService = {
   }>
   getSession: (sessionId: string) => Promise<{
     sessionId: string
-    workflow: {
-      kind: 'task_edit'
-      phase: 'collecting' | 'ready_to_confirm' | 'completed' | 'blocked'
-      activeField: 'title' | 'description' | 'dueDate' | 'dueTime' | null
-      changes: {
-        title?: string
-        description?: string
-        dueDate?: string
-        dueTime?: string
-      }
-      result: {
-        outcome: 'confirmed' | 'cancelled'
-        applyPayload: {
-          action: 'edit_task'
-          taskId: string
-          edits: {
+    workflow:
+      | {
+          kind: 'task_edit'
+          phase: 'collecting' | 'ready_to_confirm' | 'completed' | 'blocked'
+          activeField: 'title' | 'description' | 'dueDate' | 'dueTime' | null
+          changes: {
             title?: string
             description?: string
             dueDate?: string
             dueTime?: string
           }
-        } | null
-      } | null
-    } | null
+          result: {
+            outcome: 'confirmed' | 'cancelled'
+            applyPayload: {
+              action: 'edit_task'
+              taskId: string
+              edits: {
+                title?: string
+                description?: string
+                dueDate?: string
+                dueTime?: string
+              }
+            } | null
+          } | null
+        }
+      | {
+          kind: 'calendar_event'
+          operation: 'create'
+          phase: 'collecting' | 'ready_to_confirm' | 'completed' | 'blocked'
+          draft: {
+            title?: string | null
+            description?: string | null
+            startDate?: string | null
+            startTime?: string | null
+            endDate?: string | null
+            endTime?: string | null
+            location?: string | null
+            allDay?: boolean | null
+            targetCalendarId?: string | null
+            targetCalendarName?: string | null
+          }
+          changes: {
+            title?: string
+            description?: string
+            startDate?: string
+            startTime?: string
+            endDate?: string
+            endTime?: string
+            location?: string
+            allDay?: boolean
+            targetCalendarId?: string | null
+            targetCalendarName?: string | null
+          }
+          result: {
+            outcome: 'confirmed' | 'cancelled'
+            applyPayload: {
+              action: 'create_calendar_event'
+              operation: 'create'
+              draft: {
+                title?: string | null
+                description?: string | null
+                startDate?: string | null
+                startTime?: string | null
+                endDate?: string | null
+                endTime?: string | null
+                location?: string | null
+                allDay?: boolean | null
+                targetCalendarId?: string | null
+                targetCalendarName?: string | null
+              }
+            } | null
+          } | null
+        }
+      | null
     visibleEvents: Array<{
       type: 'session_started' | 'user_turn_added' | 'assistant_question' | 'assistant_synthesis' | 'assistant_failed'
       summary: string
@@ -151,6 +223,34 @@ type TaskActionTranscriptInput = {
   visibleTaskWindow?: ProcessVoiceCaptureTextInput['visibleTaskWindow']
   followUpTaskAction?: ConfirmVoiceTaskActionKind
   taskEditSessionId?: string | null
+  calendarEventSessionId?: string | null
+}
+
+function mapCalendarCreateRequestedFields(transcript: string) {
+  const normalized = transcript.toLowerCase()
+  const fields: Array<'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location'> = []
+
+  if (/\b(title|meeting|event|appointment|sync|call|reunion|reunión|evento|cita)\b/i.test(transcript)) {
+    fields.push('title')
+  }
+
+  if (/\b(description|notes?|details|descripcion|descripción)\b/i.test(transcript)) {
+    fields.push('description')
+  }
+
+  if (/\b(today|tomorrow|next|monday|tuesday|wednesday|thursday|friday|saturday|sunday|hoy|mañana|manana|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo|\d{4}-\d{2}-\d{2})\b/i.test(transcript)) {
+    fields.push('startDate')
+  }
+
+  if (/\b(at|am|pm|a las|\d{1,2}:\d{2})\b/i.test(normalized)) {
+    fields.push('startTime')
+  }
+
+  if (/\b(location|where|room|place|ubicacion|ubicación|lugar)\b/i.test(transcript)) {
+    fields.push('location')
+  }
+
+  return Array.from(new Set(fields))
 }
 
 function mapTaskEditRequestedFields(changes: ReturnType<typeof inferVoiceTaskEditChanges>) {
@@ -376,6 +476,8 @@ export function createVoiceCaptureProcessor(
           const requestedFields = mapTaskEditRequestedFields(taskEditChanges)
           const session = await dependencies.assistantSessionService.resolveTaskEditSession({
             sessionId: data.taskEditSessionId ?? undefined,
+            currentDate: data.currentDate,
+            timezone: data.timezone,
             task: {
               taskId: resolution.task.id,
               title: resolution.task.title,
@@ -533,6 +635,123 @@ export function createVoiceCaptureProcessor(
       }
     }
 
+    if (voiceIntent.family === 'calendar_action' && voiceIntent.kind === 'create_calendar_event') {
+      if (!dependencies.assistantSessionService) {
+        return {
+          ok: true,
+          outcome: 'clarify',
+          transcript: data.transcript,
+          language: data.language,
+          message: 'I understood that as a calendar action, but voice calendar actions are not available yet.',
+          questions: ['Do you want to capture this as a new task instead?'],
+          draft: null,
+        }
+      }
+
+      const requestedFields = mapCalendarCreateRequestedFields(data.transcript)
+      const session = await dependencies.assistantSessionService.resolveCalendarEventCreateSession({
+        sessionId: data.calendarEventSessionId ?? undefined,
+        currentDate: data.currentDate,
+        timezone: data.timezone,
+        draft: {},
+        routeIntent: data.routeIntent,
+        requestedFields,
+        activeField: requestedFields[0] ?? null,
+      })
+
+      const submittedTurn = await dependencies.assistantSessionService.submitSessionTurn({
+        sessionId: session.sessionId,
+        message: data.transcript,
+        source: 'voice',
+        transcriptLanguage: data.language,
+      })
+
+      const settledSession = await waitForAssistantSessionTurnSettlement({
+        assistantSessionService: dependencies.assistantSessionService,
+        sessionId: session.sessionId,
+        submittedTurnId:
+          submittedTurn && typeof submittedTurn === 'object' && submittedTurn && 'turnId' in submittedTurn && typeof submittedTurn.turnId === 'string'
+            ? submittedTurn.turnId
+            : null,
+      })
+      const workflow = settledSession.workflow
+
+      if (!workflow || workflow.kind !== 'calendar_event' || workflow.operation !== 'create') {
+        throw new Error('Calendar event session workflow missing')
+      }
+
+      const latestQuestion = getLatestAssistantSessionSummary(settledSession, 'assistant_question')
+      const latestSynthesis = getLatestAssistantSessionSummary(settledSession, 'assistant_synthesis')
+      const calendarEvent = {
+        ...workflow.draft,
+        ...workflow.changes,
+        allDay:
+          typeof workflow.changes.allDay === 'boolean'
+            ? workflow.changes.allDay
+            : typeof workflow.draft.allDay === 'boolean'
+              ? workflow.draft.allDay
+              : !workflow.changes.startTime && !workflow.draft.startTime,
+      }
+
+      if (workflow.phase === 'ready_to_confirm') {
+        return {
+          ok: true,
+          outcome: 'calendar_event_confirmation',
+          transcript: data.transcript,
+          language: data.language,
+          message: latestQuestion ?? 'Confirm this calendar event.',
+          calendarEvent,
+          calendarEventSession: {
+            sessionId: settledSession.sessionId,
+          },
+        }
+      }
+
+      if (workflow.phase === 'collecting') {
+        return {
+          ok: true,
+          outcome: 'clarify',
+          transcript: data.transcript,
+          language: data.language,
+          message: latestQuestion ?? 'What calendar event details should I use?',
+          questions: [],
+          draft: null,
+          calendarEvent,
+          calendarEventSession: {
+            sessionId: settledSession.sessionId,
+          },
+        }
+      }
+
+      if (workflow.phase === 'completed' && workflow.result?.applyPayload) {
+        return {
+          ok: true,
+          outcome: 'calendar_event_confirmation',
+          transcript: data.transcript,
+          language: data.language,
+          message: latestSynthesis ?? latestQuestion ?? 'Confirm this calendar event.',
+          calendarEvent,
+          calendarEventSession: {
+            sessionId: settledSession.sessionId,
+          },
+        }
+      }
+
+      return {
+        ok: true,
+        outcome: 'clarify',
+        transcript: data.transcript,
+        language: data.language,
+        message: latestSynthesis ?? 'I did not apply any calendar changes.',
+        questions: [latestQuestion ?? 'Do you want to try a different event request?'],
+        draft: null,
+        calendarEvent,
+        calendarEventSession: {
+          sessionId: settledSession.sessionId,
+        },
+      }
+    }
+
     if (voiceIntent.family !== 'creation') {
       const clarification = buildVoiceActionClarification(voiceIntent)
 
@@ -677,6 +896,7 @@ export function createVoiceCaptureProcessor(
         visibleTaskWindow: data.visibleTaskWindow,
         followUpTaskAction: data.followUpTaskAction,
         taskEditSessionId: data.taskEditSessionId,
+        calendarEventSessionId: data.calendarEventSessionId,
       })
     },
     async processVoiceTranscript(data: ProcessVoiceCaptureTextInput): Promise<ProcessVoiceCaptureResponse> {

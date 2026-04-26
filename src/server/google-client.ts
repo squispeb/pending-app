@@ -1,6 +1,11 @@
 import { z } from 'zod'
 import { env } from '../lib/env'
-import { getGoogleScopeString } from '../lib/google'
+import {
+  getGoogleScopeString,
+  GOOGLE_CALENDAR_WRITABLE_ACCESS_ROLES,
+  googleCalendarEventInputSchema,
+  type GoogleCalendarEventInput,
+} from '../lib/google'
 import { createGoogleState, verifyGoogleState } from './google-auth'
 
 const googleTokenResponseSchema = z.object({
@@ -25,6 +30,7 @@ const googleCalendarListResponseSchema = z.object({
         summary: z.string().optional().nullable(),
         summaryOverride: z.string().optional().nullable(),
         primary: z.boolean().optional(),
+        accessRole: z.enum(['owner', 'writer', 'reader', 'freeBusyReader']).optional(),
         hidden: z.boolean().optional(),
         deleted: z.boolean().optional(),
       }),
@@ -38,37 +44,33 @@ const googleEventDateSchema = z.object({
   timeZone: z.string().optional(),
 })
 
+const googleCalendarEventAttendeeSchema = z.object({
+  email: z.string().optional().nullable(),
+})
+
+const googleCalendarEventSchema = z.object({
+  id: z.string().min(1),
+  status: z.string().optional(),
+  summary: z.string().optional().nullable(),
+  description: z.string().optional().nullable(),
+  location: z.string().optional().nullable(),
+  htmlLink: z.string().optional().nullable(),
+  recurringEventId: z.string().optional().nullable(),
+  updated: z.string().optional(),
+  organizer: z
+    .object({
+      email: z.string().optional().nullable(),
+    })
+    .optional(),
+  attendees: z.array(googleCalendarEventAttendeeSchema).optional(),
+  start: googleEventDateSchema.optional(),
+  end: googleEventDateSchema.optional(),
+})
+
 const googleCalendarEventsResponseSchema = z.object({
   nextPageToken: z.string().optional(),
   nextSyncToken: z.string().optional(),
-  items: z
-    .array(
-      z.object({
-        id: z.string().min(1),
-        status: z.string().optional(),
-        summary: z.string().optional().nullable(),
-        description: z.string().optional().nullable(),
-        location: z.string().optional().nullable(),
-        htmlLink: z.string().optional().nullable(),
-        recurringEventId: z.string().optional().nullable(),
-        updated: z.string().optional(),
-        organizer: z
-          .object({
-            email: z.string().optional().nullable(),
-          })
-          .optional(),
-        attendees: z
-          .array(
-            z.object({
-              email: z.string().optional().nullable(),
-            }),
-          )
-          .optional(),
-        start: googleEventDateSchema.optional(),
-        end: googleEventDateSchema.optional(),
-      }),
-    )
-    .default([]),
+  items: z.array(googleCalendarEventSchema).default([]),
 })
 
 export type GoogleTokenExchange = {
@@ -88,7 +90,10 @@ export type GoogleCalendarSummary = {
   calendarName: string
   primaryFlag: boolean
   visible: boolean
+  canWrite: boolean
 }
+
+const googleWritableAccessRoles = new Set<string>(GOOGLE_CALENDAR_WRITABLE_ACCESS_ROLES)
 
 export type GoogleCalendarEventInstance = {
   googleEventId: string
@@ -105,6 +110,39 @@ export type GoogleCalendarEventInstance = {
   organizerEmail: string | null
   attendeeCount: number | null
   updatedAtRemote: Date | null
+}
+
+function toGoogleEventRequestBody(event: GoogleCalendarEventInput) {
+  return {
+    summary: event.summary ?? undefined,
+    description: event.description ?? undefined,
+    location: event.location ?? undefined,
+    start: event.start,
+    end: event.end,
+    attendees: event.attendees?.map((attendee) => ({ email: attendee.email })),
+  }
+}
+
+function mapGoogleCalendarEvent(item: z.infer<typeof googleCalendarEventSchema>): GoogleCalendarEventInstance {
+  const start = item.start ? parseGoogleEventBoundary(item.start) : null
+  const end = item.end ? parseGoogleEventBoundary(item.end) : null
+
+  return {
+    googleEventId: item.id,
+    googleRecurringEventId: item.recurringEventId ?? null,
+    status: item.status ?? 'confirmed',
+    summary: item.summary ?? null,
+    description: item.description ?? null,
+    location: item.location ?? null,
+    startsAt: start?.at ?? null,
+    endsAt: end?.at ?? null,
+    allDay: start?.allDay ?? false,
+    eventTimezone: start?.timeZone ?? end?.timeZone ?? null,
+    htmlLink: item.htmlLink ?? null,
+    organizerEmail: item.organizer?.email ?? null,
+    attendeeCount: item.attendees?.length ?? null,
+    updatedAtRemote: item.updated ? new Date(item.updated) : null,
+  }
 }
 
 export type GoogleCalendarSyncResult = {
@@ -134,9 +172,21 @@ export interface GoogleIntegrationApi {
     calendarId: string,
     options: { timeMin?: Date; timeMax?: Date; syncToken?: string },
   ): Promise<GoogleCalendarSyncResult>
+  createCalendarEvent(
+    accessToken: string,
+    calendarId: string,
+    event: GoogleCalendarEventInput,
+  ): Promise<GoogleCalendarEventInstance>
+  updateCalendarEvent(
+    accessToken: string,
+    calendarId: string,
+    googleEventId: string,
+    event: GoogleCalendarEventInput,
+  ): Promise<GoogleCalendarEventInstance>
+  deleteCalendarEvent(accessToken: string, calendarId: string, googleEventId: string): Promise<void>
 }
 
-async function fetchGoogleJson<T>(input: RequestInfo | URL, init: RequestInit, schema: z.ZodSchema<T>) {
+async function fetchGoogleResponse(input: RequestInfo | URL, init: RequestInit) {
   const response = await fetch(input, init)
 
   if (!response.ok) {
@@ -169,6 +219,12 @@ async function fetchGoogleJson<T>(input: RequestInfo | URL, init: RequestInit, s
 
     throw new GoogleApiError(`Google request failed (${response.status}): ${errorMessage}`, response.status)
   }
+
+  return response
+}
+
+async function fetchGoogleJson<T>(input: RequestInfo | URL, init: RequestInit, schema: z.ZodSchema<T>) {
+  const response = await fetchGoogleResponse(input, init)
 
   const json = await response.json()
   return schema.parse(json)
@@ -315,6 +371,7 @@ export const googleIntegrationApi: GoogleIntegrationApi = {
           calendarName: item.summaryOverride || item.summary || item.id,
           primaryFlag: !!item.primary,
           visible: !item.hidden && !item.deleted,
+          canWrite: googleWritableAccessRoles.has(item.accessRole ?? ''),
         })
       }
 
@@ -363,25 +420,7 @@ export const googleIntegrationApi: GoogleIntegrationApi = {
       )
 
       for (const item of response.items) {
-        const start = item.start ? parseGoogleEventBoundary(item.start) : null
-        const end = item.end ? parseGoogleEventBoundary(item.end) : null
-
-        events.push({
-          googleEventId: item.id,
-          googleRecurringEventId: item.recurringEventId ?? null,
-          status: item.status ?? 'confirmed',
-          summary: item.summary ?? null,
-          description: item.description ?? null,
-          location: item.location ?? null,
-          startsAt: start?.at ?? null,
-          endsAt: end?.at ?? null,
-          allDay: start?.allDay ?? false,
-          eventTimezone: start?.timeZone ?? end?.timeZone ?? null,
-          htmlLink: item.htmlLink ?? null,
-          organizerEmail: item.organizer?.email ?? null,
-          attendeeCount: item.attendees?.length ?? null,
-          updatedAtRemote: item.updated ? new Date(item.updated) : null,
-        })
+        events.push(mapGoogleCalendarEvent(item))
       }
 
       nextPageToken = response.nextPageToken
@@ -392,5 +431,48 @@ export const googleIntegrationApi: GoogleIntegrationApi = {
       events,
       nextSyncToken,
     }
+  },
+  async createCalendarEvent(accessToken, calendarId, event) {
+    const response = await fetchGoogleJson(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(toGoogleEventRequestBody(googleCalendarEventInputSchema.parse(event))),
+      },
+      googleCalendarEventSchema,
+    )
+
+    return mapGoogleCalendarEvent(response)
+  },
+  async updateCalendarEvent(accessToken, calendarId, googleEventId, event) {
+    const response = await fetchGoogleJson(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(googleEventId)}`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(toGoogleEventRequestBody(googleCalendarEventInputSchema.parse(event))),
+      },
+      googleCalendarEventSchema,
+    )
+
+    return mapGoogleCalendarEvent(response)
+  },
+  async deleteCalendarEvent(accessToken, calendarId, googleEventId) {
+    await fetchGoogleResponse(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(googleEventId)}`,
+      {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      },
+    )
   },
 }

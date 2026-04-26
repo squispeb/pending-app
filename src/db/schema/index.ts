@@ -265,6 +265,7 @@ export const calendarConnections = sqliteTable('calendar_connections', {
   calendarName: text('calendar_name').notNull(),
   isSelected: integer('is_selected', { mode: 'boolean' }).notNull().default(false),
   primaryFlag: integer('primary_flag', { mode: 'boolean' }).notNull().default(false),
+  canWrite: integer('can_write', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at', { mode: 'timestamp_ms' })
     .notNull()
     .default(sql`(unixepoch() * 1000)`),

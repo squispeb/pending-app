@@ -1,6 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { db } from '../db/client'
 import {
+  confirmVoiceCalendarEventCreateInputSchema,
   confirmCapturedIdeaInputSchema,
   confirmCapturedHabitInputSchema,
   confirmCapturedTaskInputSchema,
@@ -26,6 +27,13 @@ const ideasService = createIdeasService(db)
 const transcriptionBroker = createTranscriptionBroker()
 const voiceTaskResolver = createVoiceTaskResolver(db)
 
+function addDaysToIsoDate(value: string, days: number) {
+  const [year, month, day] = value.split('-').map(Number)
+  const next = new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0))
+  next.setUTCDate(next.getUTCDate() + days)
+  return next.toISOString().slice(0, 10)
+}
+
 export const interpretCaptureInput = createServerFn({ method: 'POST' })
   .inputValidator((input) => interpretCaptureInputSchema.parse(input))
   .handler(async ({ data }) => {
@@ -46,6 +54,7 @@ export const processVoiceCapture = createServerFn({ method: 'POST' })
         confirmCapturedHabit: (input) => captureService.confirmCapturedHabit(user.id, input),
       },
       assistantSessionService: {
+        resolveCalendarEventCreateSession: (input) => assistantSessionService.resolveCalendarEventCreateSession(input),
         resolveTaskEditSession: (input) => assistantSessionService.resolveTaskEditSession(input),
         getSession: (sessionId) => assistantSessionService.getSession(sessionId),
         submitSessionTurn: (input) => assistantSessionService.submitSessionTurn(input),
@@ -78,6 +87,7 @@ export const processVoiceCaptureTranscript = createServerFn({ method: 'POST' })
         confirmCapturedHabit: (input) => captureService.confirmCapturedHabit(user.id, input),
       },
       assistantSessionService: {
+        resolveCalendarEventCreateSession: (input) => assistantSessionService.resolveCalendarEventCreateSession(input),
         resolveTaskEditSession: (input) => assistantSessionService.resolveTaskEditSession(input),
         getSession: (sessionId) => assistantSessionService.getSession(sessionId),
         submitSessionTurn: (input) => assistantSessionService.submitSessionTurn(input),
@@ -98,7 +108,7 @@ export const processVoiceCaptureTranscript = createServerFn({ method: 'POST' })
     return voiceCaptureProcessor.processVoiceTranscript(data)
   })
 
-export const submitAssistantTaskEditSessionTurn = createServerFn({ method: 'POST' })
+export const submitAssistantSessionTurn = createServerFn({ method: 'POST' })
   .inputValidator((input: {
     sessionId: string
     message: string
@@ -107,6 +117,36 @@ export const submitAssistantTaskEditSessionTurn = createServerFn({ method: 'POST
   }) => input)
   .handler(async ({ data }) => {
     return assistantSessionService.submitSessionTurn(data)
+  })
+
+export const confirmVoiceCalendarEventCreate = createServerFn({ method: 'POST' })
+  .inputValidator((input) => confirmVoiceCalendarEventCreateInputSchema.parse(input))
+  .handler(async ({ data }) => {
+    await resolveAuthenticatedPlannerUser(db)
+    const calendarModule = await import('./calendar')
+    const targetCalendarId = data.draft.targetCalendarId ?? 'primary'
+    const isAllDay = data.draft.allDay || !data.draft.startTime
+    const allDayEndDate = addDaysToIsoDate(data.draft.endDate ?? data.draft.startDate, 1)
+
+    return calendarModule.createGoogleCalendarEvent({
+      data: {
+        calendarId: targetCalendarId,
+        event: {
+          summary: data.draft.title,
+          description: data.draft.description ?? null,
+          location: data.draft.location ?? null,
+          start: isAllDay
+            ? { date: data.draft.startDate }
+            : { dateTime: `${data.draft.startDate}T${data.draft.startTime}:00`, timeZone: data.timezone },
+          end: isAllDay
+            ? { date: allDayEndDate }
+            : {
+                dateTime: `${data.draft.endDate ?? data.draft.startDate}T${data.draft.endTime ?? data.draft.startTime}:00`,
+                timeZone: data.timezone,
+              },
+        },
+      },
+    })
   })
 
 export const confirmCapturedTask = createServerFn({ method: 'POST' })
@@ -156,7 +196,7 @@ export const confirmVoiceTaskAction = createServerFn({ method: 'POST' })
     return captureService.confirmVoiceTaskAction(user.id, data)
   })
 
-export const streamAssistantTaskEditSession = createServerFn({ method: 'GET' })
+export const streamAssistantSession = createServerFn({ method: 'GET' })
   .inputValidator((input: { sessionId: string; lastEventId?: string | null }) => input)
   .handler(async ({ data }) => {
     const response = await assistantSessionService.streamSession(data.sessionId, {

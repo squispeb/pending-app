@@ -238,6 +238,24 @@ export const confirmVoiceTaskActionInputSchema = z.object({
   }
 })
 
+const voiceCalendarEventDraftSchema = z.object({
+  title: z.string().trim().min(1).optional(),
+  description: z.string().trim().min(1).optional(),
+  startDate: captureDateSchema,
+  startTime: captureTimeSchema.optional(),
+  endDate: captureDateSchema.optional(),
+  endTime: captureTimeSchema.optional(),
+  location: z.string().trim().min(1).optional(),
+  allDay: z.boolean().optional(),
+  targetCalendarId: z.string().trim().min(1).nullable().optional(),
+  targetCalendarName: z.string().trim().min(1).nullable().optional(),
+})
+
+export const confirmVoiceCalendarEventCreateInputSchema = z.object({
+  draft: voiceCalendarEventDraftSchema,
+  timezone: z.string().trim().min(1).max(120),
+})
+
 export const processVoiceCaptureInputSchema = transcribeAudioUploadInputSchema.extend({
   currentDate: captureDateSchema,
   timezone: z.string().trim().min(1).max(120),
@@ -247,6 +265,7 @@ export const processVoiceCaptureInputSchema = transcribeAudioUploadInputSchema.e
   visibleTaskWindow: visibleTaskWindowSchema.optional(),
   followUpTaskAction: confirmVoiceTaskActionKindSchema.optional(),
   taskEditSessionId: z.string().trim().min(1).max(120).optional(),
+  calendarEventSessionId: z.string().trim().min(1).max(120).optional(),
 })
 
 export const processVoiceCaptureTextInputSchema = z.object({
@@ -260,6 +279,7 @@ export const processVoiceCaptureTextInputSchema = z.object({
   visibleTaskWindow: visibleTaskWindowSchema.optional(),
   followUpTaskAction: confirmVoiceTaskActionKindSchema.optional(),
   taskEditSessionId: z.string().trim().min(1).max(120).optional(),
+  calendarEventSessionId: z.string().trim().min(1).max(120).optional(),
 })
 
 export const processVoiceCaptureAutoSavedSchema = z.object({
@@ -310,6 +330,23 @@ const processVoiceTaskEditSessionSchema = z.object({
   sessionId: z.string().min(1),
 })
 
+const processVoiceCalendarEventSchema = z.object({
+  title: z.string().trim().min(1).optional(),
+  description: z.string().trim().min(1).optional(),
+  startDate: captureDateSchema,
+  startTime: captureTimeSchema.optional(),
+  endDate: captureDateSchema.optional(),
+  endTime: captureTimeSchema.optional(),
+  location: z.string().trim().min(1).optional(),
+  allDay: z.boolean().optional(),
+  targetCalendarId: z.string().trim().min(1).nullable().optional(),
+  targetCalendarName: z.string().trim().min(1).nullable().optional(),
+})
+
+const processVoiceCalendarEventSessionSchema = z.object({
+  sessionId: z.string().min(1),
+})
+
 export const processVoiceCaptureClarifySchema = z.object({
   ok: z.literal(true),
   outcome: z.literal('clarify'),
@@ -320,6 +357,8 @@ export const processVoiceCaptureClarifySchema = z.object({
   draft: typedTaskDraftSchema.nullable(),
   taskActionContext: processVoiceCaptureClarifyTaskActionContextSchema.optional(),
   taskEditSession: processVoiceTaskEditSessionSchema.optional(),
+  calendarEvent: processVoiceCalendarEventSchema.optional(),
+  calendarEventSession: processVoiceCalendarEventSessionSchema.optional(),
 })
 
 export const processVoiceCaptureTaskStatusSchema = z.object({
@@ -341,6 +380,18 @@ export const processVoiceCaptureTaskActionConfirmationSchema = z.object({
   task: resolvedVoiceTaskSchema,
   edits: voiceTaskEditChangesSchema.optional(),
   taskEditSession: processVoiceTaskEditSessionSchema.optional(),
+  calendarEvent: processVoiceCalendarEventSchema.optional(),
+  calendarEventSession: processVoiceCalendarEventSessionSchema.optional(),
+})
+
+export const processVoiceCaptureCalendarEventConfirmationSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.literal('calendar_event_confirmation'),
+  transcript: z.string().trim().min(1),
+  language: transcriptionDetectedLanguageSchema,
+  message: z.string().trim().min(1),
+  calendarEvent: processVoiceCalendarEventSchema,
+  calendarEventSession: processVoiceCalendarEventSessionSchema,
 })
 
 export const processVoiceCaptureFailureSchema = z.object({
@@ -355,6 +406,7 @@ export const processVoiceCaptureResponseSchema = z.union([
   processVoiceCaptureReviewSchema,
   processVoiceCaptureTaskStatusSchema,
   processVoiceCaptureTaskActionConfirmationSchema,
+  processVoiceCaptureCalendarEventConfirmationSchema,
   processVoiceCaptureClarifySchema,
   processVoiceCaptureFailureSchema,
 ])
@@ -378,6 +430,7 @@ export type ConfirmCapturedTaskInput = z.infer<typeof confirmCapturedTaskInputSc
 export type ConfirmCapturedHabitInput = z.infer<typeof confirmCapturedHabitInputSchema>
 export type ConfirmCapturedIdeaInput = z.infer<typeof confirmCapturedIdeaInputSchema>
 export type ConfirmVoiceTaskActionInput = z.infer<typeof confirmVoiceTaskActionInputSchema>
+export type ConfirmVoiceCalendarEventCreateInput = z.infer<typeof confirmVoiceCalendarEventCreateInputSchema>
 export type MatchedCalendarContext = z.infer<typeof matchedCalendarContextSchema>
 export type ProcessVoiceCaptureInput = z.infer<typeof processVoiceCaptureInputSchema>
 export type ProcessVoiceCaptureTextInput = z.infer<typeof processVoiceCaptureTextInputSchema>
@@ -386,10 +439,13 @@ export type ProcessVoiceCaptureIdeaConfirmation = z.infer<typeof processVoiceCap
 export type ProcessVoiceCaptureReview = z.infer<typeof processVoiceCaptureReviewSchema>
 export type ProcessVoiceCaptureTaskStatus = z.infer<typeof processVoiceCaptureTaskStatusSchema>
 export type ProcessVoiceCaptureTaskActionConfirmation = z.infer<typeof processVoiceCaptureTaskActionConfirmationSchema>
+export type ProcessVoiceCaptureCalendarEventConfirmation = z.infer<typeof processVoiceCaptureCalendarEventConfirmationSchema>
 export type ProcessVoiceCaptureClarify = z.infer<typeof processVoiceCaptureClarifySchema>
 export type ProcessVoiceCaptureFailure = z.infer<typeof processVoiceCaptureFailureSchema>
 export type ProcessVoiceCaptureResponse = z.infer<typeof processVoiceCaptureResponseSchema>
 export type ProcessVoiceTaskEditSession = z.infer<typeof processVoiceTaskEditSessionSchema>
+export type ProcessVoiceCalendarEvent = z.infer<typeof processVoiceCalendarEventSchema>
+export type ProcessVoiceCalendarEventSession = z.infer<typeof processVoiceCalendarEventSessionSchema>
 
 export type VoiceCaptureConfidence = 'high' | 'review' | 'clarify'
 
@@ -1232,6 +1288,7 @@ export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCa
   const visibleTaskWindow = input.get('visibleTaskWindow')
   const followUpTaskAction = input.get('followUpTaskAction')
   const taskEditSessionId = input.get('taskEditSessionId')
+  const calendarEventSessionId = input.get('calendarEventSessionId')
 
   let parsedVisibleTaskWindow: unknown = undefined
 
@@ -1257,5 +1314,7 @@ export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCa
       typeof followUpTaskAction === 'string' && followUpTaskAction ? followUpTaskAction : undefined,
     taskEditSessionId:
       typeof taskEditSessionId === 'string' && taskEditSessionId ? taskEditSessionId : undefined,
+    calendarEventSessionId:
+      typeof calendarEventSessionId === 'string' && calendarEventSessionId ? calendarEventSessionId : undefined,
   })
 }

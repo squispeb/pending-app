@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "bfc64d09-7e67-4e50-8a75-eb0008c26e8b",
-  "prevId": "68e9064e-7606-447c-b2f2-6fb9151af93c",
+  "id": "75a93dea-ac51-45d9-a679-b92070761f25",
+  "prevId": "bfc64d09-7e67-4e50-8a75-eb0008c26e8b",
   "tables": {
     "accepted_breakdown_steps": {
       "name": "accepted_breakdown_steps",
@@ -136,6 +136,14 @@
         },
         "primary_flag": {
           "name": "primary_flag",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "can_write": {
+          "name": "can_write",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
