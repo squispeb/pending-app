@@ -2,6 +2,8 @@ import type { Database } from '../db/client'
 import {
   getAssistantSession,
   resolveAssistantCalendarEventCreateSession,
+  resolveAssistantCalendarEventCancelSession,
+  resolveAssistantCalendarEventEditSession,
   resolveAssistantTaskEditSession,
   streamAssistantSession,
   submitAssistantSessionTurn,
@@ -87,6 +89,70 @@ export function createAssistantSessionService(database: Database) {
       })
 
       return resolveAssistantCalendarEventCreateSession(
+        {
+          ...input,
+          authHeaders,
+        },
+        {
+          fetchImpl: options?.fetchImpl,
+          baseUrl: options?.assistantServiceBaseUrl,
+        },
+      )
+    },
+    async resolveCalendarEventEditSession(
+      input: {
+        sessionId?: string
+        currentDate: string
+        timezone: string
+        target: { eventId: string; summary: string; calendarName?: string | null }
+        draft: {
+          title?: string | null
+          description?: string | null
+          startDate?: string | null
+          startTime?: string | null
+          endDate?: string | null
+          endTime?: string | null
+          location?: string | null
+          allDay?: boolean | null
+          targetCalendarId?: string | null
+          targetCalendarName?: string | null
+        }
+      },
+      options?: SessionOptions,
+    ) {
+      const { authHeaders } = await resolveAuthenticatedPlannerUser(database, {
+        requestHeaders: options?.requestHeaders,
+        fetchImpl: options?.fetchImpl,
+        baseUrl: options?.assistantServiceBaseUrl,
+      })
+
+      return resolveAssistantCalendarEventEditSession(
+        {
+          ...input,
+          authHeaders,
+        },
+        {
+          fetchImpl: options?.fetchImpl,
+          baseUrl: options?.assistantServiceBaseUrl,
+        },
+      )
+    },
+    async resolveCalendarEventCancelSession(
+      input: {
+        sessionId?: string
+        currentDate: string
+        timezone: string
+        target: { eventId: string; summary: string; calendarName?: string | null }
+      },
+      options?: SessionOptions,
+    ) {
+      const { authHeaders } = await resolveAuthenticatedPlannerUser(database, {
+        requestHeaders: options?.requestHeaders,
+        fetchImpl: options?.fetchImpl,
+        baseUrl: options?.assistantServiceBaseUrl,
+      })
+
+      return resolveAssistantCalendarEventCancelSession(
         {
           ...input,
           authHeaders,

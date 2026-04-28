@@ -179,6 +179,100 @@ describe('assistant service client', () => {
     })
   })
 
+  it('resolves a calendar event edit session contract with a target event', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      sessionId: 'session-123',
+      userId: 'local-user',
+      channel: 'mixed',
+      status: 'idle',
+      activeTurn: null,
+      queuedTurns: [],
+      lastTurn: null,
+      visibleEvents: [],
+      context: {
+        target: { kind: 'calendar_event', id: 'evt-1', label: 'Team sync' },
+      },
+      workflow: {
+        kind: 'calendar_event',
+        operation: 'edit',
+        phase: 'collecting',
+        currentDate: '2026-04-25',
+        timezone: 'America/Lima',
+        target: { eventId: 'evt-1', summary: 'Team sync', calendarName: 'Primary' },
+        draft: { title: 'Team sync', targetCalendarName: 'Primary' },
+        requestedFields: [],
+        missingFields: [],
+        activeField: null,
+        fieldAttempts: { title: 0, description: 0, startDate: 0, startTime: 0, endDate: 0, endTime: 0, location: 0 },
+        changes: {},
+        result: null,
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+
+    const { resolveAssistantCalendarEventEditSession } = await import('./assistant-service-client')
+    const result = await resolveAssistantCalendarEventEditSession(
+      {
+        authHeaders: { authorization: 'Bearer test-session-token' },
+        currentDate: '2026-04-25',
+        timezone: 'America/Lima',
+        target: { eventId: 'evt-1', summary: 'Team sync', calendarName: 'Primary' },
+        draft: { title: 'Team sync', targetCalendarName: 'Primary' },
+      },
+      { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' },
+    )
+
+    expect(result.workflow?.kind).toBe('calendar_event')
+    expect(result.workflow && 'operation' in result.workflow ? result.workflow.operation : null).toBe('edit')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/sessions/resolve')
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      workflow: {
+        kind: 'calendar_event',
+        operation: 'edit',
+        target: { eventId: 'evt-1', summary: 'Team sync', calendarName: 'Primary' },
+      },
+    })
+  })
+
+  it('resolves a calendar event cancel session contract with a target event', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      sessionId: 'session-123',
+      userId: 'local-user',
+      channel: 'mixed',
+      status: 'idle',
+      activeTurn: null,
+      queuedTurns: [],
+      lastTurn: null,
+      visibleEvents: [],
+      context: {
+        target: { kind: 'calendar_event', id: 'evt-1', label: 'Team sync' },
+      },
+      workflow: {
+        kind: 'calendar_event',
+        operation: 'cancel',
+        phase: 'ready_to_confirm',
+        currentDate: '2026-04-25',
+        timezone: 'America/Lima',
+        target: { eventId: 'evt-1', summary: 'Team sync', calendarName: 'Primary' },
+        result: null,
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+
+    const { resolveAssistantCalendarEventCancelSession } = await import('./assistant-service-client')
+    const result = await resolveAssistantCalendarEventCancelSession(
+      {
+        authHeaders: { authorization: 'Bearer test-session-token' },
+        currentDate: '2026-04-25',
+        timezone: 'America/Lima',
+        target: { eventId: 'evt-1', summary: 'Team sync', calendarName: 'Primary' },
+      },
+      { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' },
+    )
+
+    expect(result.workflow?.kind).toBe('calendar_event')
+    expect(result.workflow && 'operation' in result.workflow ? result.workflow.operation : null).toBe('cancel')
+  })
+
   it('submits calendar session turn patches with validated target context', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       ok: true,

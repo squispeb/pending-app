@@ -262,4 +262,100 @@ describe('voice calendar resolver', () => {
       ],
     })
   })
+
+  it('resolves a visible calendar event target when the transcript names one event clearly', async () => {
+    const resolver = createVoiceCalendarResolver(db)
+
+    const result = await resolver.resolveCalendarEventTarget({
+      transcript: 'Edit the team sync meeting on Side Projects',
+      visibleCalendarEventWindow: [
+        {
+          calendarEventId: 'evt-team-sync',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T15:00:00.000Z',
+          endsAt: '2026-04-08T15:30:00.000Z',
+          allDay: false,
+          calendarName: 'Side Projects',
+          primaryFlag: false,
+        },
+        {
+          calendarEventId: 'evt-retro',
+          summary: 'Retro',
+          startsAt: '2026-04-08T16:00:00.000Z',
+          endsAt: '2026-04-08T16:30:00.000Z',
+          allDay: false,
+          calendarName: 'Primary',
+          primaryFlag: true,
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      kind: 'resolved',
+      target: {
+        calendarEventId: 'evt-team-sync',
+        summary: 'Team sync',
+        startsAt: '2026-04-08T15:00:00.000Z',
+        endsAt: '2026-04-08T15:30:00.000Z',
+        allDay: false,
+        calendarName: 'Side Projects',
+        primaryFlag: false,
+        source: 'visible_window',
+      },
+    })
+  })
+
+  it('returns ambiguity when multiple visible calendar events match equally well', async () => {
+    const resolver = createVoiceCalendarResolver(db)
+
+    const result = await resolver.resolveCalendarEventTarget({
+      transcript: 'Cancel the team sync',
+      visibleCalendarEventWindow: [
+        {
+          calendarEventId: 'evt-team-sync-a',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T15:00:00.000Z',
+          endsAt: '2026-04-08T15:30:00.000Z',
+          allDay: false,
+          calendarName: 'Primary',
+          primaryFlag: true,
+        },
+        {
+          calendarEventId: 'evt-team-sync-b',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T17:00:00.000Z',
+          endsAt: '2026-04-08T17:30:00.000Z',
+          allDay: false,
+          calendarName: 'Side Projects',
+          primaryFlag: false,
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      kind: 'ambiguous',
+      candidates: [
+        {
+          calendarEventId: 'evt-team-sync-a',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T15:00:00.000Z',
+          endsAt: '2026-04-08T15:30:00.000Z',
+          allDay: false,
+          calendarName: 'Primary',
+          primaryFlag: true,
+          source: 'visible_window',
+        },
+        {
+          calendarEventId: 'evt-team-sync-b',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T17:00:00.000Z',
+          endsAt: '2026-04-08T17:30:00.000Z',
+          allDay: false,
+          calendarName: 'Side Projects',
+          primaryFlag: false,
+          source: 'visible_window',
+        },
+      ],
+    })
+  })
 })

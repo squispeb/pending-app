@@ -1,6 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm'
 import type { Database } from '../db/client'
 import { calendarConnections, googleAccounts } from '../db/schema'
+import { tokenizeForCaptureMatching } from '../lib/capture'
 
 function normalizeCalendarMatchText(value: string) {
   return value
@@ -39,6 +40,30 @@ type WritableCalendarTarget = {
   calendarName: string
   primaryFlag: boolean
 }
+
+type VisibleCalendarEventTarget = {
+  calendarEventId: string
+  summary: string
+  startsAt: string | null
+  endsAt: string | null
+  allDay: boolean
+  calendarName: string
+  primaryFlag: boolean
+  source: 'visible_window'
+}
+
+type VisibleCalendarEventTargetResolution =
+  | {
+      kind: 'resolved'
+      target: VisibleCalendarEventTarget
+    }
+  | {
+      kind: 'ambiguous'
+      candidates: Array<VisibleCalendarEventTarget>
+    }
+  | {
+      kind: 'unresolved'
+    }
 
 type CalendarTargetResolution =
   | {
@@ -132,6 +157,32 @@ function matchesExplicitCalendarReference(normalizedTranscript: string, calendar
   return patterns.some((pattern) => pattern.test(normalizedTranscript))
 }
 
+function normalizeEventMatchText(value: string) {
+  return normalizeCalendarMatchText(value)
+}
+
+function scoreVisibleCalendarEventTarget(
+  transcriptTokens: string[],
+  transcript: string,
+  event: VisibleCalendarEventTarget,
+) {
+  const eventTokens = tokenizeForCaptureMatching(event.summary)
+  const calendarTokens = tokenizeForCaptureMatching(event.calendarName)
+  const summaryOverlap = eventTokens.filter((token) => transcriptTokens.includes(token)).length
+  const calendarOverlap = calendarTokens.filter((token) => transcriptTokens.includes(token)).length
+  const eventText = normalizeEventMatchText(`${event.summary} ${event.calendarName}`)
+  const explicitMention = eventText && normalizeEventMatchText(transcript).includes(eventText)
+
+  if (summaryOverlap === 0 && calendarOverlap === 0 && !explicitMention) {
+    return null
+  }
+
+  return {
+    event,
+    score: summaryOverlap * 10 + calendarOverlap * 3 + (explicitMention ? 8 : 0),
+  }
+}
+
 export function createVoiceCalendarResolver(database: Database) {
   async function getRelevantAccount(userId: string) {
     const accounts = await database.query.googleAccounts.findMany({
@@ -160,6 +211,53 @@ export function createVoiceCalendarResolver(database: Database) {
   }
 
   return {
+    async resolveCalendarEventTarget(input: {
+      transcript: string
+      visibleCalendarEventWindow?: Array<{
+        calendarEventId: string
+        summary: string
+        startsAt: string | null
+        endsAt: string | null
+        allDay: boolean
+        calendarName: string
+        primaryFlag: boolean
+      }> | null
+    }): Promise<VisibleCalendarEventTargetResolution> {
+      const transcriptTokens = tokenizeForCaptureMatching(input.transcript)
+      const visibleWindow = (input.visibleCalendarEventWindow ?? []).map((event) => ({
+        ...event,
+        source: 'visible_window' as const,
+      }))
+
+      if (visibleWindow.length === 0 || transcriptTokens.length === 0) {
+        return { kind: 'unresolved' }
+      }
+
+      const scoredMatches = visibleWindow
+        .map((event) => scoreVisibleCalendarEventTarget(transcriptTokens, input.transcript, event))
+        .filter((match): match is NonNullable<typeof match> => match !== null)
+        .sort((left, right) => right.score - left.score)
+
+      if (scoredMatches.length === 0) {
+        return { kind: 'unresolved' }
+      }
+
+      const bestScore = scoredMatches[0]?.score ?? 0
+      const matchedEvents = scoredMatches.filter((match) => match.score === bestScore).map((match) => match.event)
+
+      if (matchedEvents.length === 1) {
+        return {
+          kind: 'resolved',
+          target: matchedEvents[0]!,
+        }
+      }
+
+      return {
+        kind: 'ambiguous',
+        candidates: matchedEvents,
+      }
+    },
+
     async resolveCalendarTarget(input: { userId: string; transcript: string }): Promise<CalendarTargetResolution> {
       const calendars = await listCalendarTargets(input.userId)
       const writableCalendars = toWritableCalendarTargets(calendars.filter((calendar) => calendar.canWrite))

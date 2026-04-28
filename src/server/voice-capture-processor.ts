@@ -13,6 +13,7 @@ import {
   type ProcessVoiceCaptureInput,
   type ProcessVoiceCaptureResponse,
   type ProcessVoiceCaptureTextInput,
+  type ProcessVoiceCalendarEventTarget,
 } from '../lib/capture'
 import { createCaptureService } from './capture-service'
 import { createTranscriptionBroker } from './transcription'
@@ -67,6 +68,30 @@ type AssistantSessionService = {
     requestedFields?: Array<'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location'>
     activeField?: 'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location' | null
   }) => Promise<{ sessionId: string }>
+  resolveCalendarEventEditSession: (input: {
+    sessionId?: string
+    currentDate: string
+    timezone: string
+    target: { eventId: string; summary: string; calendarName?: string | null }
+    draft: {
+      title?: string | null
+      description?: string | null
+      startDate?: string | null
+      startTime?: string | null
+      endDate?: string | null
+      endTime?: string | null
+      location?: string | null
+      allDay?: boolean | null
+      targetCalendarId?: string | null
+      targetCalendarName?: string | null
+    }
+  }) => Promise<{ sessionId: string }>
+  resolveCalendarEventCancelSession: (input: {
+    sessionId?: string
+    currentDate: string
+    timezone: string
+    target: { eventId: string; summary: string; calendarName?: string | null }
+  }) => Promise<{ sessionId: string }>
   resolveTaskEditSession: (input: {
     sessionId?: string
     currentDate: string
@@ -114,8 +139,13 @@ type AssistantSessionService = {
         }
       | {
           kind: 'calendar_event'
-          operation: 'create'
+          operation: 'create' | 'edit' | 'cancel'
           phase: 'collecting' | 'ready_to_confirm' | 'completed' | 'blocked'
+          target?: {
+            eventId: string
+            summary: string
+            calendarName?: string | null
+          }
           draft: {
             title?: string | null
             description?: string | null
@@ -183,16 +213,37 @@ type AssistantSessionService = {
         label: string
       } | null
     }
-    workflow?: {
-      kind: 'calendar_event'
-      operation: 'create'
+      workflow?: {
+        kind: 'calendar_event'
+        operation: 'create' | 'edit' | 'cancel'
       draft?: {
+        title?: string | null
+        description?: string | null
+        startDate?: string | null
+        startTime?: string | null
+        endDate?: string | null
+        endTime?: string | null
+        location?: string | null
+        allDay?: boolean | null
         targetCalendarId?: string | null
         targetCalendarName?: string | null
       }
       changes?: {
+        title?: string | null
+        description?: string | null
+        startDate?: string | null
+        startTime?: string | null
+        endDate?: string | null
+        endTime?: string | null
+        location?: string | null
+        allDay?: boolean | null
         targetCalendarId?: string | null
         targetCalendarName?: string | null
+      }
+      target?: {
+        eventId: string
+        summary: string
+        calendarName?: string | null
       }
     }
   }) => Promise<{
@@ -263,6 +314,18 @@ type VoiceCalendarResolver = {
         }>
       }
   >
+  resolveCalendarEventTarget?: (input: {
+    transcript: string
+    visibleCalendarEventWindow?: Array<{
+      calendarEventId: string
+      summary: string
+      startsAt: string | null
+      endsAt: string | null
+      allDay: boolean
+      calendarName: string
+      primaryFlag: boolean
+    }> | null
+  }) => Promise<CalendarEventTargetResolution>
 }
 
 function buildCalendarTargetClarification(
@@ -345,10 +408,24 @@ type TaskActionTranscriptInput = {
   contextTaskId?: string | null
   contextIdeaId?: string | null
   visibleTaskWindow?: ProcessVoiceCaptureTextInput['visibleTaskWindow']
+  visibleCalendarEventWindow?: ProcessVoiceCaptureTextInput['visibleCalendarEventWindow']
   followUpTaskAction?: ConfirmVoiceTaskActionKind
   taskEditSessionId?: string | null
   calendarEventSessionId?: string | null
 }
+
+type CalendarEventTargetResolution =
+  | {
+      kind: 'resolved'
+      target: ProcessVoiceCalendarEventTarget
+    }
+  | {
+      kind: 'ambiguous'
+      candidates: Array<ProcessVoiceCalendarEventTarget>
+    }
+  | {
+      kind: 'unresolved'
+    }
 
 function mapCalendarCreateRequestedFields(transcript: string) {
   const normalized = transcript.toLowerCase()
@@ -401,6 +478,63 @@ function mapTaskEditRequestedFields(changes: ReturnType<typeof inferVoiceTaskEdi
   }
 
   return fields
+}
+
+function buildCalendarEventTargetClarification(
+  intent: { kind: 'edit_calendar_event' | 'cancel_calendar_event' },
+  resolution: Exclude<CalendarEventTargetResolution, { kind: 'resolved' }>,
+) {
+  if (resolution.kind === 'ambiguous') {
+    return {
+      message:
+        intent.kind === 'cancel_calendar_event'
+          ? 'I found more than one matching event, so I need to know which one you want to cancel.'
+          : 'I found more than one matching event, so I need to know which one you want to edit.',
+      questions: resolution.candidates.slice(0, 3).map((candidate) => {
+        const when = candidate.startsAt ? ` at ${candidate.startsAt}` : ''
+        return `Did you mean "${candidate.summary}" on ${candidate.calendarName}${when}?`
+      }),
+    }
+  }
+
+  return {
+    message:
+      intent.kind === 'cancel_calendar_event'
+        ? 'I could not find a calendar event that matches that request.'
+        : 'I could not find a calendar event that matches that request.',
+    questions: ['Which calendar event do you mean?'],
+  }
+}
+
+function toConfirmationCalendarEvent(
+  target: ProcessVoiceCalendarEventTarget,
+  changes?: Partial<{
+    title: string | null
+    description: string | null
+    startDate: string | null
+    startTime: string | null
+    endDate: string | null
+    endTime: string | null
+    location: string | null
+    allDay: boolean | null
+    targetCalendarId: string | null
+    targetCalendarName: string | null
+  }>,
+) {
+  return {
+    operation: 'edit_calendar_event' as const,
+    target,
+    ...(changes?.title !== undefined ? { title: changes.title } : {}),
+    ...(changes?.description !== undefined ? { description: changes.description ?? undefined } : {}),
+    ...(changes?.startDate !== undefined ? { startDate: changes.startDate ?? undefined } : {}),
+    ...(changes?.startTime !== undefined ? { startTime: changes.startTime ?? undefined } : {}),
+    ...(changes?.endDate !== undefined ? { endDate: changes.endDate ?? undefined } : {}),
+    ...(changes?.endTime !== undefined ? { endTime: changes.endTime ?? undefined } : {}),
+    ...(changes?.location !== undefined ? { location: changes.location ?? undefined } : {}),
+    ...(changes?.allDay !== undefined ? { allDay: changes.allDay ?? undefined } : {}),
+    ...(changes?.targetCalendarId !== undefined ? { targetCalendarId: changes.targetCalendarId ?? undefined } : {}),
+    ...(changes?.targetCalendarName !== undefined ? { targetCalendarName: changes.targetCalendarName ?? undefined } : {}),
+  }
 }
 
 function getLatestAssistantSessionSummary(
@@ -922,6 +1056,161 @@ export function createVoiceCaptureProcessor(
       }
     }
 
+    if (
+      voiceIntent.family === 'calendar_action' &&
+      (voiceIntent.kind === 'edit_calendar_event' || voiceIntent.kind === 'cancel_calendar_event')
+    ) {
+      const calendarEventResolution = dependencies.calendarResolver?.resolveCalendarEventTarget
+        ? await dependencies.calendarResolver.resolveCalendarEventTarget({
+            transcript: data.transcript,
+            visibleCalendarEventWindow: data.visibleCalendarEventWindow,
+          })
+        : { kind: 'unresolved' as const }
+
+      if (calendarEventResolution.kind !== 'resolved') {
+        const clarification = buildCalendarEventTargetClarification(voiceIntent, calendarEventResolution)
+
+        return {
+          ok: true,
+          outcome: 'clarify',
+          transcript: data.transcript,
+          language: data.language,
+          message: clarification.message,
+          questions: clarification.questions,
+          draft: null,
+          calendarEventTargetCandidates:
+            calendarEventResolution.kind === 'ambiguous' ? calendarEventResolution.candidates : undefined,
+        }
+      }
+
+      if (!dependencies.assistantSessionService) {
+        return {
+          ok: true,
+          outcome: 'calendar_event_confirmation',
+          transcript: data.transcript,
+          language: data.language,
+          message:
+            voiceIntent.kind === 'cancel_calendar_event'
+              ? `I found "${calendarEventResolution.target.summary}" on ${calendarEventResolution.target.calendarName}. Confirm if you want me to cancel it.`
+              : `I found "${calendarEventResolution.target.summary}" on ${calendarEventResolution.target.calendarName}. Confirm if you want me to edit it.`,
+          calendarEvent: {
+            operation: voiceIntent.kind,
+            target: calendarEventResolution.target,
+          },
+        }
+      }
+
+      const session = voiceIntent.kind === 'cancel_calendar_event'
+        ? await dependencies.assistantSessionService.resolveCalendarEventCancelSession({
+            sessionId: data.calendarEventSessionId ?? undefined,
+            currentDate: data.currentDate,
+            timezone: data.timezone,
+            target: {
+              eventId: calendarEventResolution.target.calendarEventId,
+              summary: calendarEventResolution.target.summary,
+              calendarName: calendarEventResolution.target.calendarName,
+            },
+          })
+        : await dependencies.assistantSessionService.resolveCalendarEventEditSession({
+            sessionId: data.calendarEventSessionId ?? undefined,
+            currentDate: data.currentDate,
+            timezone: data.timezone,
+            target: {
+              eventId: calendarEventResolution.target.calendarEventId,
+              summary: calendarEventResolution.target.summary,
+              calendarName: calendarEventResolution.target.calendarName,
+            },
+            draft: {},
+          })
+
+      const submittedTurn = await dependencies.assistantSessionService.submitSessionTurn({
+        sessionId: session.sessionId,
+        message: data.transcript,
+        source: 'voice',
+        transcriptLanguage: data.language,
+        context: {
+          target: {
+            kind: 'calendar_event',
+            id: calendarEventResolution.target.calendarEventId,
+            label: calendarEventResolution.target.summary,
+          },
+        },
+      })
+
+      const settledSession = await waitForAssistantSessionTurnSettlement({
+        assistantSessionService: dependencies.assistantSessionService,
+        sessionId: session.sessionId,
+        submittedTurnId:
+          submittedTurn && typeof submittedTurn === 'object' && submittedTurn && 'turnId' in submittedTurn && typeof submittedTurn.turnId === 'string'
+            ? submittedTurn.turnId
+            : null,
+      })
+
+      const workflow = settledSession.workflow
+      if (!workflow || workflow.kind !== 'calendar_event' || workflow.operation !== voiceIntent.kind.split('_')[0]) {
+        throw new Error('Calendar event session workflow missing')
+      }
+
+      const latestQuestion = getLatestAssistantSessionSummary(settledSession, 'assistant_question')
+      const latestSynthesis = getLatestAssistantSessionSummary(settledSession, 'assistant_synthesis')
+
+      if (workflow.phase === 'collecting') {
+        return {
+          ok: true,
+          outcome: 'clarify',
+          transcript: data.transcript,
+          language: data.language,
+          message: latestQuestion ?? 'What calendar event details should I use?',
+          questions: [],
+          draft: null,
+          calendarEvent: {
+            operation: voiceIntent.kind,
+            target: calendarEventResolution.target,
+          },
+          calendarEventSession: {
+            sessionId: settledSession.sessionId,
+          },
+        }
+      }
+
+      if (workflow.phase === 'ready_to_confirm' || (workflow.phase === 'completed' && workflow.result?.applyPayload)) {
+        return {
+          ok: true,
+          outcome: 'calendar_event_confirmation',
+          transcript: data.transcript,
+          language: data.language,
+          message:
+            latestQuestion
+            ?? latestSynthesis
+            ?? (voiceIntent.kind === 'cancel_calendar_event'
+              ? `I found "${calendarEventResolution.target.summary}" on ${calendarEventResolution.target.calendarName}. Confirm if you want me to cancel it.`
+              : `I found "${calendarEventResolution.target.summary}" on ${calendarEventResolution.target.calendarName}. Confirm if you want me to edit it.`),
+          calendarEvent: {
+            operation: voiceIntent.kind,
+            target: calendarEventResolution.target,
+          },
+          calendarEventSession: {
+            sessionId: settledSession.sessionId,
+          },
+        }
+      }
+
+      return {
+        ok: true,
+        outcome: 'calendar_event_confirmation',
+        transcript: data.transcript,
+        language: data.language,
+        message:
+          voiceIntent.kind === 'cancel_calendar_event'
+            ? `I found "${calendarEventResolution.target.summary}" on ${calendarEventResolution.target.calendarName}. Confirm if you want me to cancel it.`
+            : `I found "${calendarEventResolution.target.summary}" on ${calendarEventResolution.target.calendarName}. Confirm if you want me to edit it.`,
+        calendarEvent: {
+          operation: voiceIntent.kind,
+          target: calendarEventResolution.target,
+        },
+      }
+    }
+
     if (voiceIntent.family !== 'creation') {
       const clarification = buildVoiceActionClarification(voiceIntent)
 
@@ -1064,6 +1353,7 @@ export function createVoiceCaptureProcessor(
         contextTaskId: data.contextTaskId,
         contextIdeaId: data.contextIdeaId,
         visibleTaskWindow: data.visibleTaskWindow,
+        visibleCalendarEventWindow: data.visibleCalendarEventWindow,
         followUpTaskAction: data.followUpTaskAction,
         taskEditSessionId: data.taskEditSessionId,
         calendarEventSessionId: data.calendarEventSessionId,

@@ -86,6 +86,63 @@ const calendarEventCreateWorkflowSchema = z.object({
   }).nullable(),
 })
 
+const calendarEventTargetSchema = z.object({
+  eventId: z.string().min(1),
+  summary: z.string().min(1),
+  calendarName: z.string().min(1).nullable().optional(),
+})
+
+const calendarEventEditWorkflowSchema = z.object({
+  kind: z.literal('calendar_event'),
+  operation: z.literal('edit'),
+  phase: z.enum(['collecting', 'ready_to_confirm', 'completed', 'blocked']),
+  currentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  timezone: z.string().min(1),
+  target: calendarEventTargetSchema,
+  draft: calendarEventCreateDraftSchema,
+  requestedFields: z.array(z.enum(['title', 'description', 'startDate', 'startTime', 'endDate', 'endTime', 'location'])),
+  missingFields: z.array(z.enum(['title', 'description', 'startDate', 'startTime', 'endDate', 'endTime', 'location'])),
+  activeField: z.enum(['title', 'description', 'startDate', 'startTime', 'endDate', 'endTime', 'location']).nullable(),
+  fieldAttempts: z.object({
+    title: z.number().int().nonnegative(),
+    description: z.number().int().nonnegative(),
+    startDate: z.number().int().nonnegative(),
+    startTime: z.number().int().nonnegative(),
+    endDate: z.number().int().nonnegative(),
+    endTime: z.number().int().nonnegative(),
+    location: z.number().int().nonnegative(),
+  }),
+  changes: calendarEventCreateDraftSchema,
+  result: z.object({
+    outcome: z.enum(['confirmed', 'cancelled']),
+    completedAt: z.string().min(1),
+    applyPayload: z.object({
+      action: z.literal('edit_calendar_event'),
+      operation: z.literal('edit'),
+      eventId: z.string().min(1),
+      edits: calendarEventCreateDraftSchema,
+    }).nullable(),
+  }).nullable(),
+})
+
+const calendarEventCancelWorkflowSchema = z.object({
+  kind: z.literal('calendar_event'),
+  operation: z.literal('cancel'),
+  phase: z.enum(['ready_to_confirm', 'completed', 'blocked']),
+  currentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  timezone: z.string().min(1),
+  target: calendarEventTargetSchema,
+  result: z.object({
+    outcome: z.enum(['confirmed', 'cancelled']),
+    completedAt: z.string().min(1),
+    applyPayload: z.object({
+      action: z.literal('cancel_calendar_event'),
+      operation: z.literal('cancel'),
+      eventId: z.string().min(1),
+    }).nullable(),
+  }).nullable(),
+})
+
 export type AssistantSessionView = z.infer<typeof assistantSessionViewSchema>
 export type SubmitAssistantSessionTurnResponse = z.infer<typeof submitAssistantSessionTurnResponseSchema>
 
@@ -142,7 +199,7 @@ const assistantSessionViewSchema = z.object({
     writableCalendars: z.array(assistantWritableCalendarSchema).max(25).optional(),
     notes: z.array(z.string().min(1)).max(10).optional(),
   }).nullable(),
-  workflow: z.discriminatedUnion('kind', [assistantTaskEditWorkflowSchema, calendarEventCreateWorkflowSchema]).nullable(),
+  workflow: z.union([assistantTaskEditWorkflowSchema, calendarEventCreateWorkflowSchema, calendarEventEditWorkflowSchema, calendarEventCancelWorkflowSchema]).nullable(),
 })
 
 const submitAssistantSessionTurnResponseSchema = z.object({
@@ -907,6 +964,96 @@ export async function resolveAssistantCalendarEventCreateSession(
   return assistantSessionViewSchema.parse(payload)
 }
 
+export async function resolveAssistantCalendarEventEditSession(
+  input: {
+    sessionId?: string
+    authHeaders: HeadersInit
+    currentDate: string
+    timezone: string
+    target: { eventId: string; summary: string; calendarName?: string | null }
+    draft: {
+      title?: string | null
+      description?: string | null
+      startDate?: string | null
+      startTime?: string | null
+      endDate?: string | null
+      endTime?: string | null
+      location?: string | null
+      allDay?: boolean | null
+      targetCalendarId?: string | null
+      targetCalendarName?: string | null
+    }
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+  if (!baseUrl) throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/sessions/resolve`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      channel: 'mixed',
+      context: { target: { kind: 'calendar_event', id: input.target.eventId, label: input.target.summary } },
+      workflow: {
+        kind: 'calendar_event',
+        operation: 'edit',
+        phase: 'collecting',
+        currentDate: input.currentDate,
+        timezone: input.timezone,
+        target: { eventId: input.target.eventId, summary: input.target.summary, calendarName: input.target.calendarName ?? null },
+        draft: input.draft,
+        requestedFields: [],
+        missingFields: [],
+        activeField: null,
+        fieldAttempts: { title: 0, description: 0, startDate: 0, startTime: 0, endDate: 0, endTime: 0, location: 0 },
+        changes: {},
+        result: null,
+      },
+    }),
+  })
+  const payload = await parseAssistantResponse(response)
+  return assistantSessionViewSchema.parse(payload)
+}
+
+export async function resolveAssistantCalendarEventCancelSession(
+  input: {
+    sessionId?: string
+    authHeaders: HeadersInit
+    currentDate: string
+    timezone: string
+    target: { eventId: string; summary: string; calendarName?: string | null }
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+  if (!baseUrl) throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/sessions/resolve`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      channel: 'mixed',
+      context: { target: { kind: 'calendar_event', id: input.target.eventId, label: input.target.summary } },
+      workflow: {
+        kind: 'calendar_event',
+        operation: 'cancel',
+        phase: 'ready_to_confirm',
+        currentDate: input.currentDate,
+        timezone: input.timezone,
+        target: { eventId: input.target.eventId, summary: input.target.summary, calendarName: input.target.calendarName ?? null },
+        result: null,
+      },
+    }),
+  })
+  const payload = await parseAssistantResponse(response)
+  return assistantSessionViewSchema.parse(payload)
+}
+
 export async function getAssistantSession(
   input: { sessionId: string; authHeaders: HeadersInit },
   options?: { fetchImpl?: typeof fetch; baseUrl?: string },
@@ -948,11 +1095,20 @@ export async function submitAssistantSessionTurn(
     }
     workflow?: {
       kind: 'calendar_event'
-      operation: 'create'
+      operation: 'create' | 'edit' | 'cancel'
       phase?: 'collecting' | 'ready_to_confirm' | 'completed' | 'blocked'
       currentDate?: string
       timezone?: string
+      target?: { eventId: string; summary: string; calendarName?: string | null }
       draft?: {
+        title?: string | null
+        description?: string | null
+        startDate?: string | null
+        startTime?: string | null
+        endDate?: string | null
+        endTime?: string | null
+        location?: string | null
+        allDay?: boolean | null
         targetCalendarId?: string | null
         targetCalendarName?: string | null
       }
@@ -969,6 +1125,14 @@ export async function submitAssistantSessionTurn(
         location: number
       }
       changes?: {
+        title?: string | null
+        description?: string | null
+        startDate?: string | null
+        startTime?: string | null
+        endDate?: string | null
+        endTime?: string | null
+        location?: string | null
+        allDay?: boolean | null
         targetCalendarId?: string | null
         targetCalendarName?: string | null
       }

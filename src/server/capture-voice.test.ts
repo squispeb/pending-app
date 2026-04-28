@@ -2399,6 +2399,447 @@ describe('voice capture processor', () => {
     })
   })
 
+  it('resolves a visible calendar event target for edit and keeps the flow in clarification for now', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          throw new Error('Should not be called')
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      calendarResolver: {
+        async resolveCalendarEventTarget() {
+          return {
+            kind: 'resolved' as const,
+            target: {
+              calendarEventId: 'evt-team-sync',
+              summary: 'Team sync',
+              startsAt: '2026-04-08T15:00:00.000Z',
+              endsAt: '2026-04-08T15:30:00.000Z',
+              allDay: false,
+              calendarName: 'Side Projects',
+              primaryFlag: false,
+              source: 'visible_window' as const,
+            },
+          }
+        },
+      },
+    }, {
+      async classify() {
+        return {
+          family: 'calendar_action',
+          kind: 'edit_calendar_event',
+        }
+      },
+    })
+
+    const result = await processor.processVoiceTranscript({
+      transcript: 'Edit the team sync on Side Projects',
+      language: 'en',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+      visibleCalendarEventWindow: [
+        {
+          calendarEventId: 'evt-team-sync',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T15:00:00.000Z',
+          endsAt: '2026-04-08T15:30:00.000Z',
+          allDay: false,
+          calendarName: 'Side Projects',
+          primaryFlag: false,
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'calendar_event_confirmation',
+      transcript: 'Edit the team sync on Side Projects',
+      language: 'en',
+      message: 'I found "Team sync" on Side Projects. Confirm if you want me to edit it.',
+      calendarEvent: {
+        operation: 'edit_calendar_event',
+        target: {
+          calendarEventId: 'evt-team-sync',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T15:00:00.000Z',
+          endsAt: '2026-04-08T15:30:00.000Z',
+          allDay: false,
+          calendarName: 'Side Projects',
+          primaryFlag: false,
+          source: 'visible_window',
+        },
+      },
+    })
+  })
+
+  it('routes a resolved visible calendar event edit request through assistant session resolution', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          throw new Error('Should not be called')
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      assistantSessionService: {
+        async resolveCalendarEventCreateSession() {
+          throw new Error('Should not be called')
+        },
+        async resolveCalendarEventEditSession(input) {
+          expect(input).toEqual({
+            currentDate: '2026-04-08',
+            timezone: 'America/Lima',
+            target: {
+              eventId: 'evt-team-sync',
+              summary: 'Team sync',
+              calendarName: 'Side Projects',
+            },
+            draft: {},
+          })
+          return { sessionId: 'session-calendar-edit-1' }
+        },
+        async resolveCalendarEventCancelSession() {
+          throw new Error('Should not be called')
+        },
+        async submitSessionTurn(input) {
+          expect(input.sessionId).toBe('session-calendar-edit-1')
+          expect(input.context).toEqual({
+            target: {
+              kind: 'calendar_event',
+              id: 'evt-team-sync',
+              label: 'Team sync',
+            },
+          })
+          return { turnId: 'turn-calendar-edit-1' }
+        },
+        async getSession() {
+          return {
+            sessionId: 'session-calendar-edit-1',
+            activeTurn: null,
+            lastTurn: {
+              turnId: 'turn-calendar-edit-1',
+              state: 'completed' as const,
+            },
+            workflow: {
+              kind: 'calendar_event' as const,
+              operation: 'edit' as const,
+              phase: 'ready_to_confirm' as const,
+              currentDate: '2026-04-08',
+              timezone: 'America/Lima',
+              target: {
+                eventId: 'evt-team-sync',
+                summary: 'Team sync',
+                calendarName: 'Side Projects',
+              },
+              draft: {},
+              requestedFields: [],
+              missingFields: [],
+              activeField: null,
+              fieldAttempts: { title: 0, description: 0, startDate: 0, startTime: 0, endDate: 0, endTime: 0, location: 0 },
+              changes: {},
+              result: null,
+            },
+            visibleEvents: [
+              {
+                type: 'assistant_question' as const,
+                summary: 'I found "Team sync" on Side Projects. Confirm if you want me to edit it.',
+              },
+            ],
+          }
+        },
+      },
+      calendarResolver: {
+        async resolveCalendarEventTarget() {
+          return {
+            kind: 'resolved' as const,
+            target: {
+              calendarEventId: 'evt-team-sync',
+              summary: 'Team sync',
+              startsAt: '2026-04-08T15:00:00.000Z',
+              endsAt: '2026-04-08T15:30:00.000Z',
+              allDay: false,
+              calendarName: 'Side Projects',
+              primaryFlag: false,
+              source: 'visible_window' as const,
+            },
+          }
+        },
+      },
+    }, {
+      async classify() {
+        return {
+          family: 'calendar_action',
+          kind: 'edit_calendar_event',
+        }
+      },
+    })
+
+    const result = await processor.processVoiceTranscript({
+      transcript: 'Edit the team sync on Side Projects',
+      language: 'en',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+      visibleCalendarEventWindow: [
+        {
+          calendarEventId: 'evt-team-sync',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T15:00:00.000Z',
+          endsAt: '2026-04-08T15:30:00.000Z',
+          allDay: false,
+          calendarName: 'Side Projects',
+          primaryFlag: false,
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'calendar_event_confirmation',
+      transcript: 'Edit the team sync on Side Projects',
+      language: 'en',
+      message: 'I found "Team sync" on Side Projects. Confirm if you want me to edit it.',
+      calendarEvent: {
+        operation: 'edit_calendar_event',
+        target: {
+          calendarEventId: 'evt-team-sync',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T15:00:00.000Z',
+          endsAt: '2026-04-08T15:30:00.000Z',
+          allDay: false,
+          calendarName: 'Side Projects',
+          primaryFlag: false,
+          source: 'visible_window',
+        },
+      },
+      calendarEventSession: {
+        sessionId: 'session-calendar-edit-1',
+      },
+    })
+  })
+
+  it('clarifies when a visible calendar event target is ambiguous', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          throw new Error('Should not be called')
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      calendarResolver: {
+        async resolveCalendarEventTarget() {
+          return {
+            kind: 'ambiguous' as const,
+            candidates: [
+              {
+                calendarEventId: 'evt-team-sync-a',
+                summary: 'Team sync',
+                startsAt: '2026-04-08T15:00:00.000Z',
+                endsAt: '2026-04-08T15:30:00.000Z',
+                allDay: false,
+                calendarName: 'Primary',
+                primaryFlag: true,
+                source: 'visible_window' as const,
+              },
+              {
+                calendarEventId: 'evt-team-sync-b',
+                summary: 'Team sync',
+                startsAt: '2026-04-08T17:00:00.000Z',
+                endsAt: '2026-04-08T17:30:00.000Z',
+                allDay: false,
+                calendarName: 'Side Projects',
+                primaryFlag: false,
+                source: 'visible_window' as const,
+              },
+            ],
+          }
+        },
+      },
+    }, {
+      async classify() {
+        return {
+          family: 'calendar_action',
+          kind: 'cancel_calendar_event',
+        }
+      },
+    })
+
+    const result = await processor.processVoiceTranscript({
+      transcript: 'Cancel the team sync',
+      language: 'en',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+      visibleCalendarEventWindow: [
+        {
+          calendarEventId: 'evt-team-sync-a',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T15:00:00.000Z',
+          endsAt: '2026-04-08T15:30:00.000Z',
+          allDay: false,
+          calendarName: 'Primary',
+          primaryFlag: true,
+        },
+        {
+          calendarEventId: 'evt-team-sync-b',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T17:00:00.000Z',
+          endsAt: '2026-04-08T17:30:00.000Z',
+          allDay: false,
+          calendarName: 'Side Projects',
+          primaryFlag: false,
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Cancel the team sync',
+      language: 'en',
+      message: 'I found more than one matching event, so I need to know which one you want to cancel.',
+      questions: [
+        'Did you mean "Team sync" on Primary at 2026-04-08T15:00:00.000Z?',
+        'Did you mean "Team sync" on Side Projects at 2026-04-08T17:00:00.000Z?',
+      ],
+      draft: null,
+      calendarEventTargetCandidates: [
+        {
+          calendarEventId: 'evt-team-sync-a',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T15:00:00.000Z',
+          endsAt: '2026-04-08T15:30:00.000Z',
+          allDay: false,
+          calendarName: 'Primary',
+          primaryFlag: true,
+          source: 'visible_window',
+        },
+        {
+          calendarEventId: 'evt-team-sync-b',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T17:00:00.000Z',
+          endsAt: '2026-04-08T17:30:00.000Z',
+          allDay: false,
+          calendarName: 'Side Projects',
+          primaryFlag: false,
+          source: 'visible_window',
+        },
+      ],
+    })
+  })
+
+  it('returns a confirmation payload for a visible calendar event cancel request', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          throw new Error('Should not be called')
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      calendarResolver: {
+        async resolveCalendarEventTarget() {
+          return {
+            kind: 'resolved' as const,
+            target: {
+              calendarEventId: 'evt-retro',
+              summary: 'Retro',
+              startsAt: '2026-04-08T20:00:00.000Z',
+              endsAt: '2026-04-08T21:00:00.000Z',
+              allDay: false,
+              calendarName: 'Primary',
+              primaryFlag: true,
+              source: 'visible_window' as const,
+            },
+          }
+        },
+      },
+    }, {
+      async classify() {
+        return {
+          family: 'calendar_action',
+          kind: 'cancel_calendar_event',
+        }
+      },
+    })
+
+    const result = await processor.processVoiceTranscript({
+      transcript: 'Cancel the retro',
+      language: 'en',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+      visibleCalendarEventWindow: [
+        {
+          calendarEventId: 'evt-retro',
+          summary: 'Retro',
+          startsAt: '2026-04-08T20:00:00.000Z',
+          endsAt: '2026-04-08T21:00:00.000Z',
+          allDay: false,
+          calendarName: 'Primary',
+          primaryFlag: true,
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'calendar_event_confirmation',
+      transcript: 'Cancel the retro',
+      language: 'en',
+      message: 'I found "Retro" on Primary. Confirm if you want me to cancel it.',
+      calendarEvent: {
+        operation: 'cancel_calendar_event',
+        target: {
+          calendarEventId: 'evt-retro',
+          summary: 'Retro',
+          startsAt: '2026-04-08T20:00:00.000Z',
+          endsAt: '2026-04-08T21:00:00.000Z',
+          allDay: false,
+          calendarName: 'Primary',
+          primaryFlag: true,
+          source: 'visible_window',
+        },
+      },
+    })
+  })
+
   it('routes unsupported planner commands into clarification instead of task creation', async () => {
     const interpretTypedTaskInput = vi.fn(async () => {
       throw new Error('Should not be called')

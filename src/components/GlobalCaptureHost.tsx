@@ -20,10 +20,11 @@ import {
   getTodayDateString,
   type TaskFormValues,
 } from '../lib/tasks'
-import { formatDisplayDate, formatDisplayTime } from '../lib/date-time'
+import { formatDisplayDate, formatDisplayDateTime, formatDisplayTime } from '../lib/date-time'
 import type {
   CandidateType,
   ConfirmVoiceTaskActionKind,
+  ConfirmVoiceCalendarEventOperation,
   ProcessVoiceCaptureAutoSaved,
   ProcessVoiceCaptureCalendarEvent,
   ProcessVoiceCaptureCalendarEventConfirmation,
@@ -41,6 +42,7 @@ import {
   confirmCapturedHabit as confirmCapturedHabitFn,
   confirmCapturedTask as confirmCapturedTaskFn,
   confirmVoiceCalendarEventCreate as confirmVoiceCalendarEventCreateFn,
+  confirmVoiceCalendarEventAction as confirmVoiceCalendarEventActionFn,
   confirmVoiceTaskAction as confirmVoiceTaskActionFn,
   interpretCaptureInput,
   processVoiceCapture,
@@ -339,6 +341,191 @@ export function CalendarEventSummaryCard({ event, eyebrow = 'Calendar event' }: 
         </div>
       </dl>
     </div>
+  )
+}
+
+type CalendarEventTargetSummaryCardProps = {
+  target: NonNullable<ProcessVoiceCaptureCalendarEvent['target']>
+  eyebrow?: string
+}
+
+function formatCalendarEventTargetWhen(target: NonNullable<ProcessVoiceCaptureCalendarEvent['target']>) {
+  if (!target.startsAt) {
+    return target.allDay ? 'All day' : 'Time not specified'
+  }
+
+  if (target.allDay || !target.endsAt) {
+    return formatDisplayDateTime(target.startsAt)
+  }
+
+  return `${formatDisplayDateTime(target.startsAt)} until ${formatDisplayDateTime(target.endsAt)}`
+}
+
+export function CalendarEventTargetSummaryCard({ target, eyebrow = 'Target event' }: CalendarEventTargetSummaryCardProps) {
+  return (
+    <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+        {eyebrow}
+      </span>
+      <p className="m-0 text-sm font-semibold leading-5 text-[var(--ink-strong)]">{target.summary}</p>
+      <dl className="m-0 mt-2 space-y-2">
+        <div className="space-y-1">
+          <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">When</dt>
+          <dd className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{formatCalendarEventTargetWhen(target)}</dd>
+        </div>
+        <div className="space-y-1">
+          <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">Calendar</dt>
+          <dd className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{target.calendarName}</dd>
+        </div>
+      </dl>
+    </div>
+  )
+}
+
+type CalendarEventChangesSummaryCardProps = {
+  event: ProcessVoiceCaptureCalendarEvent
+  eyebrow?: string
+}
+
+function formatCalendarEventChangeLabel(field: 'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location' | 'allDay' | 'targetCalendar') {
+  if (field === 'startDate') return 'Start date'
+  if (field === 'startTime') return 'Start time'
+  if (field === 'endDate') return 'End date'
+  if (field === 'endTime') return 'End time'
+  if (field === 'location') return 'Location'
+  if (field === 'allDay') return 'All day'
+  if (field === 'targetCalendar') return 'Calendar'
+  if (field === 'description') return 'Description'
+  return 'Title'
+}
+
+function formatCalendarEventChangeValue(event: ProcessVoiceCaptureCalendarEvent, field: 'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location' | 'allDay' | 'targetCalendar') {
+  if (field === 'title') return event.title ?? ''
+  if (field === 'description') return event.description ?? ''
+  if (field === 'startDate') return formatDisplayDate(event.startDate ?? '')
+  if (field === 'startTime') return event.startTime ? formatDisplayTime(event.startTime) : ''
+  if (field === 'endDate') return event.endDate ? formatDisplayDate(event.endDate) : ''
+  if (field === 'endTime') return event.endTime ? formatDisplayTime(event.endTime) : ''
+  if (field === 'location') return event.location ?? ''
+  if (field === 'allDay') return event.allDay ? 'Yes' : 'No'
+  return event.targetCalendarName ?? 'Primary calendar'
+}
+
+export function CalendarEventChangesSummaryCard({ event, eyebrow = 'Proposed changes' }: CalendarEventChangesSummaryCardProps) {
+  const fields: Array<'title' | 'description' | 'startDate' | 'startTime' | 'endDate' | 'endTime' | 'location' | 'allDay' | 'targetCalendar'> = []
+
+  if (event.title) fields.push('title')
+  if (event.description) fields.push('description')
+  if (event.startDate) fields.push('startDate')
+  if (event.startTime) fields.push('startTime')
+  if (event.endDate) fields.push('endDate')
+  if (event.endTime) fields.push('endTime')
+  if (event.location) fields.push('location')
+  if (typeof event.allDay === 'boolean') fields.push('allDay')
+  if (event.targetCalendarId || event.targetCalendarName) fields.push('targetCalendar')
+
+  return (
+    <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
+        {eyebrow}
+      </span>
+      {fields.length > 0 ? (
+        <dl className="m-0 space-y-2">
+          {fields.map((field) => (
+            <div key={field} className="space-y-1">
+              <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">{formatCalendarEventChangeLabel(field)}</dt>
+              <dd className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{formatCalendarEventChangeValue(event, field)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="m-0 text-sm leading-6 text-[var(--ink-soft)]">No change details were provided.</p>
+      )}
+    </div>
+  )
+}
+
+type VoiceCalendarEventConfirmationPanelProps = {
+  transcript: string
+  message: string
+  confirmLabel: string
+  isConfirming: boolean
+  error: string | null
+  event: ProcessVoiceCaptureCalendarEvent
+  onConfirm: (event: React.FormEvent) => void
+  onCancel: () => void
+}
+
+function getCalendarEventConfirmationActionLabel(operation?: ConfirmVoiceCalendarEventOperation) {
+  if (operation === 'edit_calendar_event') {
+    return 'Review these event edits'
+  }
+
+  if (operation === 'cancel_calendar_event') {
+    return 'Cancel this calendar event'
+  }
+
+  return 'Create this calendar event'
+}
+
+export function VoiceCalendarEventConfirmationPanel({
+  transcript: _transcript,
+  message,
+  confirmLabel,
+  isConfirming,
+  error,
+  event,
+  onConfirm,
+  onCancel,
+}: VoiceCalendarEventConfirmationPanelProps) {
+  const isEdit = event.operation === 'edit_calendar_event'
+  const isCancel = event.operation === 'cancel_calendar_event'
+
+  return (
+    <form className="space-y-4" onSubmit={onConfirm}>
+      <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">{getCalendarEventConfirmationActionLabel(event.operation)}</p>
+      {isEdit || isCancel ? <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{message}</p> : null}
+
+      {isEdit && event.target ? (
+        <div className="space-y-3">
+          <CalendarEventTargetSummaryCard target={event.target} />
+          <CalendarEventChangesSummaryCard event={event} />
+        </div>
+      ) : (
+        <CalendarEventSummaryCard event={event} eyebrow={isCancel ? 'Event to cancel' : 'Event details'} />
+      )}
+
+      {isCancel ? (
+        <div className="rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3">
+          <p className="m-0 text-sm font-medium text-red-200">
+            This will permanently cancel the selected calendar event.
+          </p>
+        </div>
+      ) : null}
+
+      {error ? <p className="m-0 text-sm font-medium text-red-500">{error}</p> : null}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="submit"
+          disabled={isConfirming}
+          className={
+            isCancel
+              ? 'inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-red-500/40 bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60'
+              : 'primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60'
+          }
+        >
+          {confirmLabel}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
   )
 }
 
@@ -1148,9 +1335,24 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
         throw new Error('Calendar event confirmation is missing.')
       }
 
+      const { calendarEvent, calendarEventSession } = captureCalendarEventConfirmation
+
+      if (calendarEvent.operation === 'edit_calendar_event' || calendarEvent.operation === 'cancel_calendar_event') {
+        if (!calendarEventSession) {
+          throw new Error('Calendar event session is missing.')
+        }
+
+        return confirmVoiceCalendarEventActionFn({
+          data: {
+            calendarEvent,
+            calendarEventSession,
+          },
+        })
+      }
+
       return confirmVoiceCalendarEventCreateFn({
         data: {
-          draft: captureCalendarEventConfirmation.calendarEvent,
+          draft: calendarEvent,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         },
       })
@@ -1852,7 +2054,11 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
             ? 'Apply edits'
             : 'Complete task'
     : captureMode === 'calendar_event_confirmation'
-      ? 'Create event'
+      ? captureCalendarEventConfirmation?.calendarEvent.operation === 'cancel_calendar_event'
+        ? 'Cancel event'
+        : captureCalendarEventConfirmation?.calendarEvent.operation === 'edit_calendar_event'
+          ? 'Apply changes'
+          : 'Create event'
     : captureType === 'idea'
       ? 'Create thread'
       : captureType === 'habit'
@@ -2539,29 +2745,16 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                   ) : null}
 
                   {captureMode === 'calendar_event_confirmation' && captureCalendarEventConfirmation ? (
-                    <form className="space-y-4" onSubmit={handleConfirm}>
-                      <p className="m-0 text-sm font-semibold text-[var(--ink-strong)]">Create this calendar event</p>
-                      <CalendarEventSummaryCard event={captureCalendarEventConfirmation.calendarEvent} eyebrow="Event details" />
-
-                      {captureError ? <p className="m-0 text-sm font-medium text-red-500">{captureError}</p> : null}
-
-                      <div className="flex flex-wrap items-center gap-3">
-                        <button
-                          type="submit"
-                          disabled={isConfirming}
-                          className="primary-pill cursor-pointer border-0 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {confirmLabel}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={resetCapture}
-                          className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </form>
+                    <VoiceCalendarEventConfirmationPanel
+                      transcript={captureCalendarEventConfirmation.transcript}
+                      message={captureCalendarEventConfirmation.message}
+                      confirmLabel={confirmLabel}
+                      isConfirming={isConfirming}
+                      error={captureError}
+                      event={captureCalendarEventConfirmation.calendarEvent}
+                      onConfirm={handleConfirm}
+                      onCancel={resetCapture}
+                    />
                   ) : null}
 
                   {captureMode === 'clarify' ? (

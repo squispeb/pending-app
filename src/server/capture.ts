@@ -2,6 +2,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { db } from '../db/client'
 import {
   confirmVoiceCalendarEventCreateInputSchema,
+  confirmVoiceCalendarEventActionInputSchema,
   confirmCapturedIdeaInputSchema,
   confirmCapturedHabitInputSchema,
   confirmCapturedTaskInputSchema,
@@ -20,6 +21,9 @@ import { createIdeasService } from './ideas-service'
 import { createTranscriptionBroker } from './transcription'
 import { createVoiceTaskResolver } from './voice-task-resolver'
 import { createVoiceCalendarResolver } from './voice-calendar-resolver'
+import { createCaptureCalendarActions } from './capture-calendar-actions'
+import { createCalendarService } from './calendar-service'
+import { createGoogleCalendarEvent } from './calendar'
 
 const captureService = createCaptureService(db)
 const assistantSessionService = createAssistantSessionService(db)
@@ -28,13 +32,12 @@ const ideasService = createIdeasService(db)
 const transcriptionBroker = createTranscriptionBroker()
 const voiceTaskResolver = createVoiceTaskResolver(db)
 const voiceCalendarResolver = createVoiceCalendarResolver(db)
-
-function addDaysToIsoDate(value: string, days: number) {
-  const [year, month, day] = value.split('-').map(Number)
-  const next = new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0))
-  next.setUTCDate(next.getUTCDate() + days)
-  return next.toISOString().slice(0, 10)
-}
+const calendarActions = createCaptureCalendarActions({
+  database: db,
+  calendarService: createCalendarService(db),
+  resolveUser: () => resolveAuthenticatedPlannerUser(db),
+  createGoogleCalendarEvent,
+})
 
 export const interpretCaptureInput = createServerFn({ method: 'POST' })
   .inputValidator((input) => interpretCaptureInputSchema.parse(input))
@@ -136,31 +139,13 @@ export const submitAssistantSessionTurn = createServerFn({ method: 'POST' })
 export const confirmVoiceCalendarEventCreate = createServerFn({ method: 'POST' })
   .inputValidator((input) => confirmVoiceCalendarEventCreateInputSchema.parse(input))
   .handler(async ({ data }) => {
-    await resolveAuthenticatedPlannerUser(db)
-    const calendarModule = await import('./calendar')
-    const targetCalendarId = data.draft.targetCalendarId ?? 'primary'
-    const isAllDay = data.draft.allDay || !data.draft.startTime
-    const allDayEndDate = addDaysToIsoDate(data.draft.endDate ?? data.draft.startDate, 1)
+    return calendarActions.confirmVoiceCalendarEventCreate(data)
+  })
 
-    return calendarModule.createGoogleCalendarEvent({
-      data: {
-        calendarId: targetCalendarId,
-        event: {
-          summary: data.draft.title,
-          description: data.draft.description ?? null,
-          location: data.draft.location ?? null,
-          start: isAllDay
-            ? { date: data.draft.startDate }
-            : { dateTime: `${data.draft.startDate}T${data.draft.startTime}:00`, timeZone: data.timezone },
-          end: isAllDay
-            ? { date: allDayEndDate }
-            : {
-                dateTime: `${data.draft.endDate ?? data.draft.startDate}T${data.draft.endTime ?? data.draft.startTime}:00`,
-                timeZone: data.timezone,
-              },
-        },
-      },
-    })
+export const confirmVoiceCalendarEventAction = createServerFn({ method: 'POST' })
+  .inputValidator((input) => confirmVoiceCalendarEventActionInputSchema.parse(input))
+  .handler(async ({ data }) => {
+    return calendarActions.confirmVoiceCalendarEventAction(data)
   })
 
 export const confirmCapturedTask = createServerFn({ method: 'POST' })

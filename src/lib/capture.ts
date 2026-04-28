@@ -53,6 +53,11 @@ export const voiceCalendarActionKindSchema = z.enum([
   'cancel_calendar_event',
   'unsupported_calendar_action',
 ])
+export const confirmVoiceCalendarEventOperationSchema = z.enum([
+  'create_calendar_event',
+  'edit_calendar_event',
+  'cancel_calendar_event',
+])
 export const voiceIntentClassificationSchema = z.discriminatedUnion('family', [
   z.object({
     family: z.literal('creation'),
@@ -99,6 +104,18 @@ export const visibleTaskSummarySchema = z.object({
 })
 
 export const visibleTaskWindowSchema = z.array(visibleTaskSummarySchema)
+
+export const visibleCalendarEventSummarySchema = z.object({
+  calendarEventId: z.string().min(1),
+  summary: z.string().trim().min(1),
+  startsAt: z.string().min(1).nullable(),
+  endsAt: z.string().min(1).nullable(),
+  allDay: z.boolean(),
+  calendarName: z.string().trim().min(1),
+  primaryFlag: z.boolean(),
+})
+
+export const visibleCalendarEventWindowSchema = z.array(visibleCalendarEventSummarySchema)
 
 export const typedTaskDraftSchema = z
   .object({
@@ -263,6 +280,7 @@ export const processVoiceCaptureInputSchema = transcribeAudioUploadInputSchema.e
   contextTaskId: z.string().trim().min(1).max(120).optional(),
   contextIdeaId: z.string().trim().min(1).max(120).optional(),
   visibleTaskWindow: visibleTaskWindowSchema.optional(),
+  visibleCalendarEventWindow: visibleCalendarEventWindowSchema.optional(),
   followUpTaskAction: confirmVoiceTaskActionKindSchema.optional(),
   taskEditSessionId: z.string().trim().min(1).max(120).optional(),
   calendarEventSessionId: z.string().trim().min(1).max(120).optional(),
@@ -277,6 +295,7 @@ export const processVoiceCaptureTextInputSchema = z.object({
   contextTaskId: z.string().trim().min(1).max(120).optional(),
   contextIdeaId: z.string().trim().min(1).max(120).optional(),
   visibleTaskWindow: visibleTaskWindowSchema.optional(),
+  visibleCalendarEventWindow: visibleCalendarEventWindowSchema.optional(),
   followUpTaskAction: confirmVoiceTaskActionKindSchema.optional(),
   taskEditSessionId: z.string().trim().min(1).max(120).optional(),
   calendarEventSessionId: z.string().trim().min(1).max(120).optional(),
@@ -330,10 +349,21 @@ const processVoiceTaskEditSessionSchema = z.object({
   sessionId: z.string().min(1),
 })
 
+const processVoiceCalendarEventTargetSchema = z.object({
+  calendarEventId: z.string().min(1),
+  summary: z.string().trim().min(1),
+  startsAt: z.string().min(1).nullable().optional(),
+  endsAt: z.string().min(1).nullable().optional(),
+  allDay: z.boolean().optional(),
+  calendarName: z.string().trim().min(1),
+  primaryFlag: z.boolean(),
+  source: z.literal('visible_window'),
+})
+
 const processVoiceCalendarEventSchema = z.object({
   title: z.string().trim().min(1).optional(),
   description: z.string().trim().min(1).optional(),
-  startDate: captureDateSchema,
+  startDate: captureDateSchema.optional(),
   startTime: captureTimeSchema.optional(),
   endDate: captureDateSchema.optional(),
   endTime: captureTimeSchema.optional(),
@@ -341,10 +371,22 @@ const processVoiceCalendarEventSchema = z.object({
   allDay: z.boolean().optional(),
   targetCalendarId: z.string().trim().min(1).nullable().optional(),
   targetCalendarName: z.string().trim().min(1).nullable().optional(),
+  operation: confirmVoiceCalendarEventOperationSchema.optional(),
+  target: processVoiceCalendarEventTargetSchema.optional(),
 })
 
 const processVoiceCalendarEventSessionSchema = z.object({
   sessionId: z.string().min(1),
+})
+
+const confirmVoiceCalendarEventActionCalendarEventSchema = processVoiceCalendarEventSchema.extend({
+  operation: z.enum(['edit_calendar_event', 'cancel_calendar_event']),
+  target: processVoiceCalendarEventTargetSchema,
+})
+
+export const confirmVoiceCalendarEventActionInputSchema = z.object({
+  calendarEvent: confirmVoiceCalendarEventActionCalendarEventSchema,
+  calendarEventSession: processVoiceCalendarEventSessionSchema,
 })
 
 export const processVoiceCaptureClarifySchema = z.object({
@@ -359,6 +401,8 @@ export const processVoiceCaptureClarifySchema = z.object({
   taskEditSession: processVoiceTaskEditSessionSchema.optional(),
   calendarEvent: processVoiceCalendarEventSchema.optional(),
   calendarEventSession: processVoiceCalendarEventSessionSchema.optional(),
+  calendarEventTarget: processVoiceCalendarEventTargetSchema.optional(),
+  calendarEventTargetCandidates: z.array(processVoiceCalendarEventTargetSchema).optional(),
 })
 
 export const processVoiceCaptureTaskStatusSchema = z.object({
@@ -382,6 +426,7 @@ export const processVoiceCaptureTaskActionConfirmationSchema = z.object({
   taskEditSession: processVoiceTaskEditSessionSchema.optional(),
   calendarEvent: processVoiceCalendarEventSchema.optional(),
   calendarEventSession: processVoiceCalendarEventSessionSchema.optional(),
+  calendarEventTarget: processVoiceCalendarEventTargetSchema.optional(),
 })
 
 export const processVoiceCaptureCalendarEventConfirmationSchema = z.object({
@@ -391,7 +436,31 @@ export const processVoiceCaptureCalendarEventConfirmationSchema = z.object({
   language: transcriptionDetectedLanguageSchema,
   message: z.string().trim().min(1),
   calendarEvent: processVoiceCalendarEventSchema,
-  calendarEventSession: processVoiceCalendarEventSessionSchema,
+  calendarEventSession: processVoiceCalendarEventSessionSchema.optional(),
+}).superRefine((value, ctx) => {
+  if (value.calendarEvent.operation === 'create_calendar_event' && !value.calendarEvent.startDate) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['calendarEvent', 'startDate'],
+      message: 'Start date is required for calendar creation confirmations',
+    })
+  }
+
+  if (value.calendarEvent.operation === 'edit_calendar_event' && !value.calendarEvent.target) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['calendarEvent', 'target'],
+      message: 'Target event details are required for edit confirmations',
+    })
+  }
+
+  if (value.calendarEvent.operation === 'cancel_calendar_event' && !value.calendarEvent.target) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['calendarEvent', 'target'],
+      message: 'Target event details are required for cancel confirmations',
+    })
+  }
 })
 
 export const processVoiceCaptureFailureSchema = z.object({
@@ -418,9 +487,12 @@ export type VoiceTaskActionKind = z.infer<typeof voiceTaskActionKindSchema>
 export type ConfirmVoiceTaskActionKind = z.infer<typeof confirmVoiceTaskActionKindSchema>
 export type VoiceTaskEditChanges = z.infer<typeof voiceTaskEditChangesSchema>
 export type VoiceCalendarActionKind = z.infer<typeof voiceCalendarActionKindSchema>
+export type ConfirmVoiceCalendarEventOperation = z.infer<typeof confirmVoiceCalendarEventOperationSchema>
 export type VoiceIntentClassification = z.infer<typeof voiceIntentClassificationSchema>
 export type CandidateType = z.infer<typeof candidateTypeSchema>
 export type VisibleTaskSummary = z.infer<typeof visibleTaskSummarySchema>
+export type VisibleCalendarEventSummary = z.infer<typeof visibleCalendarEventSummarySchema>
+export type VisibleCalendarEventWindow = z.infer<typeof visibleCalendarEventWindowSchema>
 export type InterpretCaptureInput = z.infer<typeof interpretCaptureInputSchema>
 export type TypedTaskDraft = z.infer<typeof typedTaskDraftSchema>
 export type TypedTaskDraftProviderOutput = z.infer<typeof typedTaskDraftProviderOutputSchema>
@@ -431,6 +503,7 @@ export type ConfirmCapturedHabitInput = z.infer<typeof confirmCapturedHabitInput
 export type ConfirmCapturedIdeaInput = z.infer<typeof confirmCapturedIdeaInputSchema>
 export type ConfirmVoiceTaskActionInput = z.infer<typeof confirmVoiceTaskActionInputSchema>
 export type ConfirmVoiceCalendarEventCreateInput = z.infer<typeof confirmVoiceCalendarEventCreateInputSchema>
+export type ConfirmVoiceCalendarEventActionInput = z.infer<typeof confirmVoiceCalendarEventActionInputSchema>
 export type MatchedCalendarContext = z.infer<typeof matchedCalendarContextSchema>
 export type ProcessVoiceCaptureInput = z.infer<typeof processVoiceCaptureInputSchema>
 export type ProcessVoiceCaptureTextInput = z.infer<typeof processVoiceCaptureTextInputSchema>
@@ -446,6 +519,7 @@ export type ProcessVoiceCaptureResponse = z.infer<typeof processVoiceCaptureResp
 export type ProcessVoiceTaskEditSession = z.infer<typeof processVoiceTaskEditSessionSchema>
 export type ProcessVoiceCalendarEvent = z.infer<typeof processVoiceCalendarEventSchema>
 export type ProcessVoiceCalendarEventSession = z.infer<typeof processVoiceCalendarEventSessionSchema>
+export type ProcessVoiceCalendarEventTarget = z.infer<typeof processVoiceCalendarEventTargetSchema>
 
 export type VoiceCaptureConfidence = 'high' | 'review' | 'clarify'
 
@@ -1286,17 +1360,27 @@ export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCa
   const contextTaskId = input.get('contextTaskId')
   const contextIdeaId = input.get('contextIdeaId')
   const visibleTaskWindow = input.get('visibleTaskWindow')
+  const visibleCalendarEventWindow = input.get('visibleCalendarEventWindow')
   const followUpTaskAction = input.get('followUpTaskAction')
   const taskEditSessionId = input.get('taskEditSessionId')
   const calendarEventSessionId = input.get('calendarEventSessionId')
 
   let parsedVisibleTaskWindow: unknown = undefined
+  let parsedVisibleCalendarEventWindow: unknown = undefined
 
   if (typeof visibleTaskWindow === 'string' && visibleTaskWindow) {
     try {
       parsedVisibleTaskWindow = JSON.parse(visibleTaskWindow)
     } catch {
       throw new Error('Invalid visibleTaskWindow JSON.')
+    }
+  }
+
+  if (typeof visibleCalendarEventWindow === 'string' && visibleCalendarEventWindow) {
+    try {
+      parsedVisibleCalendarEventWindow = JSON.parse(visibleCalendarEventWindow)
+    } catch {
+      throw new Error('Invalid visibleCalendarEventWindow JSON.')
     }
   }
 
@@ -1310,6 +1394,7 @@ export function parseProcessVoiceCaptureFormData(input: unknown): ProcessVoiceCa
     contextTaskId: typeof contextTaskId === 'string' && contextTaskId ? contextTaskId : undefined,
     contextIdeaId: typeof contextIdeaId === 'string' && contextIdeaId ? contextIdeaId : undefined,
     visibleTaskWindow: parsedVisibleTaskWindow,
+    visibleCalendarEventWindow: parsedVisibleCalendarEventWindow,
     followUpTaskAction:
       typeof followUpTaskAction === 'string' && followUpTaskAction ? followUpTaskAction : undefined,
     taskEditSessionId:

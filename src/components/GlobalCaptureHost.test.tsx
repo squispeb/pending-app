@@ -2,7 +2,10 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import {
   CalendarEventSummaryCard,
+  CalendarEventTargetSummaryCard,
+  CalendarEventChangesSummaryCard,
   SelectedTaskSummaryCard,
+  VoiceCalendarEventConfirmationPanel,
   VoiceCalendarClarifyPanel,
   VoiceTaskActionConfirmationPanel,
   VoiceTaskClarifyPanel,
@@ -398,6 +401,132 @@ describe('GlobalCaptureHost voice panels', () => {
     expect(markup).toContain('May 3, 2026 at 9:30 AM until 10:00 AM')
     expect(markup).toContain('Room A')
     expect(markup).toContain('Work')
+  })
+
+  it('renders the target calendar event summary', () => {
+    const markup = renderToStaticMarkup(
+      <CalendarEventTargetSummaryCard
+        target={{
+          calendarEventId: 'evt-1',
+          summary: 'Team sync',
+          startsAt: '2026-05-03T09:30:00.000Z',
+          endsAt: '2026-05-03T10:00:00.000Z',
+          allDay: false,
+          calendarName: 'Work',
+          primaryFlag: false,
+          source: 'visible_window',
+        }}
+      />,
+    )
+
+    expect(markup).toContain('Target event')
+    expect(markup).toContain('Team sync')
+    expect(markup).toContain('Work')
+  })
+
+  it('renders proposed calendar event changes structurally', () => {
+    const markup = renderToStaticMarkup(
+      <CalendarEventChangesSummaryCard
+        event={{
+          operation: 'edit_calendar_event',
+          target: {
+            calendarEventId: 'evt-1',
+            summary: 'Team sync',
+            startsAt: '2026-05-03T09:30:00.000Z',
+            endsAt: '2026-05-03T10:00:00.000Z',
+            allDay: false,
+            calendarName: 'Work',
+            primaryFlag: false,
+            source: 'visible_window',
+          },
+          title: 'Team sync with design',
+          description: 'Updated agenda',
+          startDate: '2026-05-04',
+          startTime: '10:00',
+          endDate: '2026-05-04',
+          endTime: '10:30',
+          location: 'Room B',
+          allDay: false,
+          targetCalendarName: 'Work',
+        }}
+      />,
+    )
+
+    expect(markup).toContain('Proposed changes')
+    expect(markup).toContain('Title')
+    expect(markup).toContain('Team sync with design')
+    expect(markup).toContain('Start date')
+    expect(markup).toContain('May 4, 2026')
+    expect(markup).toContain('Room B')
+  })
+
+  it('renders calendar confirmation for edit with target and proposed changes', () => {
+    const markup = renderToStaticMarkup(
+      <VoiceCalendarEventConfirmationPanel
+        transcript="Move the team sync to tomorrow at 10"
+        message='I found "Team sync" on Work. Confirm if you want me to edit it.'
+        confirmLabel="Apply changes"
+        isConfirming={false}
+        error={null}
+        event={{
+          operation: 'edit_calendar_event',
+          target: {
+            calendarEventId: 'evt-1',
+            summary: 'Team sync',
+            startsAt: '2026-05-03T09:30:00.000Z',
+            endsAt: '2026-05-03T10:00:00.000Z',
+            allDay: false,
+            calendarName: 'Work',
+            primaryFlag: false,
+            source: 'visible_window',
+          },
+          title: 'Team sync with design',
+          startDate: '2026-05-04',
+          startTime: '10:00',
+          endDate: '2026-05-04',
+          endTime: '10:30',
+          targetCalendarName: 'Work',
+        }}
+        onConfirm={(event) => event.preventDefault()}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Review these event edits')
+    expect(markup).toContain('Target event')
+    expect(markup).toContain('Proposed changes')
+    expect(markup).toContain('Apply changes')
+  })
+
+  it('renders destructive cancel confirmation copy', () => {
+    const markup = renderToStaticMarkup(
+      <VoiceCalendarEventConfirmationPanel
+        transcript="Cancel my dentist appointment"
+        message='I found "Dentist appointment" on Personal. Confirm if you want me to cancel it.'
+        confirmLabel="Cancel event"
+        isConfirming={false}
+        error={null}
+        event={{
+          operation: 'cancel_calendar_event',
+          target: {
+            calendarEventId: 'evt-2',
+            summary: 'Dentist appointment',
+            startsAt: '2026-05-05T15:00:00.000Z',
+            endsAt: '2026-05-05T16:00:00.000Z',
+            allDay: false,
+            calendarName: 'Personal',
+            primaryFlag: false,
+            source: 'visible_window',
+          },
+        }}
+        onConfirm={(event) => event.preventDefault()}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Cancel this calendar event')
+    expect(markup).toContain('This will permanently cancel the selected calendar event.')
+    expect(markup).toContain('Cancel event')
   })
 
   it('renders the calendar clarify panel with event context and voice reply affordance', () => {
