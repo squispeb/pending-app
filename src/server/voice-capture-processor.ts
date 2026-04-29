@@ -506,37 +506,6 @@ function buildCalendarEventTargetClarification(
   }
 }
 
-function toConfirmationCalendarEvent(
-  target: ProcessVoiceCalendarEventTarget,
-  changes?: Partial<{
-    title: string | null
-    description: string | null
-    startDate: string | null
-    startTime: string | null
-    endDate: string | null
-    endTime: string | null
-    location: string | null
-    allDay: boolean | null
-    targetCalendarId: string | null
-    targetCalendarName: string | null
-  }>,
-) {
-  return {
-    operation: 'edit_calendar_event' as const,
-    target,
-    ...(changes?.title !== undefined ? { title: changes.title } : {}),
-    ...(changes?.description !== undefined ? { description: changes.description ?? undefined } : {}),
-    ...(changes?.startDate !== undefined ? { startDate: changes.startDate ?? undefined } : {}),
-    ...(changes?.startTime !== undefined ? { startTime: changes.startTime ?? undefined } : {}),
-    ...(changes?.endDate !== undefined ? { endDate: changes.endDate ?? undefined } : {}),
-    ...(changes?.endTime !== undefined ? { endTime: changes.endTime ?? undefined } : {}),
-    ...(changes?.location !== undefined ? { location: changes.location ?? undefined } : {}),
-    ...(changes?.allDay !== undefined ? { allDay: changes.allDay ?? undefined } : {}),
-    ...(changes?.targetCalendarId !== undefined ? { targetCalendarId: changes.targetCalendarId ?? undefined } : {}),
-    ...(changes?.targetCalendarName !== undefined ? { targetCalendarName: changes.targetCalendarName ?? undefined } : {}),
-  }
-}
-
 function getLatestAssistantSessionSummary(
   session: Awaited<ReturnType<AssistantSessionService['getSession']>>,
   type: 'assistant_question' | 'assistant_synthesis' | 'assistant_failed',
@@ -1174,6 +1143,12 @@ export function createVoiceCaptureProcessor(
       }
 
       if (workflow.phase === 'ready_to_confirm' || (workflow.phase === 'completed' && workflow.result?.applyPayload)) {
+        const calendarEvent = {
+          operation: voiceIntent.kind,
+          target: calendarEventResolution.target,
+          ...(workflow.phase === 'completed' && workflow.result?.applyPayload ? workflow.result.applyPayload.edits : {}),
+        }
+
         return {
           ok: true,
           outcome: 'calendar_event_confirmation',
@@ -1185,10 +1160,7 @@ export function createVoiceCaptureProcessor(
             ?? (voiceIntent.kind === 'cancel_calendar_event'
               ? `I found "${calendarEventResolution.target.summary}" on ${calendarEventResolution.target.calendarName}. Confirm if you want me to cancel it.`
               : `I found "${calendarEventResolution.target.summary}" on ${calendarEventResolution.target.calendarName}. Confirm if you want me to edit it.`),
-          calendarEvent: {
-            operation: voiceIntent.kind,
-            target: calendarEventResolution.target,
-          },
+          calendarEvent,
           calendarEventSession: {
             sessionId: settledSession.sessionId,
           },

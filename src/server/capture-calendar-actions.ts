@@ -47,6 +47,10 @@ function addDaysToIsoDate(value: string, days: number) {
   return next.toISOString().slice(0, 10)
 }
 
+function getAllDayEndDate(startDate: string, endDate?: string | null) {
+  return addDaysToIsoDate(endDate ?? startDate, 1)
+}
+
 export function createCaptureCalendarActions({
   database,
   calendarService,
@@ -123,6 +127,7 @@ export function createCaptureCalendarActions({
       }
 
       if (event.operation === 'edit_calendar_event') {
+        const isAllDay = event.allDay || !event.startTime
         return calendarService.updateCalendarEvent(
           user.id,
           existingEvent.calendarId,
@@ -131,11 +136,11 @@ export function createCaptureCalendarActions({
             summary: event.title ?? event.target.summary,
             description: event.description ?? null,
             location: event.location ?? null,
-            start: event.allDay || !event.startTime
+            start: isAllDay
               ? { date: event.startDate }
               : { dateTime: `${event.startDate}T${event.startTime}:00`, timeZone: existingEvent.eventTimezone ?? undefined },
-            end: event.allDay || !event.startTime
-              ? { date: event.endDate ?? event.startDate }
+            end: isAllDay
+              ? { date: getAllDayEndDate(event.startDate, event.endDate) }
               : {
                   dateTime: `${event.endDate ?? event.startDate}T${event.endTime ?? event.startTime}:00`,
                   timeZone: existingEvent.eventTimezone ?? undefined,

@@ -106,6 +106,36 @@ describe('capture server confirm handlers', () => {
     expect(result).toBeUndefined()
   })
 
+  it('uses an exclusive next-day end for all-day edit confirmations', async () => {
+    db.query.calendarEvents.findFirst.mockResolvedValue({
+      calendarId: 'calendar-1',
+      eventTimezone: 'America/Lima',
+      googleEventId: 'google-event-1',
+    })
+
+    await captureCalendarActions.confirmVoiceCalendarEventAction({
+      calendarEvent: {
+        operation: 'edit_calendar_event',
+        target: {
+          calendarEventId: 'event-1',
+          summary: 'All-day event',
+        },
+        title: 'All-day event',
+        startDate: '2026-04-08',
+        endDate: '2026-04-08',
+        allDay: true,
+      },
+    })
+
+    expect(updateCalendarEvent).toHaveBeenCalledWith('user-1', 'calendar-1', 'google-event-1', {
+      summary: 'All-day event',
+      description: null,
+      location: null,
+      start: { date: '2026-04-08' },
+      end: { date: '2026-04-09' },
+    })
+  })
+
   it('confirms a cancel voice calendar event action', async () => {
     db.query.calendarEvents.findFirst.mockResolvedValue({
       calendarId: 'calendar-1',
