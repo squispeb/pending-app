@@ -452,6 +452,13 @@ describe('voice capture processor', () => {
           }
         },
       },
+    }, {
+      async classify() {
+        return {
+          family: 'task_action',
+          kind: 'task_status',
+        }
+      },
     })
 
     const result = await processor.processVoiceCapture({
@@ -2162,6 +2169,9 @@ describe('voice capture processor', () => {
         async resolveCalendarEventCreateSession() {
           throw new Error('Should not be called')
         },
+        async resolveCalendarEventTarget() {
+          throw new Error('Should not be called')
+        },
         async submitSessionTurn() {
           throw new Error('Should not be called')
         },
@@ -2182,6 +2192,9 @@ describe('voice capture processor', () => {
               },
             ],
           }
+        },
+        async getCalendarEventWindow() {
+          throw new Error('Should not be called')
         },
       },
     }, {
@@ -2237,6 +2250,9 @@ describe('voice capture processor', () => {
         async resolveCalendarEventCreateSession() {
           throw new Error('Should not be called')
         },
+        async resolveCalendarEventTarget() {
+          throw new Error('Should not be called')
+        },
         async submitSessionTurn() {
           throw new Error('Should not be called')
         },
@@ -2281,6 +2297,9 @@ describe('voice capture processor', () => {
               },
             ],
           }
+        },
+        async getCalendarEventWindow() {
+          throw new Error('Should not be called')
         },
       },
     }, {
@@ -2336,6 +2355,9 @@ describe('voice capture processor', () => {
         async resolveCalendarEventCreateSession() {
           throw new Error('Should not be called')
         },
+        async resolveCalendarEventTarget() {
+          throw new Error('Should not be called')
+        },
         async submitSessionTurn() {
           throw new Error('Should not be called')
         },
@@ -2366,6 +2388,9 @@ describe('voice capture processor', () => {
               },
             ],
           }
+        },
+        async getCalendarEventWindow() {
+          throw new Error('Should not be called')
         },
       },
     }, {
@@ -2399,91 +2424,7 @@ describe('voice capture processor', () => {
     })
   })
 
-  it('resolves a visible calendar event target for edit and keeps the flow in clarification for now', async () => {
-    const processor = createProcessorWithIntentClassifier({
-      transcriptionBroker: {
-        async transcribeAudioUpload() {
-          throw new Error('Should not be called')
-        },
-      },
-      captureService: {
-        async interpretTypedTaskInput() {
-          throw new Error('Should not be called')
-        },
-        async confirmCapturedTask() {
-          throw new Error('Should not be called')
-        },
-        async confirmCapturedHabit() {
-          throw new Error('Should not be called')
-        },
-      },
-      calendarResolver: {
-        async resolveCalendarEventTarget() {
-          return {
-            kind: 'resolved' as const,
-            target: {
-              calendarEventId: 'evt-team-sync',
-              summary: 'Team sync',
-              startsAt: '2026-04-08T15:00:00.000Z',
-              endsAt: '2026-04-08T15:30:00.000Z',
-              allDay: false,
-              calendarName: 'Side Projects',
-              primaryFlag: false,
-              source: 'visible_window' as const,
-            },
-          }
-        },
-      },
-    }, {
-      async classify() {
-        return {
-          family: 'calendar_action',
-          kind: 'edit_calendar_event',
-        }
-      },
-    })
-
-    const result = await processor.processVoiceTranscript({
-      transcript: 'Edit the team sync on Side Projects',
-      language: 'en',
-      currentDate: '2026-04-08',
-      timezone: 'America/Lima',
-      visibleCalendarEventWindow: [
-        {
-          calendarEventId: 'evt-team-sync',
-          summary: 'Team sync',
-          startsAt: '2026-04-08T15:00:00.000Z',
-          endsAt: '2026-04-08T15:30:00.000Z',
-          allDay: false,
-          calendarName: 'Side Projects',
-          primaryFlag: false,
-        },
-      ],
-    })
-
-    expect(result).toEqual({
-      ok: true,
-      outcome: 'calendar_event_confirmation',
-      transcript: 'Edit the team sync on Side Projects',
-      language: 'en',
-      message: 'I found "Team sync" on Side Projects. Confirm if you want me to edit it.',
-      calendarEvent: {
-        operation: 'edit_calendar_event',
-        target: {
-          calendarEventId: 'evt-team-sync',
-          summary: 'Team sync',
-          startsAt: '2026-04-08T15:00:00.000Z',
-          endsAt: '2026-04-08T15:30:00.000Z',
-          allDay: false,
-          calendarName: 'Side Projects',
-          primaryFlag: false,
-          source: 'visible_window',
-        },
-      },
-    })
-  })
-
-  it('routes a resolved visible calendar event edit request through assistant session resolution', async () => {
+  it('resolves a visible calendar event target for edit and asks what to change first', async () => {
     const processor = createProcessorWithIntentClassifier({
       transcriptionBroker: {
         async transcribeAudioUpload() {
@@ -2516,21 +2457,182 @@ describe('voice capture processor', () => {
             },
             draft: {},
           })
+          return { sessionId: 'session-calendar-edit-visible-1' }
+        },
+        async resolveCalendarEventCancelSession() {
+          throw new Error('Should not be called')
+        },
+        async resolveCalendarEventTarget() {
+          return {
+            kind: 'resolved' as const,
+            target: {
+              eventId: 'evt-team-sync',
+              summary: 'Team sync',
+              startsAt: '2026-04-08T15:00:00.000Z',
+              endsAt: '2026-04-08T15:30:00.000Z',
+              allDay: false,
+              calendarName: 'Side Projects',
+              primaryFlag: false,
+              source: 'visible_window' as const,
+            },
+          }
+        },
+        async submitSessionTurn() {
+          throw new Error('Should not be called')
+        },
+        async getSession() {
+          return {
+            sessionId: 'session-calendar-edit-visible-1',
+            activeTurn: null,
+            lastTurn: {
+              turnId: 'turn-calendar-edit-visible-1',
+              state: 'completed' as const,
+            },
+            workflow: {
+              kind: 'calendar_event' as const,
+              operation: 'edit' as const,
+              phase: 'ready_to_confirm' as const,
+              currentDate: '2026-04-08',
+              timezone: 'America/Lima',
+              target: {
+                eventId: 'evt-team-sync',
+                summary: 'Team sync',
+                calendarName: 'Side Projects',
+              },
+              draft: {},
+              requestedFields: [],
+              missingFields: [],
+              activeField: null,
+              fieldAttempts: { title: 0, description: 0, startDate: 0, startTime: 0, endDate: 0, endTime: 0, location: 0 },
+              changes: {},
+              result: null,
+            },
+            visibleEvents: [
+              {
+                type: 'assistant_question' as const,
+                summary: 'I found "Team sync" on Side Projects. Confirm if you want me to edit it.',
+              },
+            ],
+          }
+        },
+      },
+      calendarResolver: {
+        async resolveCalendarTarget() {
+          throw new Error('Should not be called')
+        },
+        async getCalendarEventWindow() {
+          throw new Error('Should not be called')
+        },
+      },
+    }, {
+      async classify() {
+        return {
+          family: 'calendar_action',
+          kind: 'edit_calendar_event',
+        }
+      },
+    })
+
+    const result = await processor.processVoiceTranscript({
+      transcript: 'Edit the team sync on Side Projects',
+      language: 'en',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+      visibleCalendarEventWindow: [
+        {
+          calendarEventId: 'evt-team-sync',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T15:00:00.000Z',
+          endsAt: '2026-04-08T15:30:00.000Z',
+          allDay: false,
+          calendarName: 'Side Projects',
+          primaryFlag: false,
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'Edit the team sync on Side Projects',
+      language: 'en',
+      message: 'I found "Team sync" on Side Projects. What would you like to change?',
+      questions: [],
+      draft: null,
+      calendarEvent: {
+        operation: 'edit_calendar_event',
+        target: {
+          calendarEventId: 'evt-team-sync',
+          summary: 'Team sync',
+          startsAt: '2026-04-08T15:00:00.000Z',
+          endsAt: '2026-04-08T15:30:00.000Z',
+          allDay: false,
+          calendarName: 'Side Projects',
+          primaryFlag: false,
+          source: 'visible_window',
+        },
+      },
+      calendarEventSession: {
+        sessionId: 'session-calendar-edit-visible-1',
+      },
+    })
+  })
+
+  it('routes a resolved visible calendar event edit request into a clarify-first edit session', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          throw new Error('Should not be called')
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      assistantSessionService: {
+        async resolveCalendarEventCreateSession() {
+          throw new Error('Should not be called')
+        },
+        async resolveCalendarEventTarget() {
+          return {
+            kind: 'resolved' as const,
+            target: {
+              eventId: 'evt-team-sync',
+              summary: 'Team sync',
+              startsAt: '2026-04-08T15:00:00.000Z',
+              endsAt: '2026-04-08T15:30:00.000Z',
+              allDay: false,
+              calendarName: 'Side Projects',
+              primaryFlag: false,
+              source: 'visible_window' as const,
+            },
+          }
+        },
+        async resolveCalendarEventEditSession(input) {
+          expect(input).toEqual({
+            currentDate: '2026-04-08',
+            timezone: 'America/Lima',
+            target: {
+              eventId: 'evt-team-sync',
+              summary: 'Team sync',
+              calendarName: 'Side Projects',
+            },
+            draft: {},
+          })
           return { sessionId: 'session-calendar-edit-1' }
         },
         async resolveCalendarEventCancelSession() {
           throw new Error('Should not be called')
         },
-        async submitSessionTurn(input) {
-          expect(input.sessionId).toBe('session-calendar-edit-1')
-          expect(input.context).toEqual({
-            target: {
-              kind: 'calendar_event',
-              id: 'evt-team-sync',
-              label: 'Team sync',
-            },
-          })
-          return { turnId: 'turn-calendar-edit-1' }
+        async submitSessionTurn() {
+          throw new Error('Should not be called')
         },
         async getSession() {
           return {
@@ -2569,20 +2671,11 @@ describe('voice capture processor', () => {
         },
       },
       calendarResolver: {
-        async resolveCalendarEventTarget() {
-          return {
-            kind: 'resolved' as const,
-            target: {
-              calendarEventId: 'evt-team-sync',
-              summary: 'Team sync',
-              startsAt: '2026-04-08T15:00:00.000Z',
-              endsAt: '2026-04-08T15:30:00.000Z',
-              allDay: false,
-              calendarName: 'Side Projects',
-              primaryFlag: false,
-              source: 'visible_window' as const,
-            },
-          }
+        async resolveCalendarTarget() {
+          throw new Error('Should not be called')
+        },
+        async getCalendarEventWindow() {
+          throw new Error('Should not be called')
         },
       },
     }, {
@@ -2614,10 +2707,12 @@ describe('voice capture processor', () => {
 
     expect(result).toEqual({
       ok: true,
-      outcome: 'calendar_event_confirmation',
+      outcome: 'clarify',
       transcript: 'Edit the team sync on Side Projects',
       language: 'en',
-      message: 'I found "Team sync" on Side Projects. Confirm if you want me to edit it.',
+      message: 'I found "Team sync" on Side Projects. What would you like to change?',
+      questions: [],
+      draft: null,
       calendarEvent: {
         operation: 'edit_calendar_event',
         target: {
@@ -2633,6 +2728,177 @@ describe('voice capture processor', () => {
       },
       calendarEventSession: {
         sessionId: 'session-calendar-edit-1',
+      },
+    })
+  })
+
+  it('retrieves calendar events server-side for edit requests when no visible window is provided', async () => {
+    const processor = createProcessorWithIntentClassifier({
+      transcriptionBroker: {
+        async transcribeAudioUpload() {
+          throw new Error('Should not be called')
+        },
+      },
+      captureService: {
+        async interpretTypedTaskInput() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedTask() {
+          throw new Error('Should not be called')
+        },
+        async confirmCapturedHabit() {
+          throw new Error('Should not be called')
+        },
+      },
+      assistantSessionService: {
+        async resolveCalendarEventCreateSession() {
+          throw new Error('Should not be called')
+        },
+        async resolveCalendarEventEditSession(input) {
+          expect(input).toEqual({
+            currentDate: '2026-04-08',
+            timezone: 'America/Lima',
+            target: {
+              eventId: 'evt-lunch',
+              summary: 'Lunch',
+              calendarName: 'Primary',
+            },
+            draft: {},
+          })
+          return { sessionId: 'session-calendar-edit-2' }
+        },
+        async resolveCalendarEventCancelSession() {
+          throw new Error('Should not be called')
+        },
+        async resolveCalendarEventTarget(input) {
+          expect(input.visibleCalendarEventWindow).toEqual([
+            {
+              calendarEventId: 'evt-lunch',
+              summary: 'Lunch',
+              startsAt: '2026-04-08T12:00:00.000Z',
+              endsAt: '2026-04-08T13:00:00.000Z',
+              allDay: false,
+              calendarName: 'Primary',
+              primaryFlag: true,
+            },
+          ])
+
+          return {
+            kind: 'resolved' as const,
+            target: {
+              eventId: 'evt-lunch',
+              summary: 'Lunch',
+              startsAt: '2026-04-08T12:00:00.000Z',
+              endsAt: '2026-04-08T13:00:00.000Z',
+              allDay: false,
+              calendarName: 'Primary',
+              primaryFlag: true,
+              source: 'visible_window' as const,
+            },
+          }
+        },
+        async submitSessionTurn() {
+          throw new Error('Should not be called')
+        },
+        async getSession() {
+          return {
+            sessionId: 'session-calendar-edit-2',
+            activeTurn: null,
+            lastTurn: {
+              turnId: 'turn-calendar-edit-2',
+              state: 'completed' as const,
+            },
+            workflow: {
+              kind: 'calendar_event' as const,
+              operation: 'edit' as const,
+              phase: 'ready_to_confirm' as const,
+              currentDate: '2026-04-08',
+              timezone: 'America/Lima',
+              target: {
+                eventId: 'evt-lunch',
+                summary: 'Lunch',
+                calendarName: 'Primary',
+              },
+              draft: {},
+              requestedFields: [],
+              missingFields: [],
+              activeField: null,
+              fieldAttempts: { title: 0, description: 0, startDate: 0, startTime: 0, endDate: 0, endTime: 0, location: 0 },
+              changes: {},
+              result: null,
+            },
+            visibleEvents: [
+              {
+                type: 'assistant_question' as const,
+                summary: 'I found "Lunch" on Primary. Confirm if you want me to edit it.',
+              },
+            ],
+          }
+        },
+      },
+      calendarResolver: {
+        async resolveCalendarTarget() {
+          throw new Error('Should not be called')
+        },
+        async getCalendarEventWindow(input) {
+          expect(input).toEqual({
+            transcript: 'I want to edit the event that is happening today at lunch twelve pm.',
+            currentDate: '2026-04-08',
+            timezone: 'America/Lima',
+          })
+
+          return [
+            {
+              calendarEventId: 'evt-lunch',
+              summary: 'Lunch',
+              startsAt: '2026-04-08T12:00:00.000Z',
+              endsAt: '2026-04-08T13:00:00.000Z',
+              allDay: false,
+              calendarName: 'Primary',
+              primaryFlag: true,
+            },
+          ]
+        },
+      },
+    }, {
+      async classify() {
+        return {
+          family: 'calendar_action',
+          kind: 'edit_calendar_event',
+        }
+      },
+    })
+
+    const result = await processor.processVoiceTranscript({
+      transcript: 'I want to edit the event that is happening today at lunch twelve pm.',
+      language: 'unknown',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: 'clarify',
+      transcript: 'I want to edit the event that is happening today at lunch twelve pm.',
+      language: 'unknown',
+      message: 'I found "Lunch" on Primary. What would you like to change?',
+      questions: [],
+      draft: null,
+      calendarEvent: {
+        operation: 'edit_calendar_event',
+        target: {
+          calendarEventId: 'evt-lunch',
+          summary: 'Lunch',
+          startsAt: '2026-04-08T12:00:00.000Z',
+          endsAt: '2026-04-08T13:00:00.000Z',
+          allDay: false,
+          calendarName: 'Primary',
+          primaryFlag: true,
+          source: 'visible_window',
+        },
+      },
+      calendarEventSession: {
+        sessionId: 'session-calendar-edit-2',
       },
     })
   })
@@ -2655,13 +2921,31 @@ describe('voice capture processor', () => {
           throw new Error('Should not be called')
         },
       },
-      calendarResolver: {
+      assistantSessionService: {
+        async resolveCalendarEventCreateSession() {
+          throw new Error('Should not be called')
+        },
+        async resolveCalendarEventEditSession() {
+          throw new Error('Should not be called')
+        },
+        async resolveCalendarEventCancelSession(input) {
+          expect(input).toEqual({
+            currentDate: '2026-04-08',
+            timezone: 'America/Lima',
+            target: {
+              eventId: 'evt-retro',
+              summary: 'Retro',
+              calendarName: 'Primary',
+            },
+          })
+          return { sessionId: 'session-calendar-cancel-visible-1' }
+        },
         async resolveCalendarEventTarget() {
           return {
             kind: 'ambiguous' as const,
             candidates: [
               {
-                calendarEventId: 'evt-team-sync-a',
+                eventId: 'evt-team-sync-a',
                 summary: 'Team sync',
                 startsAt: '2026-04-08T15:00:00.000Z',
                 endsAt: '2026-04-08T15:30:00.000Z',
@@ -2671,7 +2955,7 @@ describe('voice capture processor', () => {
                 source: 'visible_window' as const,
               },
               {
-                calendarEventId: 'evt-team-sync-b',
+                eventId: 'evt-team-sync-b',
                 summary: 'Team sync',
                 startsAt: '2026-04-08T17:00:00.000Z',
                 endsAt: '2026-04-08T17:30:00.000Z',
@@ -2682,6 +2966,47 @@ describe('voice capture processor', () => {
               },
             ],
           }
+        },
+        async submitSessionTurn(input) {
+          expect(input.sessionId).toBe('session-calendar-cancel-visible-1')
+          return { turnId: 'turn-calendar-cancel-visible-1' }
+        },
+        async getSession() {
+          return {
+            sessionId: 'session-calendar-cancel-visible-1',
+            activeTurn: null,
+            lastTurn: {
+              turnId: 'turn-calendar-cancel-visible-1',
+              state: 'completed' as const,
+            },
+            workflow: {
+              kind: 'calendar_event' as const,
+              operation: 'cancel' as const,
+              phase: 'ready_to_confirm' as const,
+              currentDate: '2026-04-08',
+              timezone: 'America/Lima',
+              target: {
+                eventId: 'evt-retro',
+                summary: 'Retro',
+                calendarName: 'Primary',
+              },
+              result: null,
+            },
+            visibleEvents: [
+              {
+                type: 'assistant_question' as const,
+                summary: 'I found "Retro" on Primary. Confirm if you want me to cancel it.',
+              },
+            ],
+          }
+        },
+      },
+      calendarResolver: {
+        async resolveCalendarTarget() {
+          throw new Error('Should not be called')
+        },
+        async getCalendarEventWindow() {
+          throw new Error('Should not be called')
         },
       },
     }, {
@@ -2774,12 +3099,30 @@ describe('voice capture processor', () => {
           throw new Error('Should not be called')
         },
       },
-      calendarResolver: {
+      assistantSessionService: {
+        async resolveCalendarEventCreateSession() {
+          throw new Error('Should not be called')
+        },
+        async resolveCalendarEventEditSession() {
+          throw new Error('Should not be called')
+        },
+        async resolveCalendarEventCancelSession(input) {
+          expect(input).toEqual({
+            currentDate: '2026-04-08',
+            timezone: 'America/Lima',
+            target: {
+              eventId: 'evt-retro',
+              summary: 'Retro',
+              calendarName: 'Primary',
+            },
+          })
+          return { sessionId: 'session-calendar-cancel-1' }
+        },
         async resolveCalendarEventTarget() {
           return {
             kind: 'resolved' as const,
             target: {
-              calendarEventId: 'evt-retro',
+              eventId: 'evt-retro',
               summary: 'Retro',
               startsAt: '2026-04-08T20:00:00.000Z',
               endsAt: '2026-04-08T21:00:00.000Z',
@@ -2789,6 +3132,60 @@ describe('voice capture processor', () => {
               source: 'visible_window' as const,
             },
           }
+        },
+        async submitSessionTurn(input) {
+          expect(input.sessionId).toBe('session-calendar-cancel-1')
+          expect(input.context).toEqual({
+            target: {
+              kind: 'calendar_event',
+              id: 'evt-retro',
+              label: 'Retro',
+            },
+          })
+          return { turnId: 'turn-calendar-cancel-1' }
+        },
+        async getSession() {
+          return {
+            sessionId: 'session-calendar-cancel-1',
+            activeTurn: null,
+            lastTurn: {
+              turnId: 'turn-calendar-cancel-1',
+              state: 'completed' as const,
+            },
+            workflow: {
+              kind: 'calendar_event' as const,
+              operation: 'cancel' as const,
+              phase: 'ready_to_confirm' as const,
+              currentDate: '2026-04-08',
+              timezone: 'America/Lima',
+              target: {
+                eventId: 'evt-retro',
+                summary: 'Retro',
+                calendarName: 'Primary',
+              },
+              draft: {},
+              requestedFields: [],
+              missingFields: [],
+              activeField: null,
+              fieldAttempts: { title: 0, description: 0, startDate: 0, startTime: 0, endDate: 0, endTime: 0, location: 0 },
+              changes: {},
+              result: null,
+            },
+            visibleEvents: [
+              {
+                type: 'assistant_question' as const,
+                summary: 'I found "Retro" on Primary. Confirm if you want me to cancel it.',
+              },
+            ],
+          }
+        },
+      },
+      calendarResolver: {
+        async resolveCalendarTarget() {
+          throw new Error('Should not be called')
+        },
+        async getCalendarEventWindow() {
+          throw new Error('Should not be called')
         },
       },
     }, {
@@ -2836,6 +3233,9 @@ describe('voice capture processor', () => {
           primaryFlag: true,
           source: 'visible_window',
         },
+      },
+      calendarEventSession: {
+        sessionId: 'session-calendar-cancel-1',
       },
     })
   })

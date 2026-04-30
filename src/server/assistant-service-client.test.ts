@@ -273,6 +273,66 @@ describe('assistant service client', () => {
     expect(result.workflow && 'operation' in result.workflow ? result.workflow.operation : null).toBe('cancel')
   })
 
+  it('resolves a visible calendar event target without sending auth headers in the body', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      kind: 'resolved',
+      target: {
+        eventId: 'evt-1',
+        summary: 'Team sync',
+        startsAt: '2026-04-25T15:00:00.000Z',
+        endsAt: '2026-04-25T15:30:00.000Z',
+        allDay: false,
+        calendarName: 'Primary',
+        primaryFlag: true,
+        source: 'visible_window',
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+
+    const { resolveAssistantCalendarEventTarget } = await import('./assistant-service-client')
+    const result = await resolveAssistantCalendarEventTarget(
+      {
+        authHeaders: { authorization: 'Bearer test-session-token' },
+        transcript: 'Edit the team sync on Primary',
+        transcriptLanguage: 'en',
+        currentDate: '2026-04-25',
+        timezone: 'America/Lima',
+        visibleCalendarEventWindow: [
+          {
+            eventId: 'evt-1',
+            summary: 'Team sync',
+            startsAt: '2026-04-25T15:00:00.000Z',
+            endsAt: '2026-04-25T15:30:00.000Z',
+            allDay: false,
+            calendarName: 'Primary',
+            primaryFlag: true,
+          },
+        ],
+      },
+      { fetchImpl: fetchMock as unknown as typeof fetch, baseUrl: 'https://assistant.example' },
+    )
+
+    expect(result.kind).toBe('resolved')
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://assistant.example/sessions/resolve-calendar-event-target')
+    expect(JSON.parse(String(init?.body))).toEqual({
+      transcript: 'Edit the team sync on Primary',
+      transcriptLanguage: 'en',
+      currentDate: '2026-04-25',
+      timezone: 'America/Lima',
+      visibleCalendarEventWindow: [
+        {
+          eventId: 'evt-1',
+          summary: 'Team sync',
+          startsAt: '2026-04-25T15:00:00.000Z',
+          endsAt: '2026-04-25T15:30:00.000Z',
+          allDay: false,
+          calendarName: 'Primary',
+          primaryFlag: true,
+        },
+      ],
+    })
+  })
+
   it('submits calendar session turn patches with validated target context', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       ok: true,

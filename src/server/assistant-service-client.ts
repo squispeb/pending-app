@@ -92,6 +92,40 @@ const calendarEventTargetSchema = z.object({
   calendarName: z.string().min(1).nullable().optional(),
 })
 
+const resolveAssistantCalendarEventTargetResponseSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('resolved'),
+    target: z.object({
+      eventId: z.string().min(1),
+      summary: z.string().min(1),
+      startsAt: z.string().min(1).nullable(),
+      endsAt: z.string().min(1).nullable(),
+      allDay: z.boolean(),
+      calendarName: z.string().min(1),
+      primaryFlag: z.boolean(),
+      source: z.literal('visible_window'),
+    }),
+  }),
+  z.object({
+    kind: z.literal('ambiguous'),
+    candidates: z.array(
+      z.object({
+        eventId: z.string().min(1),
+        summary: z.string().min(1),
+        startsAt: z.string().min(1).nullable(),
+        endsAt: z.string().min(1).nullable(),
+        allDay: z.boolean(),
+        calendarName: z.string().min(1),
+        primaryFlag: z.boolean(),
+        source: z.literal('visible_window'),
+      }),
+    ).min(2).max(3),
+  }),
+  z.object({
+    kind: z.literal('unresolved'),
+  }),
+])
+
 const calendarEventEditWorkflowSchema = z.object({
   kind: z.literal('calendar_event'),
   operation: z.literal('edit'),
@@ -1052,6 +1086,39 @@ export async function resolveAssistantCalendarEventCancelSession(
   })
   const payload = await parseAssistantResponse(response)
   return assistantSessionViewSchema.parse(payload)
+}
+
+export async function resolveAssistantCalendarEventTarget(
+  input: {
+    authHeaders: HeadersInit
+    transcript: string
+    transcriptLanguage: 'es' | 'en' | 'unknown' | null
+    currentDate: string
+    timezone: string
+    visibleCalendarEventWindow: Array<{
+      eventId: string
+      summary: string
+      startsAt: string | null
+      endsAt: string | null
+      allDay: boolean
+      calendarName: string
+      primaryFlag: boolean
+    }>
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+  if (!baseUrl) throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+  const { authHeaders: _authHeaders, ...body } = input
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/sessions/resolve-calendar-event-target`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  })
+  const payload = await parseAssistantResponse(response)
+  return resolveAssistantCalendarEventTargetResponseSchema.parse(payload)
 }
 
 export async function getAssistantSession(

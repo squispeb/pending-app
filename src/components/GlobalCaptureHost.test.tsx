@@ -560,4 +560,43 @@ describe('GlobalCaptureHost voice panels', () => {
     expect(markup).toContain('Reply with voice')
     expect(markup).toContain('Which calendar should I use instead? Available writable calendars: Work, Family.')
   })
+
+  it('renders the calendar clarify panel with target event details for edit flows', () => {
+    const markup = renderToStaticMarkup(
+      <VoiceCalendarClarifyPanel
+        transcript="Quiero editar el evento de las cuatro de la tarde del día de hoy."
+        message='I found "Consulta: Sebastian" on Sebastian (Personal). What would you like to change?'
+        questions={[]}
+        reply=""
+        isSubmitting={false}
+        isRecording={false}
+        error={null}
+        streamingAssistantText={undefined}
+        calendarEvent={{
+          operation: 'edit_calendar_event',
+          target: {
+            calendarEventId: 'evt-3',
+            summary: 'Consulta: Sebastian',
+            startsAt: '2026-04-30T21:00:00.000Z',
+            endsAt: '2026-04-30T22:00:00.000Z',
+            allDay: false,
+            calendarName: 'Sebastian (Personal)',
+            primaryFlag: true,
+            source: 'visible_window',
+          },
+        }}
+        onReplyChange={() => {}}
+        onSubmit={(event) => event.preventDefault()}
+        onStartVoiceReply={() => {}}
+        onEditFromScratch={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('Target event')
+    expect(markup).toContain('Consulta: Sebastian')
+    expect(markup).toContain('Sebastian (Personal)')
+    expect(markup).not.toContain('Primary calendar')
+    expect(markup).not.toContain('all day')
+  })
 })

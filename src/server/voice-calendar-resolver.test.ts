@@ -58,6 +58,32 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
       FOREIGN KEY (google_account_id) REFERENCES google_accounts(id) ON DELETE cascade
     );
   `)
+
+  await db.run(sql`
+    CREATE TABLE calendar_events (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL,
+      calendar_id text NOT NULL,
+      google_event_id text NOT NULL,
+      google_recurring_event_id text,
+      status text DEFAULT 'confirmed' NOT NULL,
+      summary text,
+      description text,
+      location text,
+      starts_at integer NOT NULL,
+      ends_at integer NOT NULL,
+      all_day integer DEFAULT false NOT NULL,
+      event_timezone text,
+      html_link text,
+      organizer_email text,
+      attendee_count integer,
+      synced_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at_remote integer,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+    );
+  `)
 }
 
 describe('voice calendar resolver', () => {
@@ -357,5 +383,69 @@ describe('voice calendar resolver', () => {
         },
       ],
     })
+  })
+
+  it('retrieves same-day calendar event candidates from selected calendars', async () => {
+    await db.insert(schema.calendarEvents).values([
+      {
+        id: 'evt-lunch',
+        userId,
+        calendarId: 'primary',
+        googleEventId: 'google-lunch',
+        summary: 'Lunch',
+        startsAt: new Date('2026-04-08T12:00:00.000Z'),
+        endsAt: new Date('2026-04-08T13:00:00.000Z'),
+        allDay: false,
+      },
+      {
+        id: 'evt-retro',
+        userId,
+        calendarId: 'team-a',
+        googleEventId: 'google-retro',
+        summary: 'Retro',
+        startsAt: new Date('2026-04-08T17:00:00.000Z'),
+        endsAt: new Date('2026-04-08T18:00:00.000Z'),
+        allDay: false,
+      },
+      {
+        id: 'evt-next-day',
+        userId,
+        calendarId: 'primary',
+        googleEventId: 'google-next-day',
+        summary: 'Tomorrow event',
+        startsAt: new Date('2026-04-09T12:00:00.000Z'),
+        endsAt: new Date('2026-04-09T13:00:00.000Z'),
+        allDay: false,
+      },
+    ])
+
+    const resolver = createVoiceCalendarResolver(db)
+    const result = await resolver.getCalendarEventWindow({
+      userId,
+      transcript: 'I want to edit the event that is happening today at twelve pm',
+      currentDate: '2026-04-08',
+      timezone: 'America/Lima',
+    })
+
+    expect(result).toEqual([
+      {
+        calendarEventId: 'evt-lunch',
+        summary: 'Lunch',
+        startsAt: '2026-04-08T12:00:00.000Z',
+        endsAt: '2026-04-08T13:00:00.000Z',
+        allDay: false,
+        calendarName: 'Primary',
+        primaryFlag: true,
+      },
+      {
+        calendarEventId: 'evt-retro',
+        summary: 'Retro',
+        startsAt: '2026-04-08T17:00:00.000Z',
+        endsAt: '2026-04-08T18:00:00.000Z',
+        allDay: false,
+        calendarName: 'Team',
+        primaryFlag: false,
+      },
+    ])
   })
 })

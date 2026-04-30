@@ -60,6 +60,9 @@ export const processVoiceCapture = createServerFn({ method: 'POST' })
       },
       assistantSessionService: {
         resolveCalendarEventCreateSession: (input) => assistantSessionService.resolveCalendarEventCreateSession(input),
+        resolveCalendarEventEditSession: (input) => assistantSessionService.resolveCalendarEventEditSession(input),
+        resolveCalendarEventCancelSession: (input) => assistantSessionService.resolveCalendarEventCancelSession(input),
+        resolveCalendarEventTarget: (input) => assistantSessionService.resolveCalendarEventTarget(input),
         resolveTaskEditSession: (input) => assistantSessionService.resolveTaskEditSession(input),
         getSession: (sessionId) => assistantSessionService.getSession(sessionId),
         submitSessionTurn: (input) => assistantSessionService.submitSessionTurn(input),
@@ -79,6 +82,12 @@ export const processVoiceCapture = createServerFn({ method: 'POST' })
         resolveCalendarTarget: (input) => voiceCalendarResolver.resolveCalendarTarget({
           userId: user.id,
           transcript: input.transcript,
+        }),
+        getCalendarEventWindow: (input) => voiceCalendarResolver.getCalendarEventWindow({
+          userId: user.id,
+          transcript: input.transcript,
+          currentDate: input.currentDate,
+          timezone: input.timezone,
         }),
       },
     })
@@ -99,6 +108,9 @@ export const processVoiceCaptureTranscript = createServerFn({ method: 'POST' })
       },
       assistantSessionService: {
         resolveCalendarEventCreateSession: (input) => assistantSessionService.resolveCalendarEventCreateSession(input),
+        resolveCalendarEventEditSession: (input) => assistantSessionService.resolveCalendarEventEditSession(input),
+        resolveCalendarEventCancelSession: (input) => assistantSessionService.resolveCalendarEventCancelSession(input),
+        resolveCalendarEventTarget: (input) => assistantSessionService.resolveCalendarEventTarget(input),
         resolveTaskEditSession: (input) => assistantSessionService.resolveTaskEditSession(input),
         getSession: (sessionId) => assistantSessionService.getSession(sessionId),
         submitSessionTurn: (input) => assistantSessionService.submitSessionTurn(input),
@@ -118,6 +130,12 @@ export const processVoiceCaptureTranscript = createServerFn({ method: 'POST' })
         resolveCalendarTarget: (input) => voiceCalendarResolver.resolveCalendarTarget({
           userId: user.id,
           transcript: input.transcript,
+        }),
+        getCalendarEventWindow: (input) => voiceCalendarResolver.getCalendarEventWindow({
+          userId: user.id,
+          transcript: input.transcript,
+          currentDate: input.currentDate,
+          timezone: input.timezone,
         }),
       },
     })

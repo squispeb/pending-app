@@ -1,7 +1,7 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, lte } from 'drizzle-orm'
 import type { Database } from '../db/client'
-import { calendarConnections, googleAccounts } from '../db/schema'
-import { tokenizeForCaptureMatching } from '../lib/capture'
+import { calendarConnections, calendarEvents, googleAccounts } from '../db/schema'
+import { inferDueDateFromInput, tokenizeForCaptureMatching } from '../lib/capture'
 
 function normalizeCalendarMatchText(value: string) {
   return value
@@ -51,6 +51,8 @@ type VisibleCalendarEventTarget = {
   primaryFlag: boolean
   source: 'visible_window'
 }
+
+type CalendarEventWindowItem = Omit<VisibleCalendarEventTarget, 'source'>
 
 type VisibleCalendarEventTargetResolution =
   | {
@@ -161,6 +163,14 @@ function normalizeEventMatchText(value: string) {
   return normalizeCalendarMatchText(value)
 }
 
+function inferCalendarEventSearchDate(transcript: string, currentDate: string, timezone: string) {
+  if (/\b(today|hoy)\b/i.test(transcript)) {
+    return currentDate
+  }
+
+  return inferDueDateFromInput(transcript, currentDate, timezone) ?? currentDate
+}
+
 function scoreVisibleCalendarEventTarget(
   transcriptTokens: string[],
   transcript: string,
@@ -210,7 +220,58 @@ export function createVoiceCalendarResolver(database: Database) {
     )
   }
 
+  async function getCalendarEventWindow(input: {
+    userId: string
+    transcript: string
+    currentDate: string
+    timezone: string
+  }): Promise<Array<CalendarEventWindowItem>> {
+    const selectedConnections = await database.query.calendarConnections.findMany({
+      where: and(
+        eq(calendarConnections.userId, input.userId),
+        eq(calendarConnections.isSelected, true),
+      ),
+    })
+
+    const selectedCalendarIds = selectedConnections.map((connection) => connection.calendarId)
+
+    if (!selectedCalendarIds.length) {
+      return []
+    }
+
+    const targetDate = inferCalendarEventSearchDate(input.transcript, input.currentDate, input.timezone)
+    const [year, month, day] = targetDate.split('-').map(Number)
+    const dayStart = new Date(year, month - 1, day, 0, 0, 0, 0)
+    const dayEnd = new Date(year, month - 1, day, 23, 59, 59, 999)
+    const events = await database.query.calendarEvents.findMany({
+      where: and(
+        eq(calendarEvents.userId, input.userId),
+        inArray(calendarEvents.calendarId, selectedCalendarIds),
+        gte(calendarEvents.endsAt, dayStart),
+        lte(calendarEvents.startsAt, dayEnd),
+      ),
+      orderBy: [asc(calendarEvents.startsAt), asc(calendarEvents.endsAt)],
+    })
+
+    const connectionByCalendarId = new Map(
+      selectedConnections.map((connection) => [connection.calendarId, connection]),
+    )
+
+    return events
+      .filter((event) => !!event.summary?.trim())
+      .map((event) => ({
+        calendarEventId: event.id,
+        summary: event.summary!.trim(),
+        startsAt: event.startsAt.toISOString(),
+        endsAt: event.endsAt.toISOString(),
+        allDay: event.allDay,
+        calendarName: connectionByCalendarId.get(event.calendarId)?.calendarName ?? event.calendarId,
+        primaryFlag: connectionByCalendarId.get(event.calendarId)?.primaryFlag ?? false,
+      }))
+  }
+
   return {
+    getCalendarEventWindow,
     async resolveCalendarEventTarget(input: {
       transcript: string
       visibleCalendarEventWindow?: Array<{

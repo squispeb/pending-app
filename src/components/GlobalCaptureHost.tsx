@@ -20,7 +20,7 @@ import {
   getTodayDateString,
   type TaskFormValues,
 } from '../lib/tasks'
-import { formatDisplayDate, formatDisplayDateTime, formatDisplayTime } from '../lib/date-time'
+import { formatDisplayDate, formatDisplayDateTime, formatDisplayTime, useClientTimeZone } from '../lib/date-time'
 import type {
   CandidateType,
   ConfirmVoiceTaskActionKind,
@@ -349,19 +349,21 @@ type CalendarEventTargetSummaryCardProps = {
   eyebrow?: string
 }
 
-function formatCalendarEventTargetWhen(target: NonNullable<ProcessVoiceCaptureCalendarEvent['target']>) {
+function formatCalendarEventTargetWhen(target: NonNullable<ProcessVoiceCaptureCalendarEvent['target']>, timeZone: string) {
   if (!target.startsAt) {
     return target.allDay ? 'All day' : 'Time not specified'
   }
 
   if (target.allDay || !target.endsAt) {
-    return formatDisplayDateTime(target.startsAt)
+    return formatDisplayDateTime(target.startsAt, timeZone)
   }
 
-  return `${formatDisplayDateTime(target.startsAt)} until ${formatDisplayDateTime(target.endsAt)}`
+  return `${formatDisplayDateTime(target.startsAt, timeZone)} until ${formatDisplayDateTime(target.endsAt, timeZone)}`
 }
 
 export function CalendarEventTargetSummaryCard({ target, eyebrow = 'Target event' }: CalendarEventTargetSummaryCardProps) {
+  const timeZone = useClientTimeZone()
+
   return (
     <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3">
       <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
@@ -371,7 +373,7 @@ export function CalendarEventTargetSummaryCard({ target, eyebrow = 'Target event
       <dl className="m-0 mt-2 space-y-2">
         <div className="space-y-1">
           <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">When</dt>
-          <dd className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{formatCalendarEventTargetWhen(target)}</dd>
+          <dd className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{formatCalendarEventTargetWhen(target, timeZone)}</dd>
         </div>
         <div className="space-y-1">
           <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">Calendar</dt>
@@ -562,9 +564,16 @@ export function VoiceCalendarClarifyPanel({
   onEditFromScratch,
   onCancel,
 }: VoiceCalendarClarifyPanelProps) {
+  const isTargetedCalendarAction =
+    calendarEvent?.operation === 'edit_calendar_event' || calendarEvent?.operation === 'cancel_calendar_event'
+
   return (
     <div className="space-y-4">
-      {calendarEvent ? <CalendarEventSummaryCard event={calendarEvent} eyebrow="Event so far" /> : null}
+      {calendarEvent
+        ? isTargetedCalendarAction && calendarEvent.target
+          ? <CalendarEventTargetSummaryCard target={calendarEvent.target} eyebrow="Target event" />
+          : <CalendarEventSummaryCard event={calendarEvent} eyebrow="Event so far" />
+        : null}
 
       <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
         <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
@@ -2034,7 +2043,11 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                   ? captureClarifyTaskActionContext?.action === 'edit_task'
                     ? 'Edit task'
                     : captureClarifyCalendarEvent || captureCalendarEventSessionId
-                      ? 'Create calendar event'
+                      ? captureClarifyCalendarEvent?.operation === 'edit_calendar_event'
+                        ? 'Edit calendar event'
+                        : captureClarifyCalendarEvent?.operation === 'cancel_calendar_event'
+                          ? 'Cancel calendar event'
+                          : 'Create calendar event'
                     : 'Need a bit more detail'
                   : isThreadReplyCapture
                     ? 'Reply to idea'

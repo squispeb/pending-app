@@ -92,6 +92,49 @@ type AssistantSessionService = {
     timezone: string
     target: { eventId: string; summary: string; calendarName?: string | null }
   }) => Promise<{ sessionId: string }>
+  resolveCalendarEventTarget: (input: {
+    transcript: string
+    transcriptLanguage: ProcessVoiceCaptureTextInput['language']
+    currentDate: string
+    timezone: string
+    visibleCalendarEventWindow?: Array<{
+      calendarEventId: string
+      summary: string
+      startsAt: string | null
+      endsAt: string | null
+      allDay: boolean
+      calendarName: string
+      primaryFlag: boolean
+    }> | null
+  }) => Promise<
+    | {
+        kind: 'resolved'
+        target: {
+          eventId: string
+          summary: string
+          startsAt: string | null
+          endsAt: string | null
+          allDay: boolean
+          calendarName: string
+          primaryFlag: boolean
+          source: 'visible_window'
+        }
+      }
+    | {
+        kind: 'ambiguous'
+        candidates: Array<{
+          eventId: string
+          summary: string
+          startsAt: string | null
+          endsAt: string | null
+          allDay: boolean
+          calendarName: string
+          primaryFlag: boolean
+          source: 'visible_window'
+        }>
+      }
+    | { kind: 'unresolved' }
+  >
   resolveTaskEditSession: (input: {
     sessionId?: string
     currentDate: string
@@ -251,10 +294,134 @@ type AssistantSessionService = {
   } | unknown>
 }
 
-type VoiceCalendarResolver = {
-  resolveCalendarTarget: (input: { transcript: string }) => Promise<
+function buildCalendarTargetClarification(
+  resolution:
     | {
-        kind: 'default_primary' | 'resolved_primary'
+        kind: 'ambiguous'
+        candidates: Array<{
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+          isSelected: boolean
+        }>
+        attemptedName: string | null
+        writableCalendars: Array<{
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+        }>
+      }
+    | {
+        kind: 'unavailable'
+        attemptedName: string
+        writableCalendars: Array<{
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+        }>
+      }
+    | {
+        kind: 'read_only'
+        attemptedName: string
+        calendar: {
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+        }
+        writableCalendars: Array<{
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+        }>
+      },
+) {
+  if (resolution.kind === 'ambiguous') {
+    return {
+      message: 'I found more than one matching writable calendar, so I need to know which one you mean.',
+      questions: resolution.candidates.slice(0, 3).map((candidate) => `Did you mean the ${candidate.calendarName} calendar?`),
+    }
+  }
+
+  if (resolution.kind === 'unavailable') {
+    const availableCalendars = resolution.writableCalendars.map((calendar) => calendar.calendarName).join(', ')
+
+    return {
+      message: `I couldn't find a writable calendar named "${resolution.attemptedName}".`,
+      questions: [
+        availableCalendars.length > 0
+          ? `Which calendar should I use instead? Available writable calendars: ${availableCalendars}.`
+          : 'Which calendar should I use instead?',
+      ],
+    }
+  }
+
+  const availableCalendars = resolution.writableCalendars.map((calendar) => calendar.calendarName).join(', ')
+
+  return {
+    message: `The ${resolution.calendar.calendarName} calendar is read-only, so I can't create events there.`,
+    questions: [
+      availableCalendars.length > 0
+        ? `Which writable calendar should I use instead? Available options: ${availableCalendars}.`
+        : 'Which writable calendar should I use instead?',
+    ],
+  }
+}
+
+type ResolvedTask = {
+  id: string
+  title: string
+  status: 'active' | 'completed' | 'archived'
+  notes?: string | null
+  dueDate: string | null
+  dueTime: string | null
+  priority: 'low' | 'medium' | 'high'
+  completedAt: string | null
+  source: 'context_task' | 'context_idea' | 'visible_window'
+}
+
+type VoiceTaskResolver = {
+  resolveTaskTarget: (input: {
+    transcript: string
+    currentDate?: string
+    timezone?: string
+    contextTaskId?: string | null
+    contextIdeaId?: string | null
+    visibleTaskWindow?: Array<{
+      id: string
+      title: string
+      status: 'active' | 'completed' | 'archived'
+      dueDate: string | null
+      dueTime: string | null
+      priority: 'low' | 'medium' | 'high'
+      completedAt: string | null
+    }> | null
+  }) => Promise<
+    | {
+        kind: 'resolved'
+        task: ResolvedTask
+      }
+    | {
+        kind: 'ambiguous'
+        candidates: Array<ResolvedTask>
+      }
+    | { kind: 'unresolved' }
+  >
+}
+
+type VoiceCalendarResolver = {
+  resolveCalendarTarget: (input: {
+    transcript: string
+  }) => Promise<
+    | {
+        kind: 'default_primary'
+        writableCalendars: Array<{
+          calendarId: string
+          calendarName: string
+          primaryFlag: boolean
+        }>
+      }
+    | {
+        kind: 'resolved_primary'
         writableCalendars: Array<{
           calendarId: string
           calendarName: string
@@ -314,89 +481,19 @@ type VoiceCalendarResolver = {
         }>
       }
   >
-  resolveCalendarEventTarget?: (input: {
+  getCalendarEventWindow: (input: {
     transcript: string
-    visibleCalendarEventWindow?: Array<{
-      calendarEventId: string
-      summary: string
-      startsAt: string | null
-      endsAt: string | null
-      allDay: boolean
-      calendarName: string
-      primaryFlag: boolean
-    }> | null
-  }) => Promise<CalendarEventTargetResolution>
-}
-
-function buildCalendarTargetClarification(
-  resolution:
-    | Awaited<ReturnType<VoiceCalendarResolver['resolveCalendarTarget']>>,
-) {
-  if (resolution.kind === 'ambiguous') {
-    return {
-      message: 'I found more than one matching writable calendar, so I need to know which one you mean.',
-      questions: resolution.candidates.slice(0, 3).map((candidate) => `Did you mean the ${candidate.calendarName} calendar?`),
-    }
-  }
-
-  if (resolution.kind === 'read_only') {
-    const writableNames = resolution.writableCalendars.slice(0, 3).map((calendar) => calendar.calendarName)
-    return {
-      message: `The ${resolution.calendar.calendarName} calendar is read-only, so I can't create events there.`,
-      questions: writableNames.length > 0
-        ? [`Which writable calendar should I use instead? Available options: ${writableNames.join(', ')}.`]
-        : ['Which writable calendar should I use instead?'],
-    }
-  }
-
-  const writableNames = resolution.writableCalendars.slice(0, 3).map((calendar) => calendar.calendarName)
-  return {
-    message: `I couldn't find a writable calendar named ${JSON.stringify(resolution.attemptedName)}.`,
-    questions: writableNames.length > 0
-      ? [`Which calendar should I use instead? Available writable calendars: ${writableNames.join(', ')}.`]
-      : ['Which calendar should I use instead?'],
-  }
-}
-
-type ResolvedTask = {
-  id: string
-  title: string
-  status: 'active' | 'completed' | 'archived'
-  notes?: string | null
-  dueDate: string | null
-  dueTime: string | null
-  priority: 'low' | 'medium' | 'high'
-  completedAt: string | null
-  source: 'context_task' | 'context_idea' | 'visible_window'
-}
-
-type VoiceTaskResolver = {
-  resolveTaskTarget: (input: {
-    transcript: string
-    currentDate?: string
-    timezone?: string
-    contextTaskId?: string | null
-    contextIdeaId?: string | null
-    visibleTaskWindow?: Array<{
-      id: string
-      title: string
-      status: 'active' | 'completed' | 'archived'
-      dueDate: string | null
-      dueTime: string | null
-      priority: 'low' | 'medium' | 'high'
-      completedAt: string | null
-    }> | null
-  }) => Promise<
-    | {
-        kind: 'resolved'
-        task: ResolvedTask
-      }
-    | {
-        kind: 'ambiguous'
-        candidates: Array<ResolvedTask>
-      }
-    | { kind: 'unresolved' }
-  >
+    currentDate: string
+    timezone: string
+  }) => Promise<Array<{
+    calendarEventId: string
+    summary: string
+    startsAt: string | null
+    endsAt: string | null
+    allDay: boolean
+    calendarName: string
+    primaryFlag: boolean
+  }>>
 }
 
 type TaskActionTranscriptInput = {
@@ -413,19 +510,6 @@ type TaskActionTranscriptInput = {
   taskEditSessionId?: string | null
   calendarEventSessionId?: string | null
 }
-
-type CalendarEventTargetResolution =
-  | {
-      kind: 'resolved'
-      target: ProcessVoiceCalendarEventTarget
-    }
-  | {
-      kind: 'ambiguous'
-      candidates: Array<ProcessVoiceCalendarEventTarget>
-    }
-  | {
-      kind: 'unresolved'
-    }
 
 function mapCalendarCreateRequestedFields(transcript: string) {
   const normalized = transcript.toLowerCase()
@@ -504,6 +588,43 @@ function buildCalendarEventTargetClarification(
         : 'I could not find a calendar event that matches that request.',
     questions: ['Which calendar event do you mean?'],
   }
+}
+
+function toProcessVoiceCalendarEventTarget(target: {
+  eventId: string
+  summary: string
+  startsAt: string | null
+  endsAt: string | null
+  allDay: boolean
+  calendarName: string
+  primaryFlag: boolean
+  source: 'visible_window'
+}): ProcessVoiceCalendarEventTarget {
+  return {
+    calendarEventId: target.eventId,
+    summary: target.summary,
+    startsAt: target.startsAt,
+    endsAt: target.endsAt,
+    allDay: target.allDay,
+    calendarName: target.calendarName,
+    primaryFlag: target.primaryFlag,
+    source: target.source,
+  }
+}
+
+function toProcessVoiceCalendarEventTargets(
+  targets: Array<{
+    eventId: string
+    summary: string
+    startsAt: string | null
+    endsAt: string | null
+    allDay: boolean
+    calendarName: string
+    primaryFlag: boolean
+    source: 'visible_window'
+  }>,
+) {
+  return targets.map(toProcessVoiceCalendarEventTarget)
 }
 
 function getLatestAssistantSessionSummary(
@@ -1029,10 +1150,24 @@ export function createVoiceCaptureProcessor(
       voiceIntent.family === 'calendar_action' &&
       (voiceIntent.kind === 'edit_calendar_event' || voiceIntent.kind === 'cancel_calendar_event')
     ) {
-      const calendarEventResolution = dependencies.calendarResolver?.resolveCalendarEventTarget
-        ? await dependencies.calendarResolver.resolveCalendarEventTarget({
+      const candidateCalendarEventWindow =
+        data.visibleCalendarEventWindow && data.visibleCalendarEventWindow.length > 0
+          ? data.visibleCalendarEventWindow
+          : dependencies.calendarResolver
+            ? await dependencies.calendarResolver.getCalendarEventWindow({
+                transcript: data.transcript,
+                currentDate: data.currentDate,
+                timezone: data.timezone,
+              })
+            : undefined
+
+      const calendarEventResolution = dependencies.assistantSessionService
+        ? await dependencies.assistantSessionService.resolveCalendarEventTarget({
             transcript: data.transcript,
-            visibleCalendarEventWindow: data.visibleCalendarEventWindow,
+            transcriptLanguage: data.language,
+            currentDate: data.currentDate,
+            timezone: data.timezone,
+            visibleCalendarEventWindow: candidateCalendarEventWindow,
           })
         : { kind: 'unresolved' as const }
 
@@ -1048,7 +1183,9 @@ export function createVoiceCaptureProcessor(
           questions: clarification.questions,
           draft: null,
           calendarEventTargetCandidates:
-            calendarEventResolution.kind === 'ambiguous' ? calendarEventResolution.candidates : undefined,
+            calendarEventResolution.kind === 'ambiguous'
+              ? toProcessVoiceCalendarEventTargets(calendarEventResolution.candidates)
+              : undefined,
         }
       }
 
@@ -1064,7 +1201,7 @@ export function createVoiceCaptureProcessor(
               : `I found "${calendarEventResolution.target.summary}" on ${calendarEventResolution.target.calendarName}. Confirm if you want me to edit it.`,
           calendarEvent: {
             operation: voiceIntent.kind,
-            target: calendarEventResolution.target,
+            target: toProcessVoiceCalendarEventTarget(calendarEventResolution.target),
           },
         }
       }
@@ -1075,7 +1212,7 @@ export function createVoiceCaptureProcessor(
             currentDate: data.currentDate,
             timezone: data.timezone,
             target: {
-              eventId: calendarEventResolution.target.calendarEventId,
+              eventId: calendarEventResolution.target.eventId,
               summary: calendarEventResolution.target.summary,
               calendarName: calendarEventResolution.target.calendarName,
             },
@@ -1085,12 +1222,31 @@ export function createVoiceCaptureProcessor(
             currentDate: data.currentDate,
             timezone: data.timezone,
             target: {
-              eventId: calendarEventResolution.target.calendarEventId,
+              eventId: calendarEventResolution.target.eventId,
               summary: calendarEventResolution.target.summary,
               calendarName: calendarEventResolution.target.calendarName,
             },
             draft: {},
           })
+
+      if (voiceIntent.kind === 'edit_calendar_event' && !data.calendarEventSessionId) {
+        return {
+          ok: true,
+          outcome: 'clarify',
+          transcript: data.transcript,
+          language: data.language,
+          message: `I found "${calendarEventResolution.target.summary}" on ${calendarEventResolution.target.calendarName}. What would you like to change?`,
+          questions: [],
+          draft: null,
+          calendarEvent: {
+            operation: voiceIntent.kind,
+            target: toProcessVoiceCalendarEventTarget(calendarEventResolution.target),
+          },
+          calendarEventSession: {
+            sessionId: session.sessionId,
+          },
+        }
+      }
 
       const submittedTurn = await dependencies.assistantSessionService.submitSessionTurn({
         sessionId: session.sessionId,
@@ -1100,7 +1256,7 @@ export function createVoiceCaptureProcessor(
         context: {
           target: {
             kind: 'calendar_event',
-            id: calendarEventResolution.target.calendarEventId,
+            id: calendarEventResolution.target.eventId,
             label: calendarEventResolution.target.summary,
           },
         },
@@ -1134,7 +1290,7 @@ export function createVoiceCaptureProcessor(
           draft: null,
           calendarEvent: {
             operation: voiceIntent.kind,
-            target: calendarEventResolution.target,
+            target: toProcessVoiceCalendarEventTarget(calendarEventResolution.target),
           },
           calendarEventSession: {
             sessionId: settledSession.sessionId,
@@ -1145,7 +1301,7 @@ export function createVoiceCaptureProcessor(
       if (workflow.phase === 'ready_to_confirm' || (workflow.phase === 'completed' && workflow.result?.applyPayload)) {
         const calendarEvent = {
           operation: voiceIntent.kind,
-          target: calendarEventResolution.target,
+          target: toProcessVoiceCalendarEventTarget(calendarEventResolution.target),
           ...(workflow.phase === 'completed' && workflow.result?.applyPayload ? workflow.result.applyPayload.edits : {}),
         }
 
@@ -1178,7 +1334,7 @@ export function createVoiceCaptureProcessor(
             : `I found "${calendarEventResolution.target.summary}" on ${calendarEventResolution.target.calendarName}. Confirm if you want me to edit it.`,
         calendarEvent: {
           operation: voiceIntent.kind,
-          target: calendarEventResolution.target,
+          target: toProcessVoiceCalendarEventTarget(calendarEventResolution.target),
         },
       }
     }

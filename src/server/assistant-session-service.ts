@@ -4,6 +4,7 @@ import {
   resolveAssistantCalendarEventCreateSession,
   resolveAssistantCalendarEventCancelSession,
   resolveAssistantCalendarEventEditSession,
+  resolveAssistantCalendarEventTarget,
   resolveAssistantTaskEditSession,
   streamAssistantSession,
   submitAssistantSessionTurn,
@@ -155,6 +156,53 @@ export function createAssistantSessionService(database: Database) {
       return resolveAssistantCalendarEventCancelSession(
         {
           ...input,
+          authHeaders,
+        },
+        {
+          fetchImpl: options?.fetchImpl,
+          baseUrl: options?.assistantServiceBaseUrl,
+        },
+      )
+    },
+    async resolveCalendarEventTarget(
+      input: {
+        transcript: string
+        transcriptLanguage: 'es' | 'en' | 'unknown' | null
+        currentDate: string
+        timezone: string
+        visibleCalendarEventWindow?: Array<{
+          calendarEventId: string
+          summary: string
+          startsAt: string | null
+          endsAt: string | null
+          allDay: boolean
+          calendarName: string
+          primaryFlag: boolean
+        }>
+      },
+      options?: SessionOptions,
+    ) {
+      const { authHeaders } = await resolveAuthenticatedPlannerUser(database, {
+        requestHeaders: options?.requestHeaders,
+        fetchImpl: options?.fetchImpl,
+        baseUrl: options?.assistantServiceBaseUrl,
+      })
+
+      return resolveAssistantCalendarEventTarget(
+        {
+          transcript: input.transcript,
+          transcriptLanguage: input.transcriptLanguage,
+          currentDate: input.currentDate,
+          timezone: input.timezone,
+          visibleCalendarEventWindow: (input.visibleCalendarEventWindow ?? []).map((event) => ({
+            eventId: event.calendarEventId,
+            summary: event.summary,
+            startsAt: event.startsAt,
+            endsAt: event.endsAt,
+            allDay: event.allDay,
+            calendarName: event.calendarName,
+            primaryFlag: event.primaryFlag,
+          })),
           authHeaders,
         },
         {
