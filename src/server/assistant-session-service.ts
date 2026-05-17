@@ -3,6 +3,7 @@ import {
   getAssistantSession,
   resolveAssistantCalendarEventCreateSession,
   resolveAssistantCalendarEventCancelSession,
+  resolveAssistantCalendarEventDate,
   resolveAssistantCalendarEventEditSession,
   resolveAssistantCalendarEventTarget,
   resolveAssistantTaskEditSession,
@@ -203,6 +204,32 @@ export function createAssistantSessionService(database: Database) {
             calendarName: event.calendarName,
             primaryFlag: event.primaryFlag,
           })),
+          authHeaders,
+        },
+        {
+          fetchImpl: options?.fetchImpl,
+          baseUrl: options?.assistantServiceBaseUrl,
+        },
+      )
+    },
+    async resolveCalendarEventDate(
+      input: {
+        transcript: string
+        transcriptLanguage: 'es' | 'en' | 'unknown' | null
+        currentDate: string
+        timezone: string
+      },
+      options?: SessionOptions,
+    ) {
+      const { authHeaders } = await resolveAuthenticatedPlannerUser(database, {
+        requestHeaders: options?.requestHeaders,
+        fetchImpl: options?.fetchImpl,
+        baseUrl: options?.assistantServiceBaseUrl,
+      })
+
+      return resolveAssistantCalendarEventDate(
+        {
+          ...input,
           authHeaders,
         },
         {

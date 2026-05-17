@@ -63,6 +63,7 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
     CREATE TABLE calendar_events (
       id text PRIMARY KEY NOT NULL,
       user_id text NOT NULL,
+      google_account_id text NOT NULL,
       calendar_id text NOT NULL,
       google_event_id text NOT NULL,
       google_recurring_event_id text,
@@ -390,6 +391,7 @@ describe('voice calendar resolver', () => {
       {
         id: 'evt-lunch',
         userId,
+        googleAccountId: 'google-1',
         calendarId: 'primary',
         googleEventId: 'google-lunch',
         summary: 'Lunch',
@@ -400,6 +402,7 @@ describe('voice calendar resolver', () => {
       {
         id: 'evt-retro',
         userId,
+        googleAccountId: 'google-1',
         calendarId: 'team-a',
         googleEventId: 'google-retro',
         summary: 'Retro',
@@ -410,6 +413,7 @@ describe('voice calendar resolver', () => {
       {
         id: 'evt-next-day',
         userId,
+        googleAccountId: 'google-1',
         calendarId: 'primary',
         googleEventId: 'google-next-day',
         summary: 'Tomorrow event',
@@ -445,6 +449,53 @@ describe('voice calendar resolver', () => {
         allDay: false,
         calendarName: 'Team',
         primaryFlag: false,
+      },
+    ])
+  })
+
+  it('infers an explicit weekday ordinal date when searching for calendar events', async () => {
+    await db.insert(schema.calendarEvents).values([
+      {
+        id: 'evt-lunch-mon-18',
+        userId,
+        googleAccountId: 'google-1',
+        calendarId: 'primary',
+        googleEventId: 'google-lunch-mon-18',
+        summary: 'Lunch',
+        startsAt: new Date('2026-05-18T12:00:00.000Z'),
+        endsAt: new Date('2026-05-18T13:00:00.000Z'),
+        allDay: false,
+      },
+      {
+        id: 'evt-lunch-other',
+        userId,
+        googleAccountId: 'google-1',
+        calendarId: 'primary',
+        googleEventId: 'google-lunch-other',
+        summary: 'Lunch',
+        startsAt: new Date('2026-05-11T12:00:00.000Z'),
+        endsAt: new Date('2026-05-11T13:00:00.000Z'),
+        allDay: false,
+      },
+    ])
+
+    const resolver = createVoiceCalendarResolver(db)
+    const result = await resolver.getCalendarEventWindow({
+      userId,
+      transcript: 'I want to edit the lunch event from Monday 18th',
+      currentDate: '2026-05-10',
+      timezone: 'America/Lima',
+    })
+
+    expect(result).toEqual([
+      {
+        calendarEventId: 'evt-lunch-mon-18',
+        summary: 'Lunch',
+        startsAt: '2026-05-18T12:00:00.000Z',
+        endsAt: '2026-05-18T13:00:00.000Z',
+        allDay: false,
+        calendarName: 'Primary',
+        primaryFlag: true,
       },
     ])
   })

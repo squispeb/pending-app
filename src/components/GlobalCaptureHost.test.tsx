@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   CalendarEventSummaryCard,
   CalendarEventTargetSummaryCard,
@@ -11,19 +11,6 @@ import {
   VoiceTaskClarifyPanel,
   VoiceTaskStatusPanel,
 } from './GlobalCaptureHost'
-
-vi.mock('@tanstack/react-router', async () => {
-  const actual = await vi.importActual<typeof import('@tanstack/react-router')>('@tanstack/react-router')
-
-  return {
-    ...actual,
-    Link: ({ to, children, ...props }: any) => (
-      <a href={typeof to === 'string' ? to : String(to)} {...props}>
-        {children}
-      </a>
-    ),
-  }
-})
 
 // ---------------------------------------------------------------------------
 // SelectedTaskSummaryCard
@@ -527,6 +514,9 @@ describe('GlobalCaptureHost voice panels', () => {
     expect(markup).toContain('Cancel this calendar event')
     expect(markup).toContain('This will permanently cancel the selected calendar event.')
     expect(markup).toContain('Cancel event')
+    // Dismiss button should say "Keep event" not "Cancel" in cancel flow
+    expect(markup).toContain('Keep event')
+    expect(markup).not.toContain('>Cancel<')
   })
 
   it('renders the calendar clarify panel with event context and voice reply affordance', () => {
@@ -559,6 +549,11 @@ describe('GlobalCaptureHost voice panels', () => {
     expect(markup).toContain('Checking calendars...')
     expect(markup).toContain('Reply with voice')
     expect(markup).toContain('Which calendar should I use instead? Available writable calendars: Work, Family.')
+    // Transcript block no longer shown in clarify panel
+    expect(markup).not.toContain('Transcript')
+    expect(markup).not.toContain('Agrega una reunion')
+    // Assistant question appears before the event card (question block comes first in DOM)
+    expect(markup.indexOf('Checking calendars...')).toBeLessThan(markup.indexOf('Event so far'))
   })
 
   it('renders the calendar clarify panel with target event details for edit flows', () => {
@@ -598,5 +593,55 @@ describe('GlobalCaptureHost voice panels', () => {
     expect(markup).toContain('Sebastian (Personal)')
     expect(markup).not.toContain('Primary calendar')
     expect(markup).not.toContain('all day')
+    // Transcript not shown
+    expect(markup).not.toContain('Transcript')
+    expect(markup).not.toContain('Quiero editar')
+    // Assistant question before target card
+    expect(markup.indexOf('What would you like to change?')).toBeLessThan(markup.indexOf('Target event'))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Timezone rendering
+// ---------------------------------------------------------------------------
+describe('CalendarEventTargetSummaryCard timezone', () => {
+  it('renders time using the client timezone (not UTC) on first render', () => {
+    // The hook now initialises synchronously from Intl.DateTimeFormat, so the
+    // rendered output should match the local timezone immediately — no UTC flash.
+    const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    const markup = renderToStaticMarkup(
+      <CalendarEventTargetSummaryCard
+        target={{
+          calendarEventId: 'tz-test',
+          summary: 'TZ test event',
+          startsAt: '2026-05-03T14:00:00.000Z',
+          endsAt: '2026-05-03T15:00:00.000Z',
+          allDay: false,
+          calendarName: 'Work',
+          primaryFlag: false,
+          source: 'visible_window',
+        }}
+      />,
+    )
+
+    // Build the expected formatted time in the local tz so this test is
+    // portable across CI environments with different system timezones.
+    const expectedStart = new Intl.DateTimeFormat('en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: localTz,
+    }).format(new Date('2026-05-03T14:00:00.000Z'))
+
+    expect(markup).toContain(expectedStart)
+    // Should NOT contain the UTC-formatted time (10:00 AM UTC rendered as-is)
+    // unless the local timezone happens to be UTC — skip the negative check in that case.
+    if (localTz !== 'UTC') {
+      const utcFormatted = new Intl.DateTimeFormat('en-US', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+        timeZone: 'UTC',
+      }).format(new Date('2026-05-03T14:00:00.000Z'))
+      expect(markup).not.toContain(utcFormatted)
+    }
   })
 })

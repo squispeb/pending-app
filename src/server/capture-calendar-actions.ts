@@ -51,6 +51,24 @@ function getAllDayEndDate(startDate: string, endDate?: string | null) {
   return addDaysToIsoDate(endDate ?? startDate, 1)
 }
 
+function getDateTimeParts(value: Date, timeZone?: string | null) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: timeZone ?? 'UTC',
+  }).formatToParts(value)
+
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value
+  return {
+    date: `${part('year')}-${part('month')}-${part('day')}`,
+    time: `${part('hour')}:${part('minute')}`,
+  }
+}
+
 export function createCaptureCalendarActions({
   database,
   calendarService,
@@ -105,7 +123,7 @@ export function createCaptureCalendarActions({
         title?: string | null
         description?: string | null
         location?: string | null
-        startDate: string
+        startDate?: string | null
         endDate?: string | null
         startTime?: string | null
         endTime?: string | null
@@ -127,22 +145,34 @@ export function createCaptureCalendarActions({
       }
 
       if (event.operation === 'edit_calendar_event') {
-        const isAllDay = event.allDay || !event.startTime
+        const existingStart = getDateTimeParts(existingEvent.startsAt, existingEvent.eventTimezone)
+        const existingEnd = getDateTimeParts(existingEvent.endsAt, existingEvent.eventTimezone)
+        const isAllDay = event.allDay ?? existingEvent.allDay
+        const startDate = event.startDate ?? existingStart.date
+        const startTime = event.startTime ?? existingStart.time
+        const endDate = event.endDate ?? existingEnd.date
+        const endTime = event.endTime ?? existingEnd.time
+        const allDayEndDate = event.endDate
+          ? getAllDayEndDate(startDate, event.endDate)
+          : event.startDate
+            ? getAllDayEndDate(startDate)
+            : existingEnd.date
+
         return calendarService.updateCalendarEvent(
           user.id,
           existingEvent.calendarId,
           existingEvent.googleEventId,
           {
-            summary: event.title ?? event.target.summary,
-            description: event.description ?? null,
-            location: event.location ?? null,
+            summary: event.title ?? existingEvent.summary ?? event.target.summary,
+            description: event.description ?? existingEvent.description ?? null,
+            location: event.location ?? existingEvent.location ?? null,
             start: isAllDay
-              ? { date: event.startDate }
-              : { dateTime: `${event.startDate}T${event.startTime}:00`, timeZone: existingEvent.eventTimezone ?? undefined },
+              ? { date: startDate }
+              : { dateTime: `${startDate}T${startTime}:00`, timeZone: existingEvent.eventTimezone ?? undefined },
             end: isAllDay
-              ? { date: getAllDayEndDate(event.startDate, event.endDate) }
+              ? { date: allDayEndDate }
               : {
-                  dateTime: `${event.endDate ?? event.startDate}T${event.endTime ?? event.startTime}:00`,
+                  dateTime: `${endDate}T${endTime}:00`,
                   timeZone: existingEvent.eventTimezone ?? undefined,
                 },
           },

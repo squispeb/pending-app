@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 const DEFAULT_TIME_ZONE = 'UTC'
 
@@ -19,11 +19,10 @@ export function getClientTimeZone() {
 }
 
 export function useClientTimeZone() {
-  const [timeZone, setTimeZone] = useState(DEFAULT_TIME_ZONE)
-
-  useEffect(() => {
-    setTimeZone(getClientTimeZone())
-  }, [])
+  // Initialize directly from the browser — avoids a UTC → local flash on first render.
+  // `Intl.DateTimeFormat().resolvedOptions().timeZone` is synchronous and safe to call
+  // during render; `useState` initializer runs only once.
+  const [timeZone] = useState(getClientTimeZone)
 
   return timeZone
 }

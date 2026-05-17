@@ -524,7 +524,7 @@ export function VoiceCalendarEventConfirmationPanel({
           onClick={onCancel}
           className="cursor-pointer text-sm font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink-strong)]"
         >
-          Cancel
+          {isCancel ? 'Keep event' : 'Discard'}
         </button>
       </div>
     </form>
@@ -569,19 +569,7 @@ export function VoiceCalendarClarifyPanel({
 
   return (
     <div className="space-y-4">
-      {calendarEvent
-        ? isTargetedCalendarAction && calendarEvent.target
-          ? <CalendarEventTargetSummaryCard target={calendarEvent.target} eyebrow="Target event" />
-          : <CalendarEventSummaryCard event={calendarEvent} eyebrow="Event so far" />
-        : null}
-
-      <div className="rounded-2xl bg-[var(--surface-inset)] px-4 py-3">
-        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-soft)]">
-          Transcript
-        </span>
-        <p className="m-0 text-sm leading-6 text-[var(--ink-strong)]">{transcript}</p>
-      </div>
-
+      {/* Assistant question first — most actionable info up top */}
       <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3">
         <p className="m-0 text-sm font-medium text-amber-200">{message}</p>
         {streamingAssistantText ? (
@@ -597,6 +585,13 @@ export function VoiceCalendarClarifyPanel({
           </ul>
         ) : null}
       </div>
+
+      {/* Target / context card below the question */}
+      {calendarEvent
+        ? isTargetedCalendarAction && calendarEvent.target
+          ? <CalendarEventTargetSummaryCard target={calendarEvent.target} eyebrow="Target event" />
+          : <CalendarEventSummaryCard event={calendarEvent} eyebrow="Event so far" />
+        : null}
 
       <form onSubmit={onSubmit} className="space-y-3">
         <label className="block">
@@ -1102,6 +1097,48 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
       }
     }
 
+    if (workflow?.kind === 'calendar_event' && (workflow.operation === 'edit' || workflow.operation === 'cancel')) {
+      const operation = workflow.operation === 'edit' ? 'edit_calendar_event' as const : 'cancel_calendar_event' as const
+      const target = captureClarifyCalendarEvent?.target
+        ?? captureCalendarEventConfirmation?.calendarEvent.target
+
+      if (target) {
+        const calendarEvent = {
+          ...workflow.changes,
+          operation,
+          target,
+        }
+
+        if (workflow.phase === 'ready_to_confirm' || (workflow.phase === 'completed' && workflow.result?.applyPayload)) {
+          return {
+            ok: true as const,
+            outcome: 'calendar_event_confirmation' as const,
+            transcript: input.transcript,
+            language: input.transcriptLanguage,
+            message: latestSynthesis ?? latestQuestion ?? 'Confirm this calendar event change.',
+            calendarEvent,
+            calendarEventSession: {
+              sessionId: settledSession.sessionId,
+            },
+          }
+        }
+
+        return {
+          ok: true as const,
+          outcome: 'clarify' as const,
+          transcript: input.transcript,
+          language: input.transcriptLanguage,
+          message: latestQuestion ?? 'What would you like to change?',
+          questions: [],
+          draft: null,
+          calendarEvent,
+          calendarEventSession: {
+            sessionId: settledSession.sessionId,
+          },
+        }
+      }
+    }
+
     if (workflow?.kind === 'calendar_event' && workflow.operation === 'create') {
       const calendarEvent = {
         ...workflow.draft,
@@ -1411,7 +1448,9 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
         throw new Error('Thread target missing.')
       }
 
-      const audioFile = new File([audioBlob], 'thread-reply.webm', { type: audioBlob.type || 'audio/webm' })
+      const audioFile = new File([audioBlob], 'thread-reply.webm', {
+        type: audioBlob.type || 'audio/webm',
+      })
       const formData = new FormData()
       formData.set('audio', audioFile, audioFile.name)
       formData.set('languageHint', 'auto')
@@ -1458,15 +1497,10 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
       }
 
       if (captureCalendarEventSessionId) {
-        return processVoiceCaptureTranscript({
-          data: {
-            transcript,
-            language: 'unknown',
-            currentDate: getTodayDateString(),
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-            routeIntent,
-            calendarEventSessionId: captureCalendarEventSessionId,
-          },
+        return submitAssistantSessionFollowUpAndStream({
+          transcript,
+          source: 'text',
+          transcriptLanguage: 'unknown',
         })
       }
 
@@ -2036,7 +2070,11 @@ export default function GlobalCaptureHost({ children }: { children?: React.React
                 ? 'Confirm task edits'
                 : 'Confirm task completion'
             : captureMode === 'calendar_event_confirmation'
-              ? 'Confirm calendar event'
+              ? captureCalendarEventConfirmation?.calendarEvent.operation === 'cancel_calendar_event'
+                ? 'Cancel calendar event'
+                : captureCalendarEventConfirmation?.calendarEvent.operation === 'edit_calendar_event'
+                  ? 'Confirm event edits'
+                  : 'Confirm new event'
               : captureMode === 'task_status'
                 ? 'Task status'
                 : captureMode === 'clarify'

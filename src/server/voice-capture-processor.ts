@@ -135,6 +135,15 @@ type AssistantSessionService = {
       }
     | { kind: 'unresolved' }
   >
+  resolveCalendarEventDate?: (input: {
+    transcript: string
+    transcriptLanguage: ProcessVoiceCaptureTextInput['language']
+    currentDate: string
+    timezone: string
+  }) => Promise<
+    | { kind: 'resolved'; targetDate: string }
+    | { kind: 'unresolved' }
+  >
   resolveTaskEditSession: (input: {
     sessionId?: string
     currentDate: string
@@ -485,6 +494,7 @@ type VoiceCalendarResolver = {
     transcript: string
     currentDate: string
     timezone: string
+    targetDate?: string
   }) => Promise<Array<{
     calendarEventId: string
     summary: string
@@ -501,6 +511,7 @@ type TaskActionTranscriptInput = {
   language: ProcessVoiceCaptureTextInput['language']
   currentDate: string
   timezone: string
+  targetDate?: string
   routeIntent?: ProcessVoiceCaptureTextInput['routeIntent']
   contextTaskId?: string | null
   contextIdeaId?: string | null
@@ -1150,6 +1161,15 @@ export function createVoiceCaptureProcessor(
       voiceIntent.family === 'calendar_action' &&
       (voiceIntent.kind === 'edit_calendar_event' || voiceIntent.kind === 'cancel_calendar_event')
     ) {
+      const calendarEventDateResolution =
+        (!data.visibleCalendarEventWindow || data.visibleCalendarEventWindow.length === 0) && dependencies.assistantSessionService?.resolveCalendarEventDate
+          ? await dependencies.assistantSessionService.resolveCalendarEventDate({
+              transcript: data.transcript,
+              transcriptLanguage: data.language,
+              currentDate: data.currentDate,
+              timezone: data.timezone,
+            })
+          : { kind: 'unresolved' as const }
       const candidateCalendarEventWindow =
         data.visibleCalendarEventWindow && data.visibleCalendarEventWindow.length > 0
           ? data.visibleCalendarEventWindow
@@ -1158,6 +1178,7 @@ export function createVoiceCaptureProcessor(
                 transcript: data.transcript,
                 currentDate: data.currentDate,
                 timezone: data.timezone,
+                targetDate: calendarEventDateResolution.kind === 'resolved' ? calendarEventDateResolution.targetDate : undefined,
               })
             : undefined
 

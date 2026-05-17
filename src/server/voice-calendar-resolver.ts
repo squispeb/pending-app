@@ -163,7 +163,78 @@ function normalizeEventMatchText(value: string) {
   return normalizeCalendarMatchText(value)
 }
 
+function parseCurrentDateParts(currentDate: string) {
+  const [year, month, day] = currentDate.split('-').map(Number)
+  const parsed = new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0))
+
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+
+  return {
+    year: parsed.getUTCFullYear(),
+    month: parsed.getUTCMonth() + 1,
+    day: parsed.getUTCDate(),
+  }
+}
+
+function formatDateParts(year: number, month: number, day: number) {
+  return [year, `${month}`.padStart(2, '0'), `${day}`.padStart(2, '0')].join('-')
+}
+
+function getWeekdayIndex(value: string) {
+  const normalized = normalizeCalendarMatchText(value)
+
+  if (/^(mon|monday|lun|lunes)$/.test(normalized)) return 1
+  if (/^(tue|tues|tuesday|mar|martes)$/.test(normalized)) return 2
+  if (/^(wed|weds|wednesday|mie|miercoles|miércoles)$/.test(normalized)) return 3
+  if (/^(thu|thur|thurs|thursday|jue|jueves)$/.test(normalized)) return 4
+  if (/^(fri|friday|vie|viernes)$/.test(normalized)) return 5
+  if (/^(sat|saturday|sab|sabado|sábado)$/.test(normalized)) return 6
+  if (/^(sun|sunday|dom|domingo)$/.test(normalized)) return 0
+
+  return null
+}
+
+function inferWeekdayOrdinalDate(transcript: string, currentDate: string) {
+  const current = parseCurrentDateParts(currentDate)
+  if (!current) return null
+
+  const normalized = normalizeCalendarMatchText(transcript)
+  const weekdayMatch = normalized.match(/\b(mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|lun(?:es)?|mar(?:tes)?|mie(?:rcoles)?|jue(?:ves)?|vie(?:rnes)?|sab(?:ado)?|dom(?:ingo)?)\b/)
+  const ordinalMatch = normalized.match(/\b(\d{1,2})(?:st|nd|rd|th)\b/)
+
+  if (!weekdayMatch?.[1] || !ordinalMatch?.[1]) {
+    return null
+  }
+
+  const weekdayIndex = getWeekdayIndex(weekdayMatch[1])
+  const dayOfMonth = Number(ordinalMatch[1])
+
+  if (weekdayIndex === null || dayOfMonth < 1 || dayOfMonth > 31) {
+    return null
+  }
+
+  const startTime = Date.UTC(current.year, current.month - 1, current.day, 12, 0, 0, 0)
+
+  for (let monthOffset = 0; monthOffset < 24; monthOffset += 1) {
+    const candidateDate = new Date(Date.UTC(current.year, current.month - 1 + monthOffset, dayOfMonth, 12, 0, 0, 0))
+    if (candidateDate.getUTCDate() !== dayOfMonth) continue
+    if (candidateDate.getUTCDay() !== weekdayIndex) continue
+    if (candidateDate.getTime() < startTime) continue
+
+    return formatDateParts(candidateDate.getUTCFullYear(), candidateDate.getUTCMonth() + 1, candidateDate.getUTCDate())
+  }
+
+  return null
+}
+
 function inferCalendarEventSearchDate(transcript: string, currentDate: string, timezone: string) {
+  const explicitWeekdayOrdinalDate = inferWeekdayOrdinalDate(transcript, currentDate)
+  if (explicitWeekdayOrdinalDate) {
+    return explicitWeekdayOrdinalDate
+  }
+
   if (/\b(today|hoy)\b/i.test(transcript)) {
     return currentDate
   }
@@ -225,6 +296,7 @@ export function createVoiceCalendarResolver(database: Database) {
     transcript: string
     currentDate: string
     timezone: string
+    targetDate?: string
   }): Promise<Array<CalendarEventWindowItem>> {
     const selectedConnections = await database.query.calendarConnections.findMany({
       where: and(
@@ -239,7 +311,7 @@ export function createVoiceCalendarResolver(database: Database) {
       return []
     }
 
-    const targetDate = inferCalendarEventSearchDate(input.transcript, input.currentDate, input.timezone)
+    const targetDate = input.targetDate ?? inferCalendarEventSearchDate(input.transcript, input.currentDate, input.timezone)
     const [year, month, day] = targetDate.split('-').map(Number)
     const dayStart = new Date(year, month - 1, day, 0, 0, 0, 0)
     const dayEnd = new Date(year, month - 1, day, 23, 59, 59, 999)

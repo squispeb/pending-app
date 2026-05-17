@@ -49,6 +49,17 @@ const calendarEventCreateDraftSchema = z.object({
   targetCalendarName: z.string().min(1).nullable().optional(),
 })
 
+const calendarEventCreateChangesSchema = z.object({
+  title: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  startTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  location: z.string().min(1).optional(),
+  allDay: z.boolean().optional(),
+})
+
 const assistantWritableCalendarSchema = z.object({
   calendarId: z.string().min(1),
   calendarName: z.string().min(1),
@@ -74,7 +85,7 @@ const calendarEventCreateWorkflowSchema = z.object({
     endTime: z.number().int().nonnegative(),
     location: z.number().int().nonnegative(),
   }),
-  changes: calendarEventCreateDraftSchema,
+  changes: calendarEventCreateChangesSchema,
   result: z.object({
     outcome: z.enum(['confirmed', 'cancelled']),
     completedAt: z.string().min(1),
@@ -126,6 +137,16 @@ const resolveAssistantCalendarEventTargetResponseSchema = z.discriminatedUnion('
   }),
 ])
 
+const resolveAssistantCalendarEventDateResponseSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('resolved'),
+    targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  }),
+  z.object({
+    kind: z.literal('unresolved'),
+  }),
+])
+
 const calendarEventEditWorkflowSchema = z.object({
   kind: z.literal('calendar_event'),
   operation: z.literal('edit'),
@@ -154,7 +175,7 @@ const calendarEventEditWorkflowSchema = z.object({
       action: z.literal('edit_calendar_event'),
       operation: z.literal('edit'),
       eventId: z.string().min(1),
-      edits: calendarEventCreateDraftSchema,
+      edits: calendarEventCreateChangesSchema,
     }).nullable(),
   }).nullable(),
 })
@@ -1119,6 +1140,30 @@ export async function resolveAssistantCalendarEventTarget(
   })
   const payload = await parseAssistantResponse(response)
   return resolveAssistantCalendarEventTargetResponseSchema.parse(payload)
+}
+
+export async function resolveAssistantCalendarEventDate(
+  input: {
+    authHeaders: HeadersInit
+    transcript: string
+    transcriptLanguage: 'es' | 'en' | 'unknown' | null
+    currentDate: string
+    timezone: string
+  },
+  options?: { fetchImpl?: typeof fetch; baseUrl?: string },
+) {
+  const baseUrl = options?.baseUrl ?? env.ASSISTANT_SERVICE_URL
+  if (!baseUrl) throw new Error('ASSISTANT_SERVICE_URL is not configured')
+  const headers = new Headers(input.authHeaders)
+  headers.set('content-type', 'application/json')
+  const { authHeaders: _authHeaders, ...body } = input
+  const response = await (options?.fetchImpl ?? fetch)(`${baseUrl}/sessions/resolve-calendar-event-date`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  })
+  const payload = await parseAssistantResponse(response)
+  return resolveAssistantCalendarEventDateResponseSchema.parse(payload)
 }
 
 export async function getAssistantSession(

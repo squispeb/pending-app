@@ -66,6 +66,12 @@ describe('capture server confirm handlers', () => {
   it('confirms an edit voice calendar event action', async () => {
     db.query.calendarEvents.findFirst.mockResolvedValue({
       calendarId: 'calendar-1',
+      startsAt: new Date('2026-04-08T19:00:00.000Z'),
+      endsAt: new Date('2026-04-08T20:00:00.000Z'),
+      allDay: false,
+      summary: 'Old title',
+      description: 'Old description',
+      location: 'Old location',
       eventTimezone: 'America/Lima',
       googleEventId: 'google-event-1',
     })
@@ -109,6 +115,12 @@ describe('capture server confirm handlers', () => {
   it('uses an exclusive next-day end for all-day edit confirmations', async () => {
     db.query.calendarEvents.findFirst.mockResolvedValue({
       calendarId: 'calendar-1',
+      startsAt: new Date('2026-04-08T00:00:00.000Z'),
+      endsAt: new Date('2026-04-09T00:00:00.000Z'),
+      allDay: true,
+      summary: 'All-day event',
+      description: null,
+      location: null,
       eventTimezone: 'America/Lima',
       googleEventId: 'google-event-1',
     })
@@ -136,9 +148,54 @@ describe('capture server confirm handlers', () => {
     })
   })
 
+  it('preserves existing event fields for an end-time-only edit', async () => {
+    db.query.calendarEvents.findFirst.mockResolvedValue({
+      calendarId: 'calendar-1',
+      startsAt: new Date('2026-05-18T17:00:00.000Z'),
+      endsAt: new Date('2026-05-18T18:00:00.000Z'),
+      allDay: false,
+      summary: 'Lunch',
+      description: 'Team lunch',
+      location: 'Cafe',
+      eventTimezone: 'America/Lima',
+      googleEventId: 'google-event-1',
+    })
+
+    await captureCalendarActions.confirmVoiceCalendarEventAction({
+      calendarEvent: {
+        operation: 'edit_calendar_event',
+        target: {
+          calendarEventId: 'event-1',
+          summary: 'Lunch',
+        },
+        endTime: '13:30',
+      },
+    })
+
+    expect(updateCalendarEvent).toHaveBeenCalledWith('user-1', 'calendar-1', 'google-event-1', {
+      summary: 'Lunch',
+      description: 'Team lunch',
+      location: 'Cafe',
+      start: {
+        dateTime: '2026-05-18T12:00:00',
+        timeZone: 'America/Lima',
+      },
+      end: {
+        dateTime: '2026-05-18T13:30:00',
+        timeZone: 'America/Lima',
+      },
+    })
+  })
+
   it('confirms a cancel voice calendar event action', async () => {
     db.query.calendarEvents.findFirst.mockResolvedValue({
       calendarId: 'calendar-1',
+      startsAt: new Date('2026-04-08T19:00:00.000Z'),
+      endsAt: new Date('2026-04-08T20:00:00.000Z'),
+      allDay: false,
+      summary: 'Old title',
+      description: null,
+      location: null,
       eventTimezone: 'America/Lima',
       googleEventId: 'google-event-1',
     })
