@@ -259,6 +259,7 @@ export function createCalendarService(
 
   function buildCalendarEventSnapshotValues(
     userId: string,
+    googleAccountId: string,
     calendarId: string,
     event: GoogleCalendarEventInstance,
     now: Date,
@@ -266,6 +267,7 @@ export function createCalendarService(
     return {
       id: crypto.randomUUID(),
       userId,
+      googleAccountId,
       calendarId,
       googleEventId: event.googleEventId,
       googleRecurringEventId: event.googleRecurringEventId,
@@ -332,13 +334,20 @@ export function createCalendarService(
 
   async function replaceCalendarEvents(
     userId: string,
+    googleAccountId: string,
     calendarId: string,
     events: Array<GoogleCalendarEventInstance>,
     now: Date,
   ) {
     await database
       .delete(calendarEvents)
-      .where(and(eq(calendarEvents.userId, userId), eq(calendarEvents.calendarId, calendarId)))
+      .where(
+        and(
+          eq(calendarEvents.userId, userId),
+          eq(calendarEvents.googleAccountId, googleAccountId),
+          eq(calendarEvents.calendarId, calendarId),
+        ),
+      )
 
     if (!events.length) {
       return
@@ -350,6 +359,7 @@ export function createCalendarService(
         .map((event) => ({
           id: crypto.randomUUID(),
           userId,
+          googleAccountId,
           calendarId,
           googleEventId: event.googleEventId,
           googleRecurringEventId: event.googleRecurringEventId,
@@ -372,14 +382,21 @@ export function createCalendarService(
     )
   }
 
-  async function deleteCalendarSnapshots(userId: string, calendarId: string) {
+  async function deleteCalendarSnapshots(userId: string, googleAccountId: string, calendarId: string) {
     await database
       .delete(calendarEvents)
-      .where(and(eq(calendarEvents.userId, userId), eq(calendarEvents.calendarId, calendarId)))
+      .where(
+        and(
+          eq(calendarEvents.userId, userId),
+          eq(calendarEvents.googleAccountId, googleAccountId),
+          eq(calendarEvents.calendarId, calendarId),
+        ),
+      )
   }
 
   async function deleteCalendarEventSnapshot(
     userId: string,
+    googleAccountId: string,
     calendarId: string,
     googleEventId: string,
   ) {
@@ -388,18 +405,25 @@ export function createCalendarService(
       .where(
         and(
           eq(calendarEvents.userId, userId),
+          eq(calendarEvents.googleAccountId, googleAccountId),
           eq(calendarEvents.calendarId, calendarId),
           eq(calendarEvents.googleEventId, googleEventId),
         ),
       )
   }
 
-  function buildDeleteCalendarEventSnapshotStatement(userId: string, calendarId: string, googleEventId: string) {
+  function buildDeleteCalendarEventSnapshotStatement(
+    userId: string,
+    googleAccountId: string,
+    calendarId: string,
+    googleEventId: string,
+  ) {
     return database
       .delete(calendarEvents)
       .where(
         and(
           eq(calendarEvents.userId, userId),
+          eq(calendarEvents.googleAccountId, googleAccountId),
           eq(calendarEvents.calendarId, calendarId),
           eq(calendarEvents.googleEventId, googleEventId),
         ),
@@ -408,36 +432,43 @@ export function createCalendarService(
 
   function buildInsertCalendarEventSnapshotStatement(
     userId: string,
+    googleAccountId: string,
     calendarId: string,
     event: GoogleCalendarEventInstance,
     now: Date,
   ) {
-    return database.insert(calendarEvents).values(buildCalendarEventSnapshotValues(userId, calendarId, event, now))
+    return database.insert(calendarEvents).values(
+      buildCalendarEventSnapshotValues(userId, googleAccountId, calendarId, event, now),
+    )
   }
 
   async function upsertCalendarEventSnapshot(
     userId: string,
+    googleAccountId: string,
     calendarId: string,
     event: GoogleCalendarEventInstance,
     now: Date,
   ) {
-    await deleteCalendarEventSnapshot(userId, calendarId, event.googleEventId)
+    await deleteCalendarEventSnapshot(userId, googleAccountId, calendarId, event.googleEventId)
 
     if (event.status === 'cancelled' || !event.startsAt || !event.endsAt) {
       return
     }
 
-    await database.insert(calendarEvents).values(buildCalendarEventSnapshotValues(userId, calendarId, event, now))
+    await database.insert(calendarEvents).values(
+      buildCalendarEventSnapshotValues(userId, googleAccountId, calendarId, event, now),
+    )
   }
 
   async function applyIncrementalCalendarChanges(
     userId: string,
+    googleAccountId: string,
     calendarId: string,
     events: Array<GoogleCalendarEventInstance>,
     now: Date,
   ) {
     for (const event of events) {
-      await upsertCalendarEventSnapshot(userId, calendarId, event, now)
+      await upsertCalendarEventSnapshot(userId, googleAccountId, calendarId, event, now)
     }
   }
 
@@ -447,6 +478,7 @@ export function createCalendarService(
 
   async function runFullCalendarSync(
     userId: string,
+    googleAccountId: string,
     calendarId: string,
     accessToken: string,
     now: Date,
@@ -457,7 +489,7 @@ export function createCalendarService(
       timeMax: planningWindow.end,
     })
 
-    await replaceCalendarEvents(userId, calendarId, result.events, now)
+    await replaceCalendarEvents(userId, googleAccountId, calendarId, result.events, now)
     await upsertSyncState(
       userId,
       calendarId,
@@ -480,6 +512,7 @@ export function createCalendarService(
 
   async function runIncrementalCalendarSync(
     userId: string,
+    googleAccountId: string,
     calendarId: string,
     accessToken: string,
     existingState: SyncState,
@@ -490,7 +523,7 @@ export function createCalendarService(
         syncToken: existingState.nextSyncToken ?? undefined,
       })
 
-      await applyIncrementalCalendarChanges(userId, calendarId, result.events, now)
+      await applyIncrementalCalendarChanges(userId, googleAccountId, calendarId, result.events, now)
       await upsertSyncState(
         userId,
         calendarId,
@@ -514,8 +547,8 @@ export function createCalendarService(
         throw error
       }
 
-      await deleteCalendarSnapshots(userId, calendarId)
-      const result = await runFullCalendarSync(userId, calendarId, accessToken, now)
+      await deleteCalendarSnapshots(userId, googleAccountId, calendarId)
+      const result = await runFullCalendarSync(userId, googleAccountId, calendarId, accessToken, now)
 
       return {
         ...result,
@@ -526,6 +559,7 @@ export function createCalendarService(
 
   async function syncCalendarConnection(
     userId: string,
+    googleAccountId: string,
     calendarId: string,
     accessToken: string,
     now: Date,
@@ -533,10 +567,10 @@ export function createCalendarService(
     const existingState = await findSyncState(userId, calendarId)
 
     if (existingState?.nextSyncToken) {
-      return runIncrementalCalendarSync(userId, calendarId, accessToken, existingState, now)
+      return runIncrementalCalendarSync(userId, googleAccountId, calendarId, accessToken, existingState, now)
     }
 
-    return runFullCalendarSync(userId, calendarId, accessToken, now)
+    return runFullCalendarSync(userId, googleAccountId, calendarId, accessToken, now)
   }
 
   async function getAccountAndConnections(
@@ -565,6 +599,14 @@ export function createCalendarService(
       .from(calendarEvents)
       .where(eq(calendarEvents.userId, userId))
 
+    const validCalendars = connections.filter((conn) => {
+      if (account && conn.calendarId === account.email) {
+        console.warn(`Filtering out invalid calendar in settings: calendarId "${conn.calendarId}" matches account email "${account.email}"`)
+        return false
+      }
+      return true
+    })
+
     return {
       configuration: config,
       account: account
@@ -576,7 +618,7 @@ export function createCalendarService(
             status: account.disconnectedAt ? ('disconnected' as const) : ('connected' as const),
           }
         : null,
-      calendars: connections,
+      calendars: validCalendars,
       cachedEventCount,
       syncStatus: syncSummary,
     }
@@ -750,7 +792,16 @@ export function createCalendarService(
       ensureFreshAccess: true,
       suppressRefreshErrors: true,
     })
-    const selectedConnections = connections.filter((connection) => connection.isSelected)
+    let selectedConnections = connections.filter((connection) => connection.isSelected)
+
+    selectedConnections = selectedConnections.filter((conn) => {
+      if (account && conn.calendarId === account.email) {
+        console.warn(`Skipping invalid calendar connection: calendarId "${conn.calendarId}" matches the account email "${account.email}".`)
+        return false
+      }
+      return true
+    })
+
     const selectedCalendarIds = selectedConnections.map((connection) => connection.calendarId)
     const states = await listSyncStates(userId)
     const syncSummary = getSyncSummary(
@@ -775,6 +826,7 @@ export function createCalendarService(
           .where(
             and(
               eq(calendarEvents.userId, userId),
+              eq(calendarEvents.googleAccountId, account.id),
               inArray(calendarEvents.calendarId, selectedCalendarIds),
               gte(calendarEvents.endsAt, viewStart),
               lte(calendarEvents.startsAt, viewEnd),
@@ -827,6 +879,7 @@ export function createCalendarService(
     const events = await database.query.calendarEvents.findMany({
       where: and(
         eq(calendarEvents.userId, userId),
+        eq(calendarEvents.googleAccountId, account.id),
         inArray(calendarEvents.calendarId, selectedCalendarIds),
         gte(calendarEvents.endsAt, dayStart),
         lte(calendarEvents.startsAt, dayEnd),
@@ -863,7 +916,15 @@ export function createCalendarService(
       throw new Error('Reconnect Google Calendar before syncing events.')
     }
 
-    const selectedConnections = await listSelectedConnections(userId, account.id)
+    let selectedConnections = await listSelectedConnections(userId, account.id)
+
+    selectedConnections = selectedConnections.filter((conn) => {
+      if (conn.calendarId === account.email) {
+        console.warn(`Skipping invalid calendar connection: calendarId "${conn.calendarId}" matches the account email "${account.email}". This indicates corrupted data.`)
+        return false
+      }
+      return true
+    })
 
     if (!selectedConnections.length) {
       throw new Error('Select at least one calendar before syncing events.')
@@ -875,7 +936,7 @@ export function createCalendarService(
 
     for (const connection of selectedConnections) {
       try {
-        const result = await syncCalendarConnection(userId, connection.calendarId, accessToken, now)
+        const result = await syncCalendarConnection(userId, connection.googleAccountId, connection.calendarId, accessToken, now)
         eventCount += result.eventCount
         recoveredExpiredToken = recoveredExpiredToken || result.recoveredExpiredToken
       } catch (error) {
@@ -931,11 +992,18 @@ export function createCalendarService(
 
     const operations: Parameters<Database['batch']>[0] = [
       buildEnsureCalendarSelectionStatement(userId, account.id, resolvedCalendarId, now),
-      buildDeleteCalendarEventSnapshotStatement(userId, resolvedCalendarId, createdEvent.googleEventId),
+      buildDeleteCalendarEventSnapshotStatement(
+        userId,
+        account.id,
+        resolvedCalendarId,
+        createdEvent.googleEventId,
+      ),
     ]
 
     if (createdEvent.status !== 'cancelled' && createdEvent.startsAt && createdEvent.endsAt) {
-      operations.push(buildInsertCalendarEventSnapshotStatement(userId, resolvedCalendarId, createdEvent, now))
+      operations.push(
+        buildInsertCalendarEventSnapshotStatement(userId, account.id, resolvedCalendarId, createdEvent, now),
+      )
     }
 
     operations.push(buildFreshSyncStateStatement(userId, resolvedCalendarId, now, existingState))
@@ -967,11 +1035,18 @@ export function createCalendarService(
     const existingState = await findSyncState(userId, resolvedCalendarId)
 
     const operations: Parameters<Database['batch']>[0] = [
-      buildDeleteCalendarEventSnapshotStatement(userId, resolvedCalendarId, updatedEvent.googleEventId),
+      buildDeleteCalendarEventSnapshotStatement(
+        userId,
+        account.id,
+        resolvedCalendarId,
+        updatedEvent.googleEventId,
+      ),
     ]
 
     if (updatedEvent.status !== 'cancelled' && updatedEvent.startsAt && updatedEvent.endsAt) {
-      operations.push(buildInsertCalendarEventSnapshotStatement(userId, resolvedCalendarId, updatedEvent, now))
+      operations.push(
+        buildInsertCalendarEventSnapshotStatement(userId, account.id, resolvedCalendarId, updatedEvent, now),
+      )
     }
 
     operations.push(buildFreshSyncStateStatement(userId, resolvedCalendarId, now, existingState))
@@ -1002,7 +1077,7 @@ export function createCalendarService(
     const existingState = await findSyncState(userId, resolvedCalendarId)
 
     const operations: Parameters<Database['batch']>[0] = [
-      buildDeleteCalendarEventSnapshotStatement(userId, resolvedCalendarId, googleEventId),
+      buildDeleteCalendarEventSnapshotStatement(userId, account.id, resolvedCalendarId, googleEventId),
       buildFreshSyncStateStatement(userId, resolvedCalendarId, now, existingState),
     ]
 
@@ -1037,7 +1112,13 @@ export function createCalendarService(
       let syncedEventCount = 0
 
       for (const connection of selectedConnections) {
-        const result = await runFullCalendarSync(userId, connection.calendarId, tokens.accessToken, now)
+        const result = await runFullCalendarSync(
+          userId,
+          googleAccountId,
+          connection.calendarId,
+          tokens.accessToken,
+          now,
+        )
         syncedEventCount += result.eventCount
       }
 

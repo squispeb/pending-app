@@ -279,6 +279,9 @@ export const calendarEvents = sqliteTable('calendar_events', {
   userId: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
+  googleAccountId: text('google_account_id')
+    .notNull()
+    .references(() => googleAccounts.id, { onDelete: 'cascade' }),
   calendarId: text('calendar_id').notNull(),
   googleEventId: text('google_event_id').notNull(),
   googleRecurringEventId: text('google_recurring_event_id'),

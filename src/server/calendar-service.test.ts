@@ -64,6 +64,7 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
     CREATE TABLE calendar_events (
       id text PRIMARY KEY NOT NULL,
       user_id text NOT NULL,
+      google_account_id text NOT NULL,
       calendar_id text NOT NULL,
       google_event_id text NOT NULL,
       google_recurring_event_id text,
@@ -82,7 +83,8 @@ async function createSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
       updated_at_remote integer,
       created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
       updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade,
+      FOREIGN KEY (google_account_id) REFERENCES google_accounts(id) ON DELETE cascade
     );
   `)
 
